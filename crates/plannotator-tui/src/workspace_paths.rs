@@ -30,7 +30,7 @@ pub(crate) fn absolute(path: &Path) -> PathBuf {
 
 /// The Plannotator data directory for this process.
 pub(crate) fn data_dir() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from);
+    let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("/"));
     plannotator_tui_schema::data_dir(|k| std::env::var(k).ok(), &home, Path::exists)
 }
 

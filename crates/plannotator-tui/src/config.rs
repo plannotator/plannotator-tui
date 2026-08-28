@@ -120,7 +120,7 @@ impl Config {
 
     /// Read the config file for this process; a missing file is the default config.
     pub(crate) fn load() -> Result<Self> {
-        let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from);
+        let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         let path = config_path(|k| std::env::var(k).ok(), &home);
         Self::load_from(&path)
     }

@@ -1,0 +1,72 @@
+# Tag v<version> (matching Cargo.toml) to publish binaries for every platform plus
+# SHA256SUMS. Consumers (the herdr-annotate plugin) download by target triple and verify.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: tag matches Cargo.toml
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          test "v$version" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != v$version"; exit 1; }
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu,  os: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
+          - { target: x86_64-apple-darwin,       os: macos-15-intel }
+          - { target: aarch64-apple-darwin,      os: macos-15 }
+          - { target: x86_64-pc-windows-msvc,    os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - run: cargo build --release -p plannotator-tui --target ${{ matrix.target }}
+      - name: name the asset by target
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${{ matrix.target }}/release/plannotator-tui.exe" "dist/plannotator-tui-${{ matrix.target }}.exe"
+          else
+            cp "target/${{ matrix.target }}/release/plannotator-tui" "dist/plannotator-tui-${{ matrix.target }}"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: checksums
+        run: cd dist && sha256sum plannotator-tui-* > SHA256SUMS && cat SHA256SUMS
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --generate-notes dist/*

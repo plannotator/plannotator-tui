@@ -29,6 +29,7 @@ const USAGE: &str = "usage:
   plannotator-tui --annotate-block <file.md> <block> <text>
   plannotator-tui --snapshot <file.md> [cols rows scroll] [select-quote]
   plannotator-tui config
+  plannotator-tui --version
   plannotator-tui herdr open [file.md | folder] [--placement overlay|split|popup] [--deliver-to <pane>]";
 
 /// Width the document gets when nothing else is known: gutter + rail + gap subtracted.
@@ -111,6 +112,10 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
             let scroll: i64 = arg(4).and_then(|s| s.parse().ok()).unwrap_or(0);
             snapshot(&path(1)?, cols, rows, scroll, arg(5))
         }
+        Some("--version" | "-V") => {
+            println!("plannotator-tui {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         Some("config") => show_config(),
         Some("herdr") => herdr_command(args.get(1..).unwrap_or_default()),
         Some(flag) if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{USAGE}"),
@@ -121,7 +126,7 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
 
 /// `plannotator-tui config`: where the file is and what is in effect.
 fn show_config() -> Result<()> {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from);
+    let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("/"));
     let path = crate::config::config_path(|k| std::env::var(k).ok(), &home);
     let config = Config::load_from(&path)?;
     let state = if path.is_file() { "" } else { " (not present; defaults)" };
