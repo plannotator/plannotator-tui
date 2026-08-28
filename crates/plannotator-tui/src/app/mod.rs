@@ -4,6 +4,7 @@
 mod draw;
 mod header;
 mod input;
+mod pick;
 mod selection;
 mod send;
 #[cfg(test)]
@@ -47,6 +48,8 @@ enum Mode {
     Edit(String),
     /// Quit was asked for while feedback is unsent; the footer asks first.
     ConfirmQuit,
+    /// Choosing which of the agent's recent messages to review.
+    Pick,
 }
 
 /// Which pane keyboard input goes to.
@@ -68,6 +71,8 @@ struct Geometry {
     bubbles: Vec<(Rect, String)>,
     /// The header's Send button; `None` when the header was too narrow for it.
     send_button: Option<Rect>,
+    /// Picker rows drawn last frame, with their candidate index.
+    pick_rows: Vec<(Rect, usize)>,
 }
 
 /// A finished selection waiting for an action.
@@ -123,6 +128,11 @@ pub(crate) struct App {
     /// Index into the rail's placed annotations.
     rail_cursor: usize,
     mode: Mode,
+    /// `last`: the agent's recent messages, newest first, and the picker's cursor.
+    candidates: Vec<plannotator_tui_hosts::Message>,
+    pick_cursor: usize,
+    message_host: String,
+    message_transcript: String,
     input: Input,
     geometry: Geometry,
     status: Option<String>,
@@ -169,6 +179,10 @@ impl App {
             cursor: (0, 0),
             rail_cursor: 0,
             mode: Mode::Browse,
+            candidates: Vec::new(),
+            pick_cursor: 0,
+            message_host: String::new(),
+            message_transcript: String::new(),
             input: Input::default(),
             geometry: Geometry::default(),
             status: None,

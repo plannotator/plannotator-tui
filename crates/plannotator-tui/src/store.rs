@@ -119,6 +119,12 @@ impl Store {
         Self { path: None, annotations: Vec::new(), resolved: Vec::new(), deliveries: Vec::new() }
     }
 
+    /// True when nothing about this store ever reaches disk.
+    #[cfg(test)]
+    pub(crate) fn is_transient(&self) -> bool {
+        self.path.is_none()
+    }
+
     /// Count annotations recorded for a file without loading a document.
     pub(crate) fn count_at(location: &Location) -> usize {
         read_record(&location.record)
