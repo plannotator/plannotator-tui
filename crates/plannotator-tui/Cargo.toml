@@ -5,14 +5,17 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Annotate Markdown in the terminal - standalone, and as a Herdr plugin."
+readme = "../../README.md"
+keywords = ["tui", "markdown", "annotation", "review", "agents"]
+categories = ["command-line-utilities", "text-processing"]
 
 [[bin]]
 name = "plannotator-tui"
 path = "src/main.rs"
 
 [dependencies]
-plannotator-tui-schema = { path = "../plannotator-tui-schema" }
-plannotator-tui-hosts = { path = "../plannotator-tui-hosts" }
+plannotator-tui-schema = { path = "../plannotator-tui-schema", version = "0.2.0" }
+plannotator-tui-hosts = { path = "../plannotator-tui-hosts", version = "0.2.0" }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
