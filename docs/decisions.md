@@ -170,3 +170,30 @@ prefix. `plannotui.quote` holds the selected raw-source text and is the only thi
 resolver searches for. The byte range is a shortcut (trusted only when it still holds the
 quote between its context); prefix/suffix and the block hint only rank occurrences. A quote
 that is not in the document is an orphan, always.
+
+## 11. Submit is delivery, and delivery is a seam (2026-08-28)
+
+The standalone app has no submit step: every annotation is saved to JSON as it is made, and
+`E` copies the feedback text to the clipboard. "Send this review back to the agent" is a
+Herdr concern, because only Herdr knows which agent sits in which pane.
+
+The app is built so that is a plug, not a rewrite:
+
+```rust
+/// Where rendered feedback goes when the user sends it.
+pub(crate) trait Delivery {
+    fn describe(&self) -> String;              // shown in the footer: "send → clipboard"
+    fn deliver(&self, feedback: &str) -> Result<()>;
+}
+```
+
+- `Clipboard` is the only implementation in 2b, and the default everywhere.
+- The Herdr plugin (phase 5) adds `HerdrAgent { pane_id }`: `herdr agent prompt <pane>
+  <feedback>`. The target comes from `HERDR_PLUGIN_CONTEXT_JSON.focused_pane_id` or an
+  explicit `--deliver-to <pane>`; the footer always names it.
+- `plannotui last` (phase 4) adds the host deliveries (stdout with exit 0, hook JSON).
+- The feedback text is produced by one function (`export::feedback`) regardless of target,
+  so what an agent receives from Herdr is byte-identical to what the clipboard gets.
+
+This is decision 6's delivery seam made concrete. Nothing else in the app knows about
+Herdr; `HERDR_ENV=1` only selects the implementation.
