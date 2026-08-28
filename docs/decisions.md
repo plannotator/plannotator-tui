@@ -91,47 +91,73 @@ are the format reference — knowledge copied, not code. Decision 6 is unchanged
 message is a transient document source, delivery is a seam, and inside Herdr `deliver`
 may target the pane's agent.
 
-## 9. `plannotui last` design, from Plannotator's regressions (2026-08-28)
+## 9. `plannotui last`: detection and extraction, from the Plannotator source (2026-08-28)
 
-From plannotator-ops, who own the reference implementation (a few hundred lines of
-extraction, several thousand of resolution machinery grown from regressions). Rules:
+Read directly from `/Users/ramos/plannotator/plannotator` (`apps/hook/server/index.ts:505-520`,
+`:1348-1520`; `session-log.ts`; `codex-session.ts`) and verified on this machine. This is the
+reference for `plannotui-hosts`; knowledge copied, not code.
 
-**Detection is a chain, deterministic, no skill required.**
-1. Explicit override first: `PLANNOTUI_HOST` / `PLANNOTUI_SESSION` env vars (validated).
-2. Per-host env fingerprints: `CODEX_THREAD_ID` (authoritative for Codex), `OMPCODE`, etc.
-3. Claude Code: `~/.claude/projects/<slug(cwd)>/<session>.jsonl`, candidates ranked by
-   mtime, with an ancestor-directory walk for a cwd below the project root.
-4. Last resort only: ancestor-pid walk against registered sessions (Copilot sets nothing).
-   Parse `ps` output through pure functions so tests never spawn it.
-cwd alone and parent-process names are not identity. Nothing assumes a host sets anything.
+**Host detection is an env-var chain, then a fallback.** `PLANNOTATOR_ORIGIN` override
+(validated) > `CODEX_THREAD_ID` > `COPILOT_CLI` > `OPENCODE` > `GEMINI_CLI` > `OMPCODE`
+(last: OMP exports it into every shell it spawns) > default Claude Code. We mirror it with
+`PLANNOTUI_HOST` as the override. `cwd` is never identity.
 
-**Claude Code extraction.** Entries form a TREE via `parentUuid`. `/rewind` writes nothing;
-the newest entry is simply off the active branch. Walk from the newest uuid-bearing entry
-back to root; only entries on that path count. Then: assistant entries only; skip
-tool_use/tool_result, thinking blocks, partial/streaming entries, compaction summaries,
-and subagent sidechain transcripts. The spec phrase is **"the last assistant entry on the
-active branch that renders text"** — an assistant entry can be tool-calls-only.
+**Claude Code session resolution — the deterministic part.** Claude Code writes
+`~/.claude/sessions/<pid>.json` per running session: `{pid, sessionId, cwd, startedAt, …}`
+(verified: `1421.json` here belongs to the plannotator-ops session). Ladder, most precise
+first, first hit wins:
+1. **Ancestor-PID walk** (`resolveSessionLogByAncestorPids`): snapshot the process table
+   once (`ps -eo pid=,ppid=`, parsed by a pure function), walk ≤8 parents from our ppid,
+   read `sessions/<pid>.json` at each hop; match its `sessionId` to
+   `~/.claude/projects/<slug(cwd)>/<sessionId>.jsonl`. Ghost check: if a NEWER jsonl exists
+   in that project dir with no registered metadata, it is a `/clear` session — prefer it.
+   This is why `plannotator last` works from a bare shell: the shell's ancestor IS claude.
+2. **Cwd scan of session metadata**: all `sessions/*.json` whose `cwd` matches, newest
+   `startedAt` first, matched to a jsonl.
+3. **Slug + mtime**: `~/.claude/projects/<cwd with [^A-Za-z0-9-] → '-'>/*.jsonl`, newest
+   first; case-insensitive dir fallback (Windows lowercases the slug).
+4. **Ancestor-directory walk**: try each parent directory's slug (user `cd`'d deeper).
+Each candidate is tried until one yields a message ("no messages" means "wrong file").
 
-**Codex extraction.** `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`, thread id
-is the uuid in the filename. One thread spans MULTIPLE files: collect all files for the
-thread from day one, walk backward across them, and stop before the active turn (or you
-annotate the message being written). Reference: Plannotator issue #1367 / PR #1387.
+**Claude Code extraction** (`resolveActiveBranchIndices`, `extractRecentRenderedMessages`):
+- Parse JSONL leniently (skip malformed lines). Entries carry `uuid`/`parentUuid`; bookkeeping
+  types (`last-prompt`, `ai-title`, `mode`, `file-history-snapshot`) have none and are often
+  written last, so "newest entry" = newest entry WITH a uuid.
+- Active branch = walk `parentUuid` from that entry to the root (`parentUuid: null`).
+  Untrusted chain (no ids, dangling parent, cycle) → fall back to file order.
+- `/compact` writes a new root, so right after it the active branch may hold no assistant
+  text: an empty result falls back to file order ("fail open, never fail empty").
+- Skip: `progress`, `system`, `file-history-snapshot`, `queue-operation`; hidden visibility
+  (`llm_only`, `assistant_only`, `hidden`); `isSidechain` subagent entries; non-text blocks
+  (`thinking`, `tool_use`). Role = `type` or `message.role`.
+- A rendered message = all `text` blocks of the same `message.id` (streamed chunks share
+  it), concatenated in file order. Collect the newest N such messages for the picker
+  (Plannotator uses 25); the newest is the default.
+- A human prompt = `user` role, not hidden, has text, and does not start with
+  `<local-command-`, `<command-name>`, `<local-command-stdout|stderr>`, `<system-reminder>`,
+  `<system-notification>`.
 
-**Always offer a picker.** "Which message" is a UI problem as much as a resolution problem:
-show the last N rendered messages, default to the resolved one. The picker forgave every
-resolution bug Plannotator ever shipped.
+**Codex.** `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`; thread id = uuid in
+the filename; scan date dirs newest-first. Entries: `type == "response_item"`,
+`payload.type == "message"`, `payload.role == "assistant"`, text from `output_text` blocks.
+Active turn: newest `event_msg` turn-start after the newest turn-complete → walk backward
+from just before it. Multi-file threads (issue #1367, PR #1387 unmerged): collect ALL files
+for the thread from day one and walk backward across them.
 
-**Explicit input first.** `plannotui last --stdin` and the env overrides ship before any
-divination exists, so the tool is usable on day one and testable without a host.
+**Delivery contract** (`index.ts:338-350`, ours to freeze): plain mode prints feedback on
+stdout, empty on close, "The user approved." on approve, **exit 0 always** (a non-zero exit
+from a Bash bang-prefix aborts the prompt before the model reads it). `--json` prints one
+`{"decision":"approved|dismissed|annotated","feedback":"…"}`. `--hook` prints nothing on
+approve/close and `{"decision":"block","reason":"…"}` on annotate. No size framing, no
+bracketed paste. Hosts may kill our process group on a shell timeout (OpenCode: 120 s).
 
-**Delivery contract is frozen before code.** Plain mode: feedback on stdout, **exit 0
-even on zero-resolve or handoff** (a non-zero exit from a Bash bang-prefix aborts the
-prompt before the model sees anything). `--json`: one machine-readable decision record on
-stdout, nothing else. Hook mode emits `{"decision":"block","reason":"<feedback>"}`. Plain
-markdown, no bracketed paste, no size framing. Hosts may run us under a shell timeout that
-kills the process group (OpenCode: 120 s); say so in skill text and surface submit failures.
+**Explicit input first.** `plannotui last --stdin` and `PLANNOTUI_HOST`/`PLANNOTUI_SESSION`
+overrides ship before any detection, so the tool is usable and testable without a host.
 
-**Fixtures.** Freeze: Claude Code JSONL entry shape, our stdout/exit contract, Codex
-`response_item/message/output_text` entry shape. Do not freeze: Codex file layout,
-Copilot session-state layout, anything derived from process tables. Every parser is a pure
-function over a string; tests never touch the real `~/.claude` or `~/.codex`.
+**Tests.** Every resolver and parser is a pure function over strings/paths with injected
+`sessions_dir`, `projects_dir`, and a `parent_pid` closure — never the real `~/.claude`,
+never a spawned `ps`. Plannotator's `session-log.test.ts` (1,621 lines) is the regression
+inventory: slug rules, human-prompt filtering, last-message extraction edge cases, picker,
+active branch, rewind, compact, ancestor walk, ancestor pids, cwd scan, `ps` parsing,
+cross-platform cwd compare. Freeze the JSONL entry shape and our stdout contract; do not
+freeze Codex file layout or anything derived from process tables.
