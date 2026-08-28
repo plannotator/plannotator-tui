@@ -245,3 +245,33 @@ button say "Sent" after a restart and, later, lets Workspaces know which comment
 has already seen. It is append-only and absent until the first send, so records written by
 earlier builds load unchanged. A folder-wide send is recorded on the open file only; the
 per-file state is a UI convenience, not an audit log.
+
+## 14. What the real transcripts changed in decision 9 (2026-08-28)
+
+`plannotator-tui-hosts` was built against decision 9 and then checked against this
+machine's live Claude Code and Codex files. Four things the rules did not say:
+
+- `attachment` entries carry `uuid`/`parentUuid` and sit inside the parent chain. The branch
+  walk passes through them and rendering skips them; skipping them from the walk would make
+  every chain look dangling.
+- `/compact` is a `system` entry with `subtype: "compact_boundary"`, `parentUuid: null` and a
+  `logicalParentUuid`, followed by a `user` entry flagged `isCompactSummary` /
+  `isVisibleInTranscriptOnly`. The summary is not a human prompt. The file-order fallback
+  after a compact works as specified.
+- `<task-notification>` is another machine-written prefix on `user` entries; it joins the
+  human-prompt filter.
+- Codex assistant messages carry `phase` (`commentary` | `final_answer`); both are returned
+  newest first so the final answer is the default pick. Subagent rollouts
+  (`payload.source.subagent`) have their own thread ids and are excluded when choosing a
+  thread — grouping by `session_id` would merge a reviewer's output into the main thread.
+
+`visibility` and `isSidechain` did not appear in the sampled transcripts; the rules stay,
+covered by synthesized fixture entries. The stdout contract (`--print`: newest reply, exit 0
+always, errors on stderr) is frozen as decision 9 required.
+
+
+Peer-reviewed against Plannotator's source at main by the plannotator-ops session
+(2026-08-28): the attachment-in-chain rule matches Plannotator exactly; the compact-summary
+exclusion, the `<task-notification>` prefix, the explicit Codex subagent skip, and
+multi-rollout grouping are stricter than Plannotator (which has an open bug, #1367, on the
+last one). Keep them; do not regress to match.

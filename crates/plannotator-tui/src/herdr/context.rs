@@ -45,6 +45,10 @@ pub(crate) struct HerdrEnv {
     pub(crate) placement: Option<String>,
     /// `HERDR_PLUGIN_ID`: the plugin this binary ships in; `plannotator-tui` when unset.
     pub(crate) plugin_id: Option<String>,
+    /// `PLANNOTATOR_TUI_MESSAGE_PID`: open this agent's last message instead of a file.
+    pub(crate) message_pid: Option<u32>,
+    /// `PLANNOTATOR_TUI_HOST`: which agent's transcript format to read.
+    pub(crate) host: Option<String>,
 }
 
 impl HerdrEnv {
@@ -66,6 +70,8 @@ impl HerdrEnv {
             deliver_agent: non_empty("PLANNOTATOR_TUI_DELIVER_AGENT"),
             placement: non_empty("PLANNOTATOR_TUI_PLACEMENT"),
             plugin_id: non_empty("HERDR_PLUGIN_ID"),
+            message_pid: non_empty("PLANNOTATOR_TUI_MESSAGE_PID").and_then(|v| v.parse().ok()),
+            host: non_empty("PLANNOTATOR_TUI_HOST"),
         }
     }
 

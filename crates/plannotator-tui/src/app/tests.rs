@@ -1,7 +1,7 @@
 //! Behaviour of the header's Send button and the quit confirmation, drawn into a
 //! `TestBackend` the way the `--snapshot` CLI does.
 
-#![allow(clippy::expect_used, reason = "tests assert by panicking")]
+#![allow(clippy::expect_used, clippy::indexing_slicing, reason = "tests assert by panicking")]
 
 use std::path::PathBuf;
 
@@ -88,4 +88,51 @@ fn quitting_with_unsent_feedback_asks_before_it_quits() {
     app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('n')))).expect("n");
     assert!(app.quit, "n quits without sending");
     assert_eq!(app.send_state, SendState::Ready, "nothing was sent");
+}
+
+fn candidates() -> Vec<plannotator_tui_hosts::Message> {
+    use plannotator_tui_hosts::{Message, Role};
+    let message = |id: &str, text: &str, at: &str| Message {
+        id: id.to_owned(),
+        role: Role::Assistant,
+        text: text.to_owned(),
+        at: Some(at.to_owned()),
+    };
+    vec![
+        message("m3", "# Third\n\nnewest message\n", "2026-08-28T12:41:00.000Z"),
+        message("m2", "# Second\n\nmiddle message\n", "2026-08-28T12:38:00.000Z"),
+        message("m1", "# First\n\noldest message\n", "2026-08-28T12:30:00.000Z"),
+    ]
+}
+
+#[test]
+fn the_picker_lists_newest_first_and_opens_the_chosen_message() {
+    let mut app = App::open_message("claude", "/tmp/transcript.jsonl", candidates(), 60, Box::new(Discard))
+        .expect("opens");
+    assert_eq!(app.mode, Mode::Pick, "more than one candidate asks which");
+    let rows = draw(&mut app);
+    let listed: Vec<&str> = rows.iter().map(String::as_str).filter(|r| r.contains("12:")).collect();
+    assert_eq!(listed.len(), 3, "{rows:?}");
+    assert!(listed[0].contains("12:41  # Third"), "{:?}", listed[0]);
+    assert!(listed[2].contains("12:30  # First"), "{:?}", listed[2]);
+
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('j')))).expect("j");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Enter))).expect("enter");
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.doc.source, "# Second\n\nmiddle message\n");
+    assert!(app.open.store.is_transient(), "a message is never written to disk");
+    app.add_block_annotation(0, Kind::Comment, "x".to_owned()).expect("annotate");
+    assert!(app.open.store.is_transient());
+}
+
+#[test]
+fn escaping_the_picker_keeps_the_newest_message() {
+    let mut app = App::open_message("claude", "/tmp/transcript.jsonl", candidates(), 60, Box::new(Discard))
+        .expect("opens");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Esc))).expect("esc");
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.doc.source, "# Third\n\nnewest message\n");
+    assert_eq!(app.open.source.name, "claude · last message");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('p')))).expect("p");
+    assert_eq!(app.mode, Mode::Pick, "p reopens the picker");
 }

@@ -27,6 +27,11 @@ bind a key:
 key = "prefix+a"
 type = "plugin_action"
 command = "plannotator-tui.open"
+
+[[keys.command]]
+key = "prefix+shift+d"
+type = "plugin_action"
+command = "plannotator-tui.last"
 ```
 
 `prefix+a` opens the focused pane's folder for review; Ctrl-click on a `file://…md` link an
@@ -42,6 +47,16 @@ placement = "overlay"   # overlay (full tab, default) | split | popup
 ```
 
 `plannotator-tui config` prints the file's path and the values in effect.
+
+## Review the agent's last message
+
+`plannotator-tui last` finds the transcript of the agent that launched your shell (Claude
+Code or Codex), shows a picker of its recent replies, and opens the one you choose as a
+document you can annotate and send back — nothing is written to disk. In Herdr, bind
+`plannotator-tui.last` (`prefix+shift+d` above) and press it in the agent's pane. For
+scripts and hooks, `plannotator-tui last --print` writes the newest reply to stdout and
+always exits 0; `--session <transcript>` skips detection and `--stdin` reads a document
+from stdin.
 
 See `crates/plannotator-tui/README.md` for keys, headless tools, and measurements;
 `docs/decisions.md` for the design record; `AGENTS.md` for engineering rules.

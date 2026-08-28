@@ -1233,6 +1233,7 @@ name = "plannotator-tui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "plannotator-tui-hosts",
  "plannotator-tui-schema",
  "pulldown-cmark",
  "ratatui",
@@ -1243,6 +1244,13 @@ dependencies = [
  "tui-input",
  "tui-markdown",
  "unicode-width",
+]
+
+[[package]]
+name = "plannotator-tui-hosts"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]

@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 plannotator-tui-schema = { path = "../plannotator-tui-schema" }
+plannotator-tui-hosts = { path = "../plannotator-tui-hosts" }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

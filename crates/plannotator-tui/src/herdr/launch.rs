@@ -34,6 +34,61 @@ pub(crate) struct Launch {
     pub(crate) deliver: Option<Target>,
     /// The plugin id to open under: whatever plugin ships this binary.
     pub(crate) plugin: String,
+    /// Open an agent's last message instead of `file`: (pid, host label).
+    pub(crate) message: Option<(u32, String)>,
+}
+
+/// The agent process behind a pane, from `herdr pane process-info --pane <id>` JSON: the
+/// foreground process whose name is a known agent, else the group leader. Returns
+/// `(pid, host)` where host is the label `plannotator-tui last --host` accepts.
+pub(crate) fn agent_pid(process_info_json: &str) -> Option<(u32, String)> {
+    let json: serde_json::Value = serde_json::from_str(process_info_json).ok()?;
+    let info = json.pointer("/result/process_info")?;
+    let processes = info.get("foreground_processes")?.as_array()?;
+    let name_of = |p: &serde_json::Value| p.get("name").and_then(|n| n.as_str()).unwrap_or("").to_owned();
+    let pid_of = |p: &serde_json::Value| p.get("pid").and_then(serde_json::Value::as_u64).map(|n| n as u32);
+    for process in processes {
+        let name = name_of(process);
+        if let Some(host) = host_for_process(&name) {
+            return pid_of(process).map(|pid| (pid, host.to_owned()));
+        }
+    }
+    let leader = info.get("foreground_process_group_id").and_then(serde_json::Value::as_u64)?;
+    processes
+        .iter()
+        .find(|p| pid_of(p) == Some(leader as u32))
+        .and_then(pid_of)
+        .map(|pid| (pid, "claude".to_owned()))
+}
+
+fn host_for_process(name: &str) -> Option<&'static str> {
+    match name.rsplit('/').next().unwrap_or(name) {
+        "claude" => Some("claude"),
+        "codex" => Some("codex"),
+        _ => None,
+    }
+}
+
+/// Resolve a `last` launch: the target pane as for `open`, the folder from the context, and
+/// the agent process from the pane's process info (fetched by the caller).
+pub(crate) fn plan_last(
+    env: &HerdrEnv,
+    config: &Config,
+    args: OpenArgs,
+    cwd: &Path,
+    process_info_json: &str,
+) -> Result<Launch> {
+    let mut launch = plan(env, config, OpenArgs { path: None, ..args }, cwd)?;
+    let pane = launch.deliver.as_ref().map(|t| t.pane.clone()).or_else(|| launch.target_pane.clone());
+    let Some(pane) = pane else {
+        anyhow::bail!("no agent pane to read: not focused on one and no --deliver-to")
+    };
+    let Some(message) = agent_pid(process_info_json) else {
+        anyhow::bail!("no agent process found in pane {pane}");
+    };
+    launch.file.clone_from(&launch.cwd);
+    launch.message = Some(message);
+    Ok(launch)
 }
 
 /// A `file://` URL as a local path; anything else is not ours to open.
@@ -122,6 +177,7 @@ pub(crate) fn plan(env: &HerdrEnv, config: &Config, args: OpenArgs, cwd: &Path) 
         target_pane,
         deliver,
         plugin: env.plugin_id.clone().unwrap_or_else(|| "plannotator-tui".to_owned()),
+        message: None,
     })
 }
 
@@ -147,7 +203,13 @@ pub(crate) fn argv(launch: &Launch) -> Vec<String> {
     }
     out.push("--focus".to_owned());
     out.extend(["--cwd".to_owned(), launch.cwd.display().to_string()]);
-    out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_FILE={}", launch.file.display())]);
+    match &launch.message {
+        Some((pid, host)) => {
+            out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_MESSAGE_PID={pid}")]);
+            out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_HOST={host}")]);
+        }
+        None => out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_FILE={}", launch.file.display())]),
+    }
     if let Some(target) = &launch.deliver {
         out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_DELIVER_TO={}", target.pane)]);
         if let Some(agent) = &target.agent {
@@ -155,6 +217,18 @@ pub(crate) fn argv(launch: &Launch) -> Vec<String> {
         }
     }
     out
+}
+
+/// `herdr pane process-info --pane <pane>`, raw JSON.
+pub(crate) fn process_info(env: &HerdrEnv, pane: &str) -> Result<String> {
+    let output = Command::new(&env.bin)
+        .args(["pane", "process-info", "--pane", pane])
+        .output()
+        .with_context(|| format!("running {} pane process-info", env.bin.display()))?;
+    if !output.status.success() {
+        anyhow::bail!("herdr pane process-info {pane}: {}", String::from_utf8_lossy(&output.stderr).trim());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Run the launch through `bin`. Herdr's own stdout/stderr pass through.

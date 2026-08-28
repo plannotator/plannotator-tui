@@ -17,7 +17,7 @@ command = ["cargo", "build", "--release", "--manifest-path", "../Cargo.toml"]
 id = "doc"
 title = "plannotator-tui"
 placement = "overlay"
-command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotator-tui\" \"${PLANNOTATOR_TUI_FILE:-$PWD}\""]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotator-tui\" herdr pane"]
 
 # Human entry points. Both run the launcher, which reads Herdr's invocation context: the
 # focused pane's folder (open) or the clicked file:// link (open-link), and the focused
@@ -35,6 +35,12 @@ contexts = ["pane"]
 command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotator-tui\" herdr open"]
 
 # Ctrl-click on a file:// markdown link. Anchored on the scheme so web links never match.
+[[actions]]
+id = "last"
+title = "Annotate: agent's last message"
+contexts = ["pane"]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotator-tui\" herdr last"]
+
 [[link_handlers]]
 id = "markdown-file"
 title = "Annotate this file"

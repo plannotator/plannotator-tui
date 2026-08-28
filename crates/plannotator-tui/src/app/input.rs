@@ -18,9 +18,11 @@ impl App {
             Event::Key(key) if key.kind != KeyEventKind::Release => match &self.mode {
                 Mode::Browse => self.browse_key(*key),
                 Mode::ConfirmQuit => self.confirm_quit_key(*key),
+                Mode::Pick => self.pick_key(*key),
                 Mode::Compose | Mode::Edit(_) => self.text_key(*key, event),
             },
             Event::Mouse(mouse) if self.mode == Mode::Browse => self.mouse(*mouse),
+            Event::Mouse(mouse) if self.mode == Mode::Pick => self.pick_mouse(*mouse),
             _ => Ok(()),
         }
     }
@@ -42,6 +44,10 @@ impl App {
                 return Ok(());
             }
             (KeyCode::Char('r'), _) => return self.reload(),
+            (KeyCode::Char('p'), _) => {
+                self.reopen_picker();
+                return Ok(());
+            }
             _ => {}
         }
         match self.focus {
@@ -260,7 +266,7 @@ impl App {
                             self.status = Some("annotation updated".into());
                         }
                     }
-                    Mode::Compose | Mode::Browse | Mode::ConfirmQuit => {
+                    Mode::Compose | Mode::Browse | Mode::ConfirmQuit | Mode::Pick => {
                         if !body.is_empty()
                             && let Some(pending) = self.pending.take()
                         {
