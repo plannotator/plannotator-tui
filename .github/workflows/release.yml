@@ -73,6 +73,30 @@ jobs:
 
   # Tell the Homebrew tap to regenerate its formula for this release. Skipped
   # (never failed) when HOMEBREW_TAP_TOKEN is absent, e.g. on forks.
+  crates-io:
+    # A release created with the workflow token does not fire `release: published` for
+    # other workflows, so publishing happens here, after the binaries are up.
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          for crate in plannotator-tui-schema plannotator-tui-hosts plannotator-tui; do
+            if cargo publish -p "$crate" 2> err.log; then
+              echo "published $crate"
+            elif grep -q "already exists\|already uploaded" err.log; then
+              echo "$crate: this version is already on crates.io; skipping"
+            else
+              cat err.log; exit 1
+            fi
+          done
+
   homebrew:
     needs: publish
     runs-on: ubuntu-latest

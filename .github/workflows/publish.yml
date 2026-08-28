@@ -1,11 +1,8 @@
-# Publish the crates to crates.io once a release exists (binaries built, tag verified).
-# Runs when a GitHub release is published, or on demand for a given tag. Order matters:
-# the binary crate depends on the two libraries.
+# On-demand crates.io publish for a given tag (the release workflow publishes on its own;
+# this exists for re-runs). Order matters: the binary crate depends on the two libraries.
 name: publish
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -25,13 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || inputs.tag || github.event.release.tag_name }}
+          ref: ${{ inputs.ref || inputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: tag matches Cargo.toml
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          tag="${{ inputs.tag || github.event.release.tag_name }}"
+          tag="${{ inputs.tag }}"
           test "v$version" = "$tag" || { echo "tag $tag != v$version"; exit 1; }
       - name: publish
         env:
