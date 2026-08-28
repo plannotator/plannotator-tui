@@ -70,3 +70,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --generate-notes dist/*
+
+  # Tell the Homebrew tap to regenerate its formula for this release. Skipped
+  # (never failed) when HOMEBREW_TAP_TOKEN is absent, e.g. on forks.
+  homebrew:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: dispatch to plannotator/homebrew-tap
+        env:
+          # The default GITHUB_TOKEN cannot reach another repository. This is a
+          # fine-grained PAT scoped to plannotator/homebrew-tap with
+          # "Contents: read and write" and "Metadata: read".
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "no HOMEBREW_TAP_TOKEN; skipping homebrew tap update"
+            exit 0
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          gh api repos/plannotator/homebrew-tap/dispatches \
+            -f event_type=plannotator-tui-release \
+            -F "client_payload[version]=${version}"
