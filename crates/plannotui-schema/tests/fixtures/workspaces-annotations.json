@@ -1,0 +1,684 @@
+{
+  "source": "api-design/spec.yaml (Workspaces API 0.14.0-slice7-live), extracted 2026-08-28",
+  "examples": {
+    "create_request": {
+      "markdown": {
+        "anchor": {
+          "block_id": "b_3f29",
+          "start_offset": 12,
+          "end_offset": 47,
+          "original_text": "the quick brown fox"
+        },
+        "body": "This paragraph needs a citation.",
+        "author": "Alex"
+      },
+      "markdownAgent": {
+        "anchor": {
+          "original_text": "the quick brown fox",
+          "start_offset": 12,
+          "end_offset": 47
+        },
+        "body": "This paragraph needs a citation.",
+        "author": "claude-code"
+      },
+      "html": {
+        "anchor": {
+          "block_id": "",
+          "original_text": "the quick brown fox",
+          "start_meta": {
+            "parent_tag": "p",
+            "text_offset": 0
+          },
+          "end_meta": {
+            "parent_tag": "p",
+            "text_offset": 19
+          }
+        },
+        "body": "Is this still accurate?"
+      }
+    },
+    "create_response": {
+      "created": {
+        "id": "anno_01J9X4ZK7QABCDEF0123456789",
+        "document_id": "doc_01J9X4ZK7QABCDEF0123456789",
+        "anchor": {
+          "block_id": "b_3f29",
+          "start_offset": 12,
+          "end_offset": 47,
+          "original_text": "the quick brown fox"
+        },
+        "body": "This paragraph needs a citation.",
+        "author": "user_01J9X4ZK7QABCDEF0123456789",
+        "author_name": "Alex Chen",
+        "state": "open",
+        "created_at": "2026-06-08T09:00:00Z",
+        "updated_at": "2026-06-08T09:00:00Z",
+        "replies": []
+      },
+      "anonymous": {
+        "id": "anno_01J9X4ZK8MN3PQR5STV7WXY9Z0",
+        "document_id": "doc_01J9X4ZK7QABCDEF0123456789",
+        "anchor": {
+          "block_id": "b_7a11",
+          "start_offset": 0,
+          "end_offset": 8,
+          "original_text": "Overview"
+        },
+        "body": "typo here",
+        "author": null,
+        "state": "open",
+        "created_at": "2026-06-08T09:02:00Z",
+        "updated_at": "2026-06-08T09:02:00Z",
+        "replies": []
+      }
+    },
+    "list_response": {
+      "some": {
+        "annotations": [
+          {
+            "id": "anno_01J9X4ZK7QABCDEF0123456789",
+            "document_id": "doc_01J9X4ZK7QABCDEF0123456789",
+            "anchor": {
+              "block_id": "b_3f29",
+              "start_offset": 12,
+              "end_offset": 47,
+              "original_text": "the quick brown fox"
+            },
+            "body": "This paragraph needs a citation.",
+            "author": "Alex",
+            "state": "open",
+            "created_at": "2026-06-08T09:00:00Z",
+            "updated_at": "2026-06-08T09:00:00Z",
+            "replies": [
+              {
+                "id": "reply_01J9X4ZK8MN3PQR5STV7WXY9Z0",
+                "annotation_id": "anno_01J9X4ZK7QABCDEF0123456789",
+                "body": "Added a link.",
+                "author": "Alex",
+                "created_at": "2026-06-08T09:01:00Z",
+                "updated_at": "2026-06-08T09:01:00Z"
+              }
+            ]
+          },
+          {
+            "id": "anno_01J9X4ZK8MN3PQR5STV7WXY9Z0",
+            "document_id": "doc_01J9X4ZK7QABCDEF0123456789",
+            "anchor": {
+              "block_id": "b_7a11",
+              "start_offset": 0,
+              "end_offset": 8,
+              "original_text": "Overview"
+            },
+            "body": "typo here",
+            "author": null,
+            "state": "open",
+            "created_at": "2026-06-08T09:02:00Z",
+            "updated_at": "2026-06-08T09:02:00Z",
+            "replies": []
+          }
+        ]
+      },
+      "none": {
+        "annotations": []
+      }
+    },
+    "patch_request": {
+      "editBody": {
+        "body": "This paragraph now has a citation."
+      },
+      "resolve": {
+        "state": "resolved"
+      },
+      "healAnchor": {
+        "anchor": {
+          "original_text": "the quick brown fox",
+          "start_offset": 18,
+          "end_offset": 37
+        }
+      }
+    }
+  },
+  "schemas": {
+    "Annotation": {
+      "type": "object",
+      "description": "A root comment anchored to a place in a document. Returned when you create or\npatch one and as the items of the comment lists. Replies are shallow and nested\nunder the root comment.\n",
+      "required": [
+        "id",
+        "document_id",
+        "anchor",
+        "body",
+        "author",
+        "state",
+        "created_at",
+        "updated_at",
+        "replies"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The comment's id.",
+          "example": "anno_01J9X4ZK7QABCDEF0123456789"
+        },
+        "document_id": {
+          "type": "string",
+          "description": "The document the comment is anchored to. Stable — a comment is pinned to the\ndocument id, not its path, so renaming or moving the document never orphans the\ncomment. A comment can't move between documents.\n",
+          "example": "doc_01J9X4ZK7QABCDEF0123456789"
+        },
+        "anchor": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "The selection the comment is pinned to — an **opaque, client-owned** object the\nserver stores and returns exactly as received. The server never parses,\nvalidates, or re-anchors it (`additionalProperties: true` is intentional).\nWhen document text changes, a client may reattach the comment and replace this\nwhole object with `PATCH .../annotations/{annoId}`.\n"
+        },
+        "body": {
+          "type": "string",
+          "description": "The comment text, a plain string (no rich text; image attachments ride the separate `attachments` field).",
+          "example": "This paragraph needs a citation."
+        },
+        "attachments": {
+          "type": "array",
+          "maxItems": 8,
+          "description": "Image attachments on the comment: absolute `https://` URLs, in the order\nthey were attached, at most 8. Present only when the comment carries at\nleast one attachment; omitted otherwise (older comments serve\nbyte-identical responses). The server stores the URLs verbatim and never\nfetches, proxies, or resizes them. Clients normally point them at the\nhash-pinned asset `url` the asset upload route returned, so the image\nkeeps rendering for every later reader.\n",
+          "items": {
+            "type": "string",
+            "example": "https://tot.page/gxq14byrk27ah3n0wsy2dvzm/assets/uploads/k9x2-shot.png@9a2f7c41d8e0b6a3f5c1d2e4a6b8c0d2e4f6a8b0"
+          }
+        },
+        "author": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A display label for who wrote the comment — **never** used to decide who can\ndelete it. For a logged-in or API-key caller it is server-derived from the\nauthenticated identity. For an anonymous commenter on a `link_edit` document it's an\noptional self-supplied name, or `null` if none was given (and is therefore\nunverified — render it as untrusted text, like the body).\n",
+          "example": "Alex"
+        },
+        "author_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The comment author's human display name, stamped at write time from the\nauthenticated identity's profile (never the email). Omitted or `null` when no\nname is known: anonymous comments (their optional self-supplied name is in\n`author`), identities whose login provider carries no profile name, and\ncomments written before names were recorded. Display only — when absent,\nrender your existing `author` convention; never treat it as an identifier.\n",
+          "example": "Alex Chen"
+        },
+        "agent": {
+          "type": "object",
+          "description": "Formal agent attribution for a row written by an **agent credential** — an API\nkey, or an MCP OAuth token on deployments that enable the MCP OAuth arm. When\nthis object is present, the row's `author`\n(or actor/requester id field) is formally the **on-behalf-of human**: the\ndelegating user's id, and the agent named here is the actual author. Derived\nentirely from stored credential facts at write time — never client-supplied.\nOmitted (never null-filled) on rows a human wrote directly and on rows written\nbefore agent attribution was recorded.\n",
+          "required": [
+            "id",
+            "kind",
+            "name"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The agent's stable principal id — the API key id (`key_…`) for `api_key`\nwrites; the token id (JWT `jti`), else the OAuth client id, else the\napproving user's id for `mcp_token` writes. A formal id-backed linkage,\nnot a display string.\n",
+              "example": "key_01J9X4ZK7QABCDEF0123456789"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "api_key",
+                "mcp_token"
+              ],
+              "description": "The stored credential kind behind the write. Derive any \"agent\" marker\nfrom THIS fact (plus `id`), never from `name` — agent names are\nregistrant-chosen and can look human.\n"
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The agent's own display name — the API key's user-typed name — stamped\nat write time, never an email. `null` when the credential carried no\nsafe display name (always `null` for `mcp_token` writes today); the\n`id` linkage still holds. Untrusted display text.\n",
+              "example": "claude-code"
+            }
+          }
+        },
+        "review_submission_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The approval submission this comment belongs to — the author's\nfeedback batch on the round that was open when the comment was\nwritten — or `null`: no round was open, the author was anonymous,\nor the comment predates the feature. Server-assigned at write\ntime, never accepted on create or PATCH, and never re-decided.\n`null` again if the submission's round is later pruned. Clients\nuse it to group the comment index under the approval panel.\n",
+          "example": null
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "open",
+            "resolved"
+          ],
+          "description": "The root comment's thread state. `resolved` hides or dims the thread in clients\nand blocks new replies; it does not prevent cleanup edits/deletes.\n",
+          "example": "open"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the comment was created.",
+          "example": "2026-06-08T09:00:00Z"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the root comment body, state, or anchor last changed.",
+          "example": "2026-06-08T09:05:00Z"
+        },
+        "replies": {
+          "type": "array",
+          "description": "Shallow replies under this root comment, oldest first.",
+          "items": {
+            "type": "object",
+            "description": "A shallow reply under a root comment.",
+            "required": [
+              "id",
+              "annotation_id",
+              "body",
+              "author",
+              "created_at",
+              "updated_at"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The reply's id.",
+                "example": "reply_01J9X4ZK8MN3PQR5STV7WXY9Z0"
+              },
+              "annotation_id": {
+                "type": "string",
+                "description": "The root comment this reply belongs to.",
+                "example": "anno_01J9X4ZK7QABCDEF0123456789"
+              },
+              "body": {
+                "type": "string",
+                "description": "The reply text — a plain string, no rich text or attachments.",
+                "example": "Added the citation."
+              },
+              "author": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "A display label for who wrote the reply. Authenticated/API-key callers get\nserver-derived attribution; anonymous link_edit-doc callers may pass a display name.\n",
+                "example": "Alex"
+              },
+              "author_name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The reply author's human display name, stamped at write time from the\nauthenticated identity's profile (never the email). Omitted or `null` when no\nname is known — render your existing `author` convention instead.\n",
+                "example": "Alex Chen"
+              },
+              "agent": {
+                "type": "object",
+                "description": "Formal agent attribution for a row written by an **agent credential** — an API\nkey, or an MCP OAuth token on deployments that enable the MCP OAuth arm. When\nthis object is present, the row's `author`\n(or actor/requester id field) is formally the **on-behalf-of human**: the\ndelegating user's id, and the agent named here is the actual author. Derived\nentirely from stored credential facts at write time — never client-supplied.\nOmitted (never null-filled) on rows a human wrote directly and on rows written\nbefore agent attribution was recorded.\n",
+                "required": [
+                  "id",
+                  "kind",
+                  "name"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "The agent's stable principal id — the API key id (`key_…`) for `api_key`\nwrites; the token id (JWT `jti`), else the OAuth client id, else the\napproving user's id for `mcp_token` writes. A formal id-backed linkage,\nnot a display string.\n",
+                    "example": "key_01J9X4ZK7QABCDEF0123456789"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "api_key",
+                      "mcp_token"
+                    ],
+                    "description": "The stored credential kind behind the write. Derive any \"agent\" marker\nfrom THIS fact (plus `id`), never from `name` — agent names are\nregistrant-chosen and can look human.\n"
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The agent's own display name — the API key's user-typed name — stamped\nat write time, never an email. `null` when the credential carried no\nsafe display name (always `null` for `mcp_token` writes today); the\n`id` linkage still holds. Untrusted display text.\n",
+                    "example": "claude-code"
+                  }
+                }
+              },
+              "review_submission_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The REPLIER's approval submission — a reply joins the replier's\nown feedback batch, never the root author's — or `null`; same\nrules as the root comment's field. Server-assigned, never\naccepted from the caller.\n",
+                "example": null
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When the reply was created.",
+                "example": "2026-06-08T09:01:00Z"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When the reply body last changed.",
+                "example": "2026-06-08T09:01:00Z"
+              }
+            }
+          }
+        },
+        "doc_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The document's current path — **present on the workspace-wide list**\n(`GET /v1/workspaces/{wsId}/annotations`) **and the org-wide list**\n(`GET /v1/orgs/{orgId}/annotations`), as a display label so you can group\ncomments by document. It's recomputed on every read and is **not stable** (a\nrename changes it): never key, cache, or address by it — use `document_id`.\nOmitted on the per-document list and the create response.\n",
+          "example": "index.md"
+        },
+        "workspace_id": {
+          "type": "string",
+          "description": "The workspace the comment lives in — **present only on the org-wide list**\n(`GET /v1/orgs/{orgId}/annotations`), where comments span many workspaces, so\neach one can be traced to its workspace. Omitted everywhere else (the\nworkspace is already fixed by the path).\n",
+          "example": "ws_01J9X4ZK7QZYXWVS9876543210"
+        }
+      }
+    },
+    "AnnotationReply": {
+      "type": "object",
+      "description": "A shallow reply under a root comment.",
+      "required": [
+        "id",
+        "annotation_id",
+        "body",
+        "author",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The reply's id.",
+          "example": "reply_01J9X4ZK8MN3PQR5STV7WXY9Z0"
+        },
+        "annotation_id": {
+          "type": "string",
+          "description": "The root comment this reply belongs to.",
+          "example": "anno_01J9X4ZK7QABCDEF0123456789"
+        },
+        "body": {
+          "type": "string",
+          "description": "The reply text — a plain string, no rich text or attachments.",
+          "example": "Added the citation."
+        },
+        "author": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A display label for who wrote the reply. Authenticated/API-key callers get\nserver-derived attribution; anonymous link_edit-doc callers may pass a display name.\n",
+          "example": "Alex"
+        },
+        "author_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The reply author's human display name, stamped at write time from the\nauthenticated identity's profile (never the email). Omitted or `null` when no\nname is known — render your existing `author` convention instead.\n",
+          "example": "Alex Chen"
+        },
+        "agent": {
+          "type": "object",
+          "description": "Formal agent attribution for a row written by an **agent credential** — an API\nkey, or an MCP OAuth token on deployments that enable the MCP OAuth arm. When\nthis object is present, the row's `author`\n(or actor/requester id field) is formally the **on-behalf-of human**: the\ndelegating user's id, and the agent named here is the actual author. Derived\nentirely from stored credential facts at write time — never client-supplied.\nOmitted (never null-filled) on rows a human wrote directly and on rows written\nbefore agent attribution was recorded.\n",
+          "required": [
+            "id",
+            "kind",
+            "name"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The agent's stable principal id — the API key id (`key_…`) for `api_key`\nwrites; the token id (JWT `jti`), else the OAuth client id, else the\napproving user's id for `mcp_token` writes. A formal id-backed linkage,\nnot a display string.\n",
+              "example": "key_01J9X4ZK7QABCDEF0123456789"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "api_key",
+                "mcp_token"
+              ],
+              "description": "The stored credential kind behind the write. Derive any \"agent\" marker\nfrom THIS fact (plus `id`), never from `name` — agent names are\nregistrant-chosen and can look human.\n"
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The agent's own display name — the API key's user-typed name — stamped\nat write time, never an email. `null` when the credential carried no\nsafe display name (always `null` for `mcp_token` writes today); the\n`id` linkage still holds. Untrusted display text.\n",
+              "example": "claude-code"
+            }
+          }
+        },
+        "review_submission_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The REPLIER's approval submission — a reply joins the replier's\nown feedback batch, never the root author's — or `null`; same\nrules as the root comment's field. Server-assigned, never\naccepted from the caller.\n",
+          "example": null
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the reply was created.",
+          "example": "2026-06-08T09:01:00Z"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the reply body last changed.",
+          "example": "2026-06-08T09:01:00Z"
+        }
+      }
+    },
+    "CreateAnnotationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "anchor",
+        "body"
+      ],
+      "description": "The body for adding a comment to a document. The whole JSON request is capped at 32 KiB.",
+      "x-max-request-bytes": 32768,
+      "properties": {
+        "anchor": {
+          "type": "object",
+          "additionalProperties": true,
+          "x-max-serialized-bytes": 16384,
+          "description": "The selection to pin the comment to — an opaque, client-owned object stored and\nreturned verbatim (the server never looks inside it), with one exception:\n`point`. Required. Serialized JSON form must be at most 16 KiB of UTF-8.\n\nIf the anchor carries a top-level `point` key, it must be the normalized\npinpoint `{x, y}`: each coordinate a finite number from 0 to 1 inclusive,\nmeasured inside the anchored target's rectangle. An out-of-range,\nnon-finite, or non-numeric\ncoordinate is rejected with the standard `validation_error` shape naming\nthe offending field (for example `anchor.point.x`). Keys beside `x`/`y`\ninside `point`, and anchors without a `point` key, stay fully opaque.\n",
+          "properties": {
+            "point": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "x",
+                "y"
+              ],
+              "description": "Optional normalized pinpoint inside the anchored target's rectangle, `0..1` per axis.\n",
+              "properties": {
+                "x": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "example": 0.42
+                },
+                "y": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "example": 0.61
+                }
+              }
+            }
+          }
+        },
+        "body": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192,
+          "description": "The comment text, a plain string, at most 8 KiB of UTF-8.",
+          "example": "This paragraph needs a citation."
+        },
+        "attachments": {
+          "type": "array",
+          "maxItems": 8,
+          "description": "Optional image attachments: at most 8 absolute `https://` URLs, each at\nmost 2048 characters. An entry that does not parse as an `https` URL\n(plain `http`, `javascript:`, `data:`, a bare filename) is rejected with\nthe standard `validation_error` shape. Stored verbatim and returned on\nevery read of the comment. Upload the image first (asset upload route)\nand put its returned hash-pinned `url` here.\n",
+          "items": {
+            "type": "string",
+            "maxLength": 2048,
+            "example": "https://tot.page/gxq14byrk27ah3n0wsy2dvzm/assets/uploads/k9x2-shot.png@9a2f7c41d8e0b6a3f5c1d2e4a6b8c0d2e4f6a8b0"
+          }
+        },
+        "author": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 120,
+          "description": "Optional display name, honored only for an anonymous commenter on a `link_edit`\ndocument. For a logged-in or API-key caller the server uses the authenticated\nidentity and ignores this field (so attribution can't be spoofed). At most 120\ncharacters.\n",
+          "example": "Alex"
+        }
+      }
+    },
+    "PatchAnnotationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "A partial update to a root comment. Include any combination of `body`, `state`,\nand `anchor`. `anchor` is full replacement, not merge-patch. The whole JSON\nrequest is capped at 32 KiB.\n",
+      "x-max-request-bytes": 32768,
+      "properties": {
+        "anchor": {
+          "type": "object",
+          "additionalProperties": true,
+          "x-max-serialized-bytes": 16384,
+          "description": "Replacement opaque anchor object. Serialized JSON form must be at most 16 KiB\nof UTF-8. The create-time `point` rule applies here too: a top-level `point`\nkey, if present, must carry finite normalized `x`/`y` coordinates in `0..1`\n(see `CreateAnnotationRequest.anchor`).\n",
+          "properties": {
+            "point": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "x",
+                "y"
+              ],
+              "description": "Optional normalized pinpoint inside the anchored target's rectangle, `0..1` per axis.\n",
+              "properties": {
+                "x": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "y": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              }
+            }
+          }
+        },
+        "body": {
+          "type": "string",
+          "x-max-utf8-bytes": 8192,
+          "description": "Replacement comment text, at most 8 KiB of UTF-8.",
+          "example": "This paragraph now has a citation."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "open",
+            "resolved"
+          ],
+          "description": "Open or resolve the root comment thread.",
+          "example": "resolved"
+        }
+      }
+    },
+    "Error": {
+      "type": "object",
+      "description": "The standard error shape. Errors are always JSON.",
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "The set of error codes the API can return.",
+              "enum": [
+                "login_required",
+                "unauthorized",
+                "forbidden",
+                "external_sharing_disabled",
+                "document_not_found",
+                "workspace_not_found",
+                "workspace_id_conflict",
+                "org_not_found",
+                "project_not_found",
+                "proposal_not_found",
+                "api_key_not_found",
+                "annotation_not_found",
+                "annotation_resolved",
+                "asset_not_found",
+                "artifact_not_found",
+                "artifact_too_large",
+                "quota_exceeded",
+                "path_conflict",
+                "version_conflict",
+                "validation_error",
+                "rate_limited",
+                "claim_conflict",
+                "workspace_already_assigned",
+                "assignee_not_found",
+                "assignee_not_org_member",
+                "assignee_limit_exceeded",
+                "gone",
+                "billing_expired",
+                "org_members_only",
+                "attestation_required",
+                "rule_not_found",
+                "rule_adopted",
+                "approval_human_only",
+                "approval_not_open",
+                "approval_feedback_empty",
+                "reviewer_not_eligible",
+                "reviewer_roster_forbidden",
+                "reviewer_limit_exceeded",
+                "reviewer_request_not_found",
+                "reviewer_request_already_claimed",
+                "reviewer_already_responded",
+                "reviewer_claim_agent_only",
+                "pr_link_not_found",
+                "pr_link_exists",
+                "code_link_not_found",
+                "code_link_exists",
+                "dependency_not_found",
+                "dependency_exists",
+                "dependency_target_not_found",
+                "dependency_limit_exceeded",
+                "dependency_cycle",
+                "dependency_cross_org",
+                "internal_error"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "description": "A human-readable explanation."
+            },
+            "details": {
+              "type": "object",
+              "description": "Optional extra information about the error. The object is free-form\n(`additionalProperties: true`), with two schema-**typed** exceptions you\ncan rely on as real fields: `version_conflict` carries\n`details.current_version` (see `VersionConflictError`), the one an agent\nmust branch on to retry, and `validation_error` carries `details.fields`,\na map of field name → what's wrong (see `ValidationErrorBody`). The rest\nare documented, best-effort hints on the same free-form object — a\n`path_conflict` carries `details.doc_path`.\n",
+              "additionalProperties": true
+            }
+          }
+        }
+      }
+    }
+  }
+}

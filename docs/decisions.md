@@ -161,3 +161,12 @@ inventory: slug rules, human-prompt filtering, last-message extraction edge case
 active branch, rewind, compact, ancestor walk, ancestor pids, cwd scan, `ps` parsing,
 cross-platform cwd compare. Freeze the JSONL entry shape and our stdout contract; do not
 freeze Codex file layout or anything derived from process tables.
+
+## 10. The anchor stores the raw quote; context only ranks (2026-08-28)
+
+Found by a test in phase 1: reconstructing the quote from prefix/suffix is unsound — an
+empty suffix matches anywhere, so a deleted quote "resolved" to whatever now sits after the
+prefix. `plannotui.quote` holds the selected raw-source text and is the only thing the
+resolver searches for. The byte range is a shortcut (trusted only when it still holds the
+quote between its context); prefix/suffix and the block hint only rank occurrences. A quote
+that is not in the document is an orphan, always.
