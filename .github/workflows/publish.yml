@@ -11,6 +11,9 @@ on:
       tag:
         description: "release tag to publish, e.g. v0.2.0"
         required: true
+      ref:
+        description: "what to check out (default: the tag); use main only when the tag lacks publish metadata"
+        required: false
 
 permissions:
   contents: read
@@ -22,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.event.release.tag_name }}
+          ref: ${{ inputs.ref || inputs.tag || github.event.release.tag_name }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: tag matches Cargo.toml
