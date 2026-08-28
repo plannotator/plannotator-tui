@@ -4,6 +4,7 @@
 //! of feedback reads the other the same way: a title, a count line, then one `## N.` entry
 //! per annotation in document order, each quoting the text and carrying the note.
 
+use std::fmt::Write as _;
 use std::ops::Range;
 
 use plannotui_schema::{Annotation, Kind};
@@ -22,41 +23,43 @@ pub(crate) fn feedback(source: &str, subject: &str, entries: &[Entry<'_>]) -> St
     }
     let mut out = String::from("# Plan Feedback\n\n");
     let n = entries.len();
-    out.push_str(&format!(
+    let _ = write!(
+        out,
         "I've reviewed this {subject} and have {n} piece{} of feedback:\n\n",
         if n > 1 { "s" } else { "" }
-    ));
+    );
     for (i, entry) in entries.iter().enumerate() {
         let quoted = source.get(entry.range.clone()).unwrap_or("");
         let line_label = match entry.lines {
             (a, b) if a == b => format!("line {a}"),
             (a, b) => format!("lines {a}\u{2013}{b}"),
         };
-        out.push_str(&format!("## {}. ({line_label}) ", i + 1));
+        let _ = write!(out, "## {}. ({line_label}) ", i + 1);
         let body = entry.annotation.body.trim();
         match entry.annotation.anchor.kind() {
             Kind::Delete => {
                 out.push_str("Remove this\n");
                 out.push_str(&fenced(quoted));
-                out.push_str(&format!(
-                    "> {}\n",
+                let _ = writeln!(
+                    out,
+                    "> {}",
                     if body.is_empty() { "I don't want this in the plan." } else { body }
-                ));
+                );
             }
             Kind::LooksGood => {
-                out.push_str(&format!("[Looks good] Feedback on: \"{}\"\n", single_line(quoted)));
+                let _ = writeln!(out, "[Looks good] Feedback on: \"{}\"", single_line(quoted));
                 if !body.is_empty() {
-                    out.push_str(&format!("> {}\n", quote_lines(body)));
+                    let _ = writeln!(out, "> {}", quote_lines(body));
                 }
             }
             Kind::Comment => {
-                out.push_str(&format!("Feedback on: \"{}\"\n", single_line(quoted)));
-                out.push_str(&format!("> {}\n", quote_lines(body)));
+                let _ = writeln!(out, "Feedback on: \"{}\"", single_line(quoted));
+                let _ = writeln!(out, "> {}", quote_lines(body));
             }
         }
         for reply in &entry.annotation.replies {
             let who = reply.author.as_deref().unwrap_or("reply");
-            out.push_str(&format!("- **Reply ({who}):** {}\n", reply.body.replace('\n', "\n  ")));
+            let _ = writeln!(out, "- **Reply ({who}):** {}", reply.body.replace('\n', "\n  "));
         }
         out.push('\n');
     }
