@@ -122,7 +122,7 @@ command = "plannotator-tui.last"
 > `herdr plugin pane open --plugin plannotator-tui --entrypoint doc --placement split
 > --direction right --target-pane "$HERDR_PANE_ID" --focus --env PLANNOTATOR_TUI_FILE=<path>
 > --env PLANNOTATOR_TUI_DELIVER_TO="$HERDR_PANE_ID"`, and **end your turn**. The review arrives
-> as your next user message, as numbered feedback (`## 1. (line 12) Feedback on: "…"`).
+> as your next user message, as numbered annotations (`# Annotations on <file>`, `## Annotation 1 (line 12)`).
 > Address each item. Only when `HERDR_ENV=1`.
 
 The agent never waits on plannotator-tui and never parses its output. Feedback is a normal turn.

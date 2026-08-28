@@ -21,7 +21,10 @@ file is and ask them to review it.
    user message, as numbered feedback:
 
    ```
-   ## 1. (line 12) Feedback on: "Rotate the token on every…"
+   # Annotations on docs/plans/auth.md
+
+   ## Annotation 1 (line 12)
+   Comment on: "Rotate the token on every…"
    > Rotation on every privilege change will log people out…
    ```
 

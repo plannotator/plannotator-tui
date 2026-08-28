@@ -33,8 +33,9 @@ fn folder_export_includes_every_annotated_file() {
         .output()
         .expect("export runs");
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("## File: a.md"), "{text}");
-    assert!(text.contains("## File: b.md"), "{text}");
+    assert!(text.contains("# Annotations on a.md"), "{text}");
+    assert!(text.contains("# Annotations on b.md"), "{text}");
+    assert!(text.contains("## Annotation 1 (line 3)"), "{text}");
     assert!(text.contains("\"alpha\"") && text.contains("\"beta\""), "{text}");
     std::fs::remove_dir_all(&root).expect("cleanup");
 }

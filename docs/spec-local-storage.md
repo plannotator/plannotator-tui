@@ -84,7 +84,7 @@ This slice adds:
 - **Tree that stays out of the way.** `t` hides/shows it; auto-hides under 120 columns;
   `Tab` still reaches it.
 - **Folder-wide export.** `E` in the tree copies feedback for every annotated file, with
-  a `## File: <path>` heading per file.
+  a `# Annotations on <path>` block per file.
 
 ## Not built
 

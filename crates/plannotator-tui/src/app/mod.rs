@@ -314,10 +314,10 @@ impl App {
 
     /// The feedback document for every placed annotation of the open file.
     pub(crate) fn feedback(&self) -> String {
-        Self::feedback_for(&self.open)
+        Self::feedback_for(&self.open, &self.open.source.name)
     }
 
-    fn feedback_for(open: &Open) -> String {
+    fn feedback_for(open: &Open, name: &str) -> String {
         let source = &open.doc.source;
         let entries: Vec<export::Entry<'_>> = open
             .store
@@ -329,10 +329,10 @@ impl App {
                 range: p.range.clone(),
             })
             .collect();
-        export::feedback(source, "plan", &entries)
+        export::feedback(source, name, &entries)
     }
 
-    /// Feedback for every annotated file in the folder, one `## File:` section each.
+    /// Feedback for every annotated file in the folder, one `# Annotations on <path>` block each.
     pub(crate) fn folder_feedback(&self) -> Result<String> {
         let Some(tree) = &self.tree else { return Ok(self.feedback()) };
         let width = self.open.layout.width;
@@ -340,9 +340,9 @@ impl App {
         for row in tree.rows.iter().filter(|r| !r.is_dir && r.annotations > 0) {
             let open = Open::new(read_file(&row.path)?, width, &self.data_dir, &self.project)?;
             let relative = row.path.strip_prefix(tree.root()).unwrap_or(&row.path);
-            let _ = writeln!(out, "## File: {}\n\n{}", relative.display(), Self::feedback_for(&open));
+            let _ = writeln!(out, "{}", Self::feedback_for(&open, &relative.display().to_string()));
         }
-        Ok(if out.is_empty() { "No changes detected.".to_owned() } else { out })
+        Ok(if out.is_empty() { "No annotations.".to_owned() } else { out })
     }
 
     /// Paths of every annotated file in the folder, the open one included.
