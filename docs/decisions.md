@@ -90,3 +90,48 @@ one test. The Plannotator sources (`apps/hook/server/session-log.ts`, `codex-ses
 are the format reference — knowledge copied, not code. Decision 6 is unchanged: the
 message is a transient document source, delivery is a seam, and inside Herdr `deliver`
 may target the pane's agent.
+
+## 9. `plannotui last` design, from Plannotator's regressions (2026-08-28)
+
+From plannotator-ops, who own the reference implementation (a few hundred lines of
+extraction, several thousand of resolution machinery grown from regressions). Rules:
+
+**Detection is a chain, deterministic, no skill required.**
+1. Explicit override first: `PLANNOTUI_HOST` / `PLANNOTUI_SESSION` env vars (validated).
+2. Per-host env fingerprints: `CODEX_THREAD_ID` (authoritative for Codex), `OMPCODE`, etc.
+3. Claude Code: `~/.claude/projects/<slug(cwd)>/<session>.jsonl`, candidates ranked by
+   mtime, with an ancestor-directory walk for a cwd below the project root.
+4. Last resort only: ancestor-pid walk against registered sessions (Copilot sets nothing).
+   Parse `ps` output through pure functions so tests never spawn it.
+cwd alone and parent-process names are not identity. Nothing assumes a host sets anything.
+
+**Claude Code extraction.** Entries form a TREE via `parentUuid`. `/rewind` writes nothing;
+the newest entry is simply off the active branch. Walk from the newest uuid-bearing entry
+back to root; only entries on that path count. Then: assistant entries only; skip
+tool_use/tool_result, thinking blocks, partial/streaming entries, compaction summaries,
+and subagent sidechain transcripts. The spec phrase is **"the last assistant entry on the
+active branch that renders text"** — an assistant entry can be tool-calls-only.
+
+**Codex extraction.** `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`, thread id
+is the uuid in the filename. One thread spans MULTIPLE files: collect all files for the
+thread from day one, walk backward across them, and stop before the active turn (or you
+annotate the message being written). Reference: Plannotator issue #1367 / PR #1387.
+
+**Always offer a picker.** "Which message" is a UI problem as much as a resolution problem:
+show the last N rendered messages, default to the resolved one. The picker forgave every
+resolution bug Plannotator ever shipped.
+
+**Explicit input first.** `plannotui last --stdin` and the env overrides ship before any
+divination exists, so the tool is usable on day one and testable without a host.
+
+**Delivery contract is frozen before code.** Plain mode: feedback on stdout, **exit 0
+even on zero-resolve or handoff** (a non-zero exit from a Bash bang-prefix aborts the
+prompt before the model sees anything). `--json`: one machine-readable decision record on
+stdout, nothing else. Hook mode emits `{"decision":"block","reason":"<feedback>"}`. Plain
+markdown, no bracketed paste, no size framing. Hosts may run us under a shell timeout that
+kills the process group (OpenCode: 120 s); say so in skill text and surface submit failures.
+
+**Fixtures.** Freeze: Claude Code JSONL entry shape, our stdout/exit contract, Codex
+`response_item/message/output_text` entry shape. Do not freeze: Codex file layout,
+Copilot session-state layout, anything derived from process tables. Every parser is a pure
+function over a string; tests never touch the real `~/.claude` or `~/.codex`.
