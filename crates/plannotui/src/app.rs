@@ -11,7 +11,9 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use ratatui::Frame;
-use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
@@ -38,8 +40,11 @@ const BLOCK_BG: Color = Color::Indexed(236);
 const TOOLBAR_BG: Color = Color::Indexed(238);
 
 /// Toolbar items in display order: (glyph, label, key, kind).
-const TOOLBAR: [(&str, &str, char, Kind); 3] =
-    [("👍", "looks good", 'a', Kind::Approve), ("💬", "comment", 'c', Kind::Comment), ("✗", "delete", 'd', Kind::Delete)];
+const TOOLBAR: [(&str, &str, char, Kind); 3] = [
+    ("👍", "looks good", 'a', Kind::Approve),
+    ("💬", "comment", 'c', Kind::Comment),
+    ("✗", "delete", 'd', Kind::Delete),
+];
 
 #[derive(PartialEq, Eq)]
 enum Mode {
@@ -137,14 +142,19 @@ impl App {
 
     /// Annotate a whole block by index.
     pub fn add_comment(&mut self, block: usize, kind: Kind, body: String) -> Result<()> {
-        anyhow::ensure!(block < self.doc.blocks.len(), "block {block} out of range ({} blocks)", self.doc.blocks.len());
+        anyhow::ensure!(
+            block < self.doc.blocks.len(),
+            "block {block} out of range ({} blocks)",
+            self.doc.blocks.len()
+        );
         let range = self.doc.blocks[block].range.clone();
         self.store.add(&self.doc, block, range, kind, body)
     }
 
     /// Annotate the first occurrence of `quote` in the source.
     pub fn add_quote_comment(&mut self, quote: &str, kind: Kind, body: String) -> Result<()> {
-        let start = self.doc.source.find(quote).ok_or_else(|| anyhow::anyhow!("quote not found: {quote:?}"))?;
+        let start =
+            self.doc.source.find(quote).ok_or_else(|| anyhow::anyhow!("quote not found: {quote:?}"))?;
         let range = start..start + quote.len();
         let block = crate::comments::block_containing(&self.doc, start)
             .ok_or_else(|| anyhow::anyhow!("quote is not inside a block"))?;
@@ -178,7 +188,8 @@ impl App {
 
     /// Simulate a finished drag over `quote` (first occurrence), for `--snapshot`.
     pub fn select_quote_for_snapshot(&mut self, quote: &str) -> Result<()> {
-        let start = self.doc.source.find(quote).ok_or_else(|| anyhow::anyhow!("quote not found: {quote:?}"))?;
+        let start =
+            self.doc.source.find(quote).ok_or_else(|| anyhow::anyhow!("quote not found: {quote:?}"))?;
         let end = start + quote.len();
         let mut first: Option<(usize, usize)> = None;
         let mut last: Option<(usize, usize)> = None;
@@ -209,10 +220,12 @@ impl App {
 
     pub fn handle_event(&mut self, event: Event) -> Result<()> {
         match event {
-            Event::Key(key) if key.kind != ratatui::crossterm::event::KeyEventKind::Release => match self.mode {
-                Mode::Browse => self.browse_key(key)?,
-                Mode::Compose => self.compose_key(key, &event)?,
-            },
+            Event::Key(key) if key.kind != ratatui::crossterm::event::KeyEventKind::Release => {
+                match self.mode {
+                    Mode::Browse => self.browse_key(key)?,
+                    Mode::Compose => self.compose_key(key, &event)?,
+                }
+            }
             Event::Mouse(mouse) if self.mode == Mode::Browse => self.mouse(mouse)?,
             _ => {}
         }
@@ -239,10 +252,16 @@ impl App {
             }
             (KeyCode::Char('j'), _) | (KeyCode::Down, _) => self.select_block(self.selected + 1),
             (KeyCode::Char('k'), _) | (KeyCode::Up, _) => self.select_block(self.selected.saturating_sub(1)),
-            (KeyCode::Char('d'), KeyModifiers::CONTROL) | (KeyCode::PageDown, _) => self.scroll_by(page as i64 / 2),
-            (KeyCode::Char('u'), KeyModifiers::CONTROL) | (KeyCode::PageUp, _) => self.scroll_by(-(page as i64) / 2),
+            (KeyCode::Char('d'), KeyModifiers::CONTROL) | (KeyCode::PageDown, _) => {
+                self.scroll_by(page as i64 / 2)
+            }
+            (KeyCode::Char('u'), KeyModifiers::CONTROL) | (KeyCode::PageUp, _) => {
+                self.scroll_by(-(page as i64) / 2)
+            }
             (KeyCode::Char('g'), _) | (KeyCode::Home, _) => self.select_block(0),
-            (KeyCode::Char('G'), _) | (KeyCode::End, _) => self.select_block(self.doc.blocks.len().saturating_sub(1)),
+            (KeyCode::Char('G'), _) | (KeyCode::End, _) => {
+                self.select_block(self.doc.blocks.len().saturating_sub(1))
+            }
             (KeyCode::Char('c'), _) | (KeyCode::Enter, _) => {
                 // No selection: comment on the whole selected block.
                 let block = self.selected;
@@ -351,7 +370,10 @@ impl App {
         let doc = self.geometry.doc;
         let inside = column >= doc.x && column < doc.right() && row >= doc.y && row < doc.bottom();
         if !inside && !clamp {
-            let in_gutter = column >= doc.x.saturating_sub(GUTTER) && column < doc.x && row >= doc.y && row < doc.bottom();
+            let in_gutter = column >= doc.x.saturating_sub(GUTTER)
+                && column < doc.x
+                && row >= doc.y
+                && row < doc.bottom();
             if !in_gutter {
                 return None;
             }
@@ -376,7 +398,8 @@ impl App {
         for row in a.0..=b.0 {
             let Some(r) = self.layout.row(row) else { continue };
             let cols = sel.columns_on(row, r.cells.len()).unwrap_or(0..0);
-            for offset in r.cells[cols.start.min(r.cells.len())..cols.end.min(r.cells.len())].iter().flatten() {
+            for offset in r.cells[cols.start.min(r.cells.len())..cols.end.min(r.cells.len())].iter().flatten()
+            {
                 lo = lo.min(*offset);
                 hi = hi.max(*offset);
             }
@@ -448,8 +471,11 @@ impl App {
         let [header, body, footer] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)]).areas(area);
 
-        let rail_width =
-            if area.width >= RAIL_MIN_TOTAL_WIDTH { (area.width * 3 / 10).clamp(RAIL_MIN_WIDTH, RAIL_WIDTH) } else { 0 };
+        let rail_width = if area.width >= RAIL_MIN_TOTAL_WIDTH {
+            (area.width * 3 / 10).clamp(RAIL_MIN_WIDTH, RAIL_WIDTH)
+        } else {
+            0
+        };
         let [gutter, doc, _gap, rail] = Layout::horizontal([
             Constraint::Length(GUTTER),
             Constraint::Min(20),
@@ -480,7 +506,10 @@ impl App {
     }
 
     fn draw_header(&self, frame: &mut Frame, area: Rect) {
-        let title = Line::from(vec![Span::raw(" ").dim(), Span::styled(self.path.display().to_string(), Style::new().bold())]);
+        let title = Line::from(vec![
+            Span::raw(" ").dim(),
+            Span::styled(self.path.display().to_string(), Style::new().bold()),
+        ]);
         let right = Line::from(Span::raw("plannotui ").dim()).right_aligned();
         frame.render_widget(Paragraph::new(title), area);
         frame.render_widget(Paragraph::new(right), area);
@@ -499,24 +528,32 @@ impl App {
             buf.set_line(doc.x, screen_y, &row.line, doc.width);
 
             if block == self.selected && !text_selection_active && self.pending.is_none() {
-                buf.set_style(Rect { x: doc.x, y: screen_y, width: doc.width, height: 1 }, Style::new().bg(BLOCK_BG));
+                buf.set_style(
+                    Rect { x: doc.x, y: screen_y, width: doc.width, height: 1 },
+                    Style::new().bg(BLOCK_BG),
+                );
             }
 
             let mut row_has_annotation = false;
             for (col, cell) in row.cells.iter().enumerate().take(doc.width as usize) {
                 let Some(offset) = cell else { continue };
                 // Delete wins over approve wins over comment when annotations overlap.
-                let kind = annotations.iter().filter(|(r, _)| r.contains(offset)).map(|(_, k)| *k).max_by_key(|k| match k {
-                    Kind::Comment => 0,
-                    Kind::Approve => 1,
-                    Kind::Delete => 2,
-                });
+                let kind =
+                    annotations.iter().filter(|(r, _)| r.contains(offset)).map(|(_, k)| *k).max_by_key(|k| {
+                        match k {
+                            Kind::Comment => 0,
+                            Kind::Approve => 1,
+                            Kind::Delete => 2,
+                        }
+                    });
                 let Some(kind) = kind else { continue };
                 row_has_annotation = true;
                 let style = match kind {
                     Kind::Comment => Style::new().bg(COMMENT_BG),
                     Kind::Approve => Style::new().bg(APPROVE_BG),
-                    Kind::Delete => Style::new().fg(Color::Red).add_modifier(Modifier::CROSSED_OUT | Modifier::DIM),
+                    Kind::Delete => {
+                        Style::new().fg(Color::Red).add_modifier(Modifier::CROSSED_OUT | Modifier::DIM)
+                    }
                 };
                 buf.set_style(Rect { x: doc.x + col as u16, y: screen_y, width: 1, height: 1 }, style);
             }
@@ -581,7 +618,12 @@ impl App {
                 Kind::Comment => Color::Yellow,
                 Kind::Delete => Color::Red,
             };
-            buf.set_span(x, rect.y, &Span::styled(label.as_str(), Style::new().fg(color).bg(TOOLBAR_BG).bold()), w);
+            buf.set_span(
+                x,
+                rect.y,
+                &Span::styled(label.as_str(), Style::new().fg(color).bg(TOOLBAR_BG).bold()),
+                w,
+            );
             spans[i] = x..x + w;
             x += w;
         }
@@ -601,7 +643,10 @@ impl App {
         let width = inner.width.saturating_sub(1) as usize;
         let scroll = self.input.visual_scroll(width);
         let value: String = self.input.value().chars().skip(scroll).collect();
-        frame.render_widget(Paragraph::new(Line::from(value)), Rect { x: inner.x + 1, width: inner.width.saturating_sub(1), ..inner });
+        frame.render_widget(
+            Paragraph::new(Line::from(value)),
+            Rect { x: inner.x + 1, width: inner.width.saturating_sub(1), ..inner },
+        );
         let cursor_x = inner.x + 1 + (self.input.visual_cursor().saturating_sub(scroll)) as u16;
         frame.set_cursor_position((cursor_x.min(inner.right().saturating_sub(1)), inner.y));
     }
@@ -619,9 +664,15 @@ impl App {
                 let anchored_y = rail.y + anchor_row.saturating_sub(self.scroll) as u16;
                 let y = anchored_y.max(next_y);
                 let inner_width = rail.width.saturating_sub(4) as usize;
-                let body = if comment.body.is_empty() { comment.kind.label().to_string() } else { comment.body.clone() };
-                let lines: Vec<Line<'static>> =
-                    wrap_line(&Line::from(body.as_str()), &[], inner_width).into_iter().map(|r| r.line).collect();
+                let body = if comment.body.is_empty() {
+                    comment.kind.label().to_string()
+                } else {
+                    comment.body.clone()
+                };
+                let lines: Vec<Line<'static>> = wrap_line(&Line::from(body.as_str()), &[], inner_width)
+                    .into_iter()
+                    .map(|r| r.line)
+                    .collect();
                 let height = (lines.len() as u16 + 2).min(rail.bottom().saturating_sub(y));
                 if height < 3 {
                     break;
@@ -631,16 +682,24 @@ impl App {
                     Kind::Approve => Color::Green,
                     Kind::Delete => Color::Red,
                 };
-                let border = if index == self.selected { Style::new().fg(accent) } else { Style::new().fg(Color::DarkGray) };
+                let border = if index == self.selected {
+                    Style::new().fg(accent)
+                } else {
+                    Style::new().fg(Color::DarkGray)
+                };
                 let bubble = Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(border)
-                    .title(Span::styled(format!(" {} #{} ", comment.kind.glyph(), comment.id), Style::new().fg(accent)));
+                    .title(Span::styled(
+                        format!(" {} #{} ", comment.kind.glyph(), comment.id),
+                        Style::new().fg(accent),
+                    ));
                 let rect = Rect { x: rail.x, y, width: rail.width, height };
                 let inner = bubble.inner(rect);
                 frame.render_widget(bubble, rect);
-                let body_style = if comment.body.is_empty() { Style::new().dim().italic() } else { Style::new() };
+                let body_style =
+                    if comment.body.is_empty() { Style::new().dim().italic() } else { Style::new() };
                 frame.render_widget(
                     Paragraph::new(lines).style(body_style),
                     Rect { x: inner.x + 1, width: inner.width.saturating_sub(1), ..inner },
@@ -676,7 +735,8 @@ impl App {
         } else {
             "drag to select · j/k block · c comment block · x clear block · r reload · q quit "
         };
-        let [left_area, right_area] = Layout::horizontal([Constraint::Min(10), Constraint::Length(help.len() as u16)]).areas(area);
+        let [left_area, right_area] =
+            Layout::horizontal([Constraint::Min(10), Constraint::Length(help.len() as u16)]).areas(area);
         let left = Line::from(Span::raw(format!(" {}", parts.join(" · "))).dim());
         let right = Line::from(Span::raw(help).dim()).right_aligned();
         frame.render_widget(Paragraph::new(left), left_area);
@@ -728,4 +788,3 @@ mod tests {
         assert_eq!(sel.columns_on(5, 80), Some(0..3));
     }
 }
-

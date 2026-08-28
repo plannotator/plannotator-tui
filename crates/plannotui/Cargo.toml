@@ -21,3 +21,6 @@ pulldown-cmark = { version = "0.13.4", default-features = false }
 ratatui = "0.30"
 tui-markdown = "0.3.9"
 tui-input = "0.15"
+
+[lints]
+workspace = true

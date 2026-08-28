@@ -1,0 +1,3 @@
+msrv = "1.96"
+too-many-arguments-threshold = 7
+too-many-lines-threshold = 120

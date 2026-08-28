@@ -63,7 +63,10 @@ pub struct Comment {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resolution {
     /// Absolute source byte range inside `block`.
-    Range { block: usize, range: Range<usize> },
+    Range {
+        block: usize,
+        range: Range<usize>,
+    },
     Orphan,
 }
 
@@ -98,9 +101,11 @@ impl Store {
     pub fn load(doc_path: &Path, doc: &Document) -> Result<Self> {
         let path = Self::sidecar_path(doc_path);
         let comments = match std::fs::read_to_string(&path) {
-            Ok(json) => serde_json::from_str::<FileFormat>(&json)
-                .with_context(|| format!("parsing {}", path.display()))?
-                .comments,
+            Ok(json) => {
+                serde_json::from_str::<FileFormat>(&json)
+                    .with_context(|| format!("parsing {}", path.display()))?
+                    .comments
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
         };
@@ -118,7 +123,14 @@ impl Store {
     }
 
     /// Annotate an absolute source range that starts inside `block`.
-    pub fn add(&mut self, doc: &Document, block: usize, range: Range<usize>, kind: Kind, body: String) -> Result<()> {
+    pub fn add(
+        &mut self,
+        doc: &Document,
+        block: usize,
+        range: Range<usize>,
+        kind: Kind,
+        body: String,
+    ) -> Result<()> {
         let anchor = make_anchor(doc, block, &range);
         let id = self.comments.iter().map(|c| c.id).max().unwrap_or(0) + 1;
         let created_at = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
@@ -175,8 +187,10 @@ impl Store {
 
 fn make_anchor(doc: &Document, block: usize, range: &Range<usize>) -> Anchor {
     let src = &doc.source;
-    let prefix_start = src[..range.start].char_indices().rev().nth(CONTEXT_CHARS - 1).map(|(i, _)| i).unwrap_or(0);
-    let suffix_end = src[range.end..].char_indices().nth(CONTEXT_CHARS).map(|(i, _)| range.end + i).unwrap_or(src.len());
+    let prefix_start =
+        src[..range.start].char_indices().rev().nth(CONTEXT_CHARS - 1).map(|(i, _)| i).unwrap_or(0);
+    let suffix_end =
+        src[range.end..].char_indices().nth(CONTEXT_CHARS).map(|(i, _)| range.end + i).unwrap_or(src.len());
     Anchor {
         quote: src[range.clone()].to_string(),
         prefix: src[prefix_start..range.start].to_string(),
@@ -224,7 +238,8 @@ fn best_occurrence(doc: &Document, anchor: &Anchor, needle: &str) -> Option<Reso
     let mut best: Option<((u8, usize), usize, Range<usize>)> = None;
     for range in find_all(src, needle) {
         let Some(block) = block_containing(doc, range.start) else { continue };
-        let score = src[..range.start].ends_with(&anchor.prefix) as u8 + src[range.end..].starts_with(&anchor.suffix) as u8;
+        let score = src[..range.start].ends_with(&anchor.prefix) as u8
+            + src[range.end..].starts_with(&anchor.suffix) as u8;
         let distance = (block as i64 - anchor.block_hint as i64).unsigned_abs() as usize;
         let key = (score, usize::MAX - distance);
         if best.as_ref().is_none_or(|(k, _, _)| key > *k) {
@@ -265,7 +280,10 @@ mod tests {
         let doc = Document::parse("# Title\n\nfirst para\n\nsecond para\n".into());
         let anchor = make_anchor(&doc, 1, &range_of(&doc, "para\n\nsecond"));
         let edited = Document::parse("intro\n\n# Title\n\nfirst para\n\nsecond para\n".into());
-        assert_eq!(resolve(&edited, &anchor), Resolution::Range { block: 2, range: range_of(&edited, "para\n\nsecond") });
+        assert_eq!(
+            resolve(&edited, &anchor),
+            Resolution::Range { block: 2, range: range_of(&edited, "para\n\nsecond") }
+        );
     }
 
     #[test]

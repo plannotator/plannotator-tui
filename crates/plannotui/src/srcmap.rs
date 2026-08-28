@@ -15,7 +15,8 @@ pub type LineOffsets = Vec<Option<usize>>;
 /// byte sits at absolute offset `base`.
 pub fn align(rendered_lines: &[String], source: &str, base: usize) -> Vec<LineOffsets> {
     let rendered: Vec<char> = rendered_lines.join("\n").chars().collect();
-    let (src_chars, src_bytes): (Vec<char>, Vec<usize>) = source.char_indices().map(|(i, c)| (c, base + i)).unzip();
+    let (src_chars, src_bytes): (Vec<char>, Vec<usize>) =
+        source.char_indices().map(|(i, c)| (c, base + i)).unzip();
 
     let mut flat: Vec<Option<usize>> = vec![None; rendered.len()];
     for op in capture_diff_slices(Algorithm::Myers, &rendered, &src_chars) {

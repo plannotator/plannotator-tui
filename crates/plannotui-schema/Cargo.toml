@@ -9,3 +9,6 @@ description = "Annotation and anchor types shared by plannotui and Plannotator W
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+
+[lints]
+workspace = true

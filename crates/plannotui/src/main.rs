@@ -35,15 +35,19 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Some("--add-comment") => {
-            let path = args.get(1).map(PathBuf::from).context("usage: plannotui --add-comment <file.md> <block> <text>")?;
+            let path = args
+                .get(1)
+                .map(PathBuf::from)
+                .context("usage: plannotui --add-comment <file.md> <block> <text>")?;
             let block: usize = args.get(2).and_then(|s| s.parse().ok()).context("block index")?;
             let body = args.get(3).cloned().context("comment text")?;
             let mut app = App::open(path, 100)?;
             return app.add_comment(block, comments::Kind::Comment, body);
         }
         Some("--add-quote-comment") => {
-            let path =
-                args.get(1).map(PathBuf::from).context("usage: plannotui --add-quote-comment <file.md> <quote> <text> [comment|approve|delete]")?;
+            let path = args.get(1).map(PathBuf::from).context(
+                "usage: plannotui --add-quote-comment <file.md> <quote> <text> [comment|approve|delete]",
+            )?;
             let quote = args.get(2).cloned().context("quote")?;
             let body = args.get(3).cloned().context("comment text")?;
             let kind = match args.get(4).map(String::as_str) {
@@ -55,7 +59,10 @@ fn main() -> Result<()> {
             return app.add_quote_comment(&quote, kind, body);
         }
         Some("--snapshot") => {
-            let path = args.get(1).map(PathBuf::from).context("usage: plannotui --snapshot <file.md> [cols rows scroll] [select-quote]")?;
+            let path = args
+                .get(1)
+                .map(PathBuf::from)
+                .context("usage: plannotui --snapshot <file.md> [cols rows scroll] [select-quote]")?;
             let cols: u16 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(140);
             let rows: u16 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(40);
             let scroll: i64 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -99,7 +106,13 @@ fn bench(path: PathBuf) -> Result<()> {
     }
     let lookup_us = t.elapsed().as_secs_f64() * 1e6 / (layout.total_rows / 7).max(1) as f64;
 
-    let mapped: usize = layout.blocks.iter().flat_map(|b| b.rows.iter()).flat_map(|r| r.cells.iter()).filter(|c| c.is_some()).count();
+    let mapped: usize = layout
+        .blocks
+        .iter()
+        .flat_map(|b| b.rows.iter())
+        .flat_map(|r| r.cells.iter())
+        .filter(|c| c.is_some())
+        .count();
     let cells: usize = layout.blocks.iter().flat_map(|b| b.rows.iter()).map(|r| r.cells.len()).sum();
 
     println!("{}: {} bytes, {} blocks", path.display(), bytes, doc.blocks.len());
