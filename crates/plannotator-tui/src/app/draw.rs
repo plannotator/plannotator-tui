@@ -66,7 +66,14 @@ impl App {
             Constraint::Length(rail_width),
         ])
         .areas(body);
-        self.geometry = Geometry { tree, doc, toolbar: None, bubbles: Vec::new(), send_button: None };
+        self.geometry = Geometry {
+            tree,
+            doc,
+            toolbar: None,
+            bubbles: Vec::new(),
+            send_button: None,
+            pick_rows: Vec::new(),
+        };
 
         if self.open.layout.width != usize::from(doc.width) {
             self.open.layout.reflow(usize::from(doc.width));
@@ -87,6 +94,7 @@ impl App {
             Mode::Compose => self.draw_compose(frame, " comment · enter saves · esc cancels "),
             Mode::Edit(_) => self.draw_compose(frame, " edit · enter saves · esc cancels "),
             Mode::Browse if self.pending.is_some() => self.draw_toolbar(frame),
+            Mode::Pick => self.draw_pick(frame),
             Mode::Browse | Mode::ConfirmQuit => {}
         }
     }

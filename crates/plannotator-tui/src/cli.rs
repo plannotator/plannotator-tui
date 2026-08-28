@@ -48,7 +48,7 @@ fn open_file(path: &PathBuf) -> Result<DocumentSource> {
 /// A file opens on its own; a folder opens in folder mode on its first markdown file.
 /// Interactive runs send to the Herdr agent pane named by the environment, else the
 /// clipboard; headless runs send nowhere.
-fn delivery(interactive: bool) -> Box<dyn Delivery> {
+pub(crate) fn delivery(interactive: bool) -> Box<dyn Delivery> {
     if !interactive {
         return Box::new(Discard);
     }
@@ -183,7 +183,7 @@ fn herdr_command(args: &[String]) -> Result<()> {
 fn herdr_pane() -> Result<()> {
     let env = HerdrEnv::from_env();
     if let Some(pid) = env.message_pid {
-        return crate::last::run(crate::last::LastOptions {
+        return crate::last::run(&crate::last::LastOptions {
             host: env.host,
             pid: Some(pid),
             pick: 25,
@@ -212,14 +212,19 @@ fn last_command(args: &[String]) -> Result<()> {
             other => anyhow::bail!("unknown argument {other}\n{USAGE}"),
         }
     }
-    crate::last::run(options)
+    crate::last::run(&options)
 }
 
 fn interactive(path: &PathBuf) -> Result<()> {
+    run_ui(|width| open_app(path, width, true))
+}
+
+/// Own the terminal for one app: `build` gets the document width the screen allows.
+pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
     let mut terminal = ratatui::init();
     execute!(stdout(), EnableMouseCapture)?;
     let width = doc_width(terminal.size().map_or(120, |s| s.width));
-    let result = open_app(path, width, true).and_then(|app| event_loop(&mut terminal, app));
+    let result = build(width).and_then(|app| event_loop(&mut terminal, app));
     let _ = execute!(stdout(), DisableMouseCapture);
     ratatui::restore();
     result
