@@ -49,22 +49,25 @@ pub(crate) fn agent_pid(process_info_json: &str) -> Option<(u32, String)> {
     let pid_of = |p: &serde_json::Value| p.get("pid").and_then(serde_json::Value::as_u64).map(|n| n as u32);
     for process in processes {
         let name = name_of(process);
-        if let Some(host) = host_for_process(&name) {
+        if let Some(host) = known_host(&name) {
             return pid_of(process).map(|pid| (pid, host.to_owned()));
         }
     }
+    // No process we can read: report the group leader under its own name, so the pane can
+    // say "<name> is not supported" and fall back to the screen.
     let leader = info.get("foreground_process_group_id").and_then(serde_json::Value::as_u64)?;
-    processes
-        .iter()
-        .find(|p| pid_of(p) == Some(leader as u32))
-        .and_then(pid_of)
-        .map(|pid| (pid, "claude".to_owned()))
+    let process = processes.iter().find(|p| pid_of(p) == Some(leader as u32))?;
+    let name = name_of(process);
+    let host = name.rsplit('/').next().unwrap_or(&name).to_owned();
+    pid_of(process).map(|pid| (pid, if host.is_empty() { "claude".to_owned() } else { host }))
 }
 
-fn host_for_process(name: &str) -> Option<&'static str> {
+/// Agents whose transcripts the hosts crate can read, by process name.
+fn known_host(name: &str) -> Option<&'static str> {
     match name.rsplit('/').next().unwrap_or(name) {
         "claude" => Some("claude"),
         "codex" => Some("codex"),
+        "pi" => Some("pi"),
         _ => None,
     }
 }
@@ -207,6 +210,7 @@ pub(crate) fn argv(launch: &Launch) -> Vec<String> {
         Some((pid, host)) => {
             out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_MESSAGE_PID={pid}")]);
             out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_HOST={host}")]);
+            out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_CWD={}", launch.cwd.display())]);
         }
         None => out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_FILE={}", launch.file.display())]),
     }

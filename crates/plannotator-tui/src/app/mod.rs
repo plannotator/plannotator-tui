@@ -260,6 +260,10 @@ impl App {
         Ok(())
     }
 
+    pub(crate) fn set_status(&mut self, status: String) {
+        self.status = Some(status);
+    }
+
     pub(crate) fn record_frame(&mut self, ms: f64) {
         self.frame_ms = if self.frame_ms == 0.0 { ms } else { self.frame_ms * 0.9 + ms * 0.1 };
         self.frame_max_ms = self.frame_max_ms.max(ms);
