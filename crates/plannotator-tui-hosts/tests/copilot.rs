@@ -67,7 +67,7 @@ fn always_copilot(_: u32) -> bool {
 
 fn age(dir: &Path, secs: u64) {
     let when = SystemTime::now() - Duration::from_secs(secs);
-    File::open(dir).expect("open").set_modified(when).expect("mtime");
+    open_dir_for_mtime(dir).expect("open").set_modified(when).expect("mtime");
 }
 
 #[test]
