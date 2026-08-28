@@ -182,17 +182,16 @@ fn herdr_command(args: &[String]) -> Result<()> {
 /// The pane entrypoint: Herdr runs this in the opened pane; the environment says what to show.
 fn herdr_pane() -> Result<()> {
     let env = HerdrEnv::from_env();
-    let result = match env.message_pid {
-        Some(pid) => crate::last::run(&crate::last::LastOptions {
+    let result = if let Some(pid) = env.message_pid {
+        crate::last::run(&crate::last::LastOptions {
             host: env.host.clone(),
             pid: Some(pid),
             pick: 25,
             ..crate::last::LastOptions::default()
-        }),
-        None => {
-            let path = env.file.clone().unwrap_or(std::env::current_dir().context("current directory")?);
-            interactive(&path)
-        }
+        })
+    } else {
+        let path = env.file.clone().unwrap_or(std::env::current_dir().context("current directory")?);
+        interactive(&path)
     };
     // The pane closes when we exit; an error that flashes by is an error nobody can read.
     if let Err(err) = &result {
