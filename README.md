@@ -27,6 +27,11 @@ bind a key:
 key = "prefix+a"
 type = "plugin_action"
 command = "plannotator-tui.open"
+
+[[keys.command]]
+key = "prefix+shift+d"
+type = "plugin_action"
+command = "plannotator-tui.last"
 ```
 
 `prefix+a` opens the focused pane's folder for review; Ctrl-click on a `file://…md` link an

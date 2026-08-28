@@ -30,7 +30,10 @@ const USAGE: &str = "usage:
   plannotator-tui --snapshot <file.md> [cols rows scroll] [select-quote]
   plannotator-tui config
   plannotator-tui --version
-  plannotator-tui herdr open [file.md | folder] [--placement overlay|split|popup] [--deliver-to <pane>]";
+  plannotator-tui herdr open [file.md | folder] [--placement overlay|split|popup] [--deliver-to <pane>]
+  plannotator-tui herdr last [--placement P] [--deliver-to <pane>]
+  plannotator-tui herdr pane
+  plannotator-tui last [--host claude|codex] [--pid N] [--session <transcript>] [--stdin] [--print] [--pick N]";
 
 /// Width the document gets when nothing else is known: gutter + rail + gap subtracted.
 fn doc_width(cols: u16) -> usize {
@@ -118,6 +121,7 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
         }
         Some("config") => show_config(),
         Some("herdr") => herdr_command(args.get(1..).unwrap_or_default()),
+        Some("last") => last_command(args.get(1..).unwrap_or_default()),
         Some(flag) if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{USAGE}"),
         Some(_) => interactive(&path(0)?),
         None => anyhow::bail!(USAGE),
@@ -137,8 +141,14 @@ fn show_config() -> Result<()> {
 
 /// `plannotator-tui herdr open [PATH] [--placement P] [--deliver-to PANE]`.
 fn herdr_command(args: &[String]) -> Result<()> {
-    use crate::herdr::launch::{OpenArgs, plan, run};
-    let Some("open") = args.first().map(String::as_str) else { anyhow::bail!(USAGE) };
+    use crate::herdr::launch::{OpenArgs, plan, plan_last, process_info, run};
+    let sub = args.first().map(String::as_str);
+    if sub == Some("pane") {
+        return herdr_pane();
+    }
+    if !matches!(sub, Some("open" | "last")) {
+        anyhow::bail!(USAGE);
+    }
     let mut open = OpenArgs::default();
     let mut rest = args.get(1..).unwrap_or_default().iter();
     while let Some(arg) = rest.next() {
@@ -158,8 +168,51 @@ fn herdr_command(args: &[String]) -> Result<()> {
     let env = HerdrEnv::from_env();
     let config = Config::load()?;
     let cwd = std::env::current_dir().context("current directory")?;
-    let launch = plan(&env, &config, open, &cwd)?;
+    let launch = if sub == Some("last") {
+        let probe = plan(&env, &config, OpenArgs { path: None, ..open.clone() }, &cwd)?;
+        let pane = probe.deliver.as_ref().map(|t| t.pane.clone()).or(probe.target_pane);
+        let pane = pane.context("no agent pane to read: not focused on one and no --deliver-to")?;
+        plan_last(&env, &config, open, &cwd, &process_info(&env, &pane)?)?
+    } else {
+        plan(&env, &config, open, &cwd)?
+    };
     run(&env, &launch)
+}
+
+/// The pane entrypoint: Herdr runs this in the opened pane; the environment says what to show.
+fn herdr_pane() -> Result<()> {
+    let env = HerdrEnv::from_env();
+    if let Some(pid) = env.message_pid {
+        return crate::last::run(crate::last::LastOptions {
+            host: env.host,
+            pid: Some(pid),
+            pick: 25,
+            ..crate::last::LastOptions::default()
+        });
+    }
+    let path = env.file.unwrap_or(std::env::current_dir().context("current directory")?);
+    interactive(&path)
+}
+
+/// `plannotator-tui last [--host H] [--pid N] [--session PATH] [--stdin] [--print] [--pick N]`.
+fn last_command(args: &[String]) -> Result<()> {
+    use crate::last::LastOptions;
+    let mut options = LastOptions { pick: 25, ..LastOptions::default() };
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--host" => options.host = Some(rest.next().context("--host needs a value")?.clone()),
+            "--pid" => options.pid = Some(rest.next().context("--pid needs a value")?.parse()?),
+            "--session" => {
+                options.session = Some(PathBuf::from(rest.next().context("--session needs a value")?));
+            }
+            "--stdin" => options.stdin = true,
+            "--print" => options.print = true,
+            "--pick" => options.pick = rest.next().context("--pick needs a value")?.parse()?,
+            other => anyhow::bail!("unknown argument {other}\n{USAGE}"),
+        }
+    }
+    crate::last::run(options)
 }
 
 fn interactive(path: &PathBuf) -> Result<()> {

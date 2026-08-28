@@ -160,3 +160,41 @@ fn the_plugin_id_comes_from_the_environment() {
     let plugin = args.iter().position(|a| a == "--plugin").and_then(|i| args.get(i + 1));
     assert_eq!(plugin.map(String::as_str), Some("annotate"));
 }
+
+const PROCESS_INFO: &str = r#"{"id":"cli:pane:process_info","result":{"process_info":{"foreground_process_group_id":91279,"foreground_processes":[{"argv":["claude"],"argv0":"claude","cmdline":"claude","cwd":"/w","name":"claude","pid":91279}],"pane_id":"w1:p1","shell_pid":84211},"type":"pane_process_info"}}"#;
+
+#[test]
+fn the_agent_pid_is_the_named_agent_process_else_the_group_leader() {
+    assert_eq!(agent_pid(PROCESS_INFO), Some((91279, "claude".into())));
+    let leader_only = PROCESS_INFO.replace(r#""name":"claude""#, r#""name":"node""#);
+    assert_eq!(
+        agent_pid(&leader_only),
+        Some((91279, "claude".into())),
+        "unknown name → leader, host default"
+    );
+    assert_eq!(agent_pid("{}"), None);
+}
+
+#[test]
+fn a_last_launch_carries_the_pid_and_host_instead_of_a_file() {
+    let context = HerdrContext {
+        focused_pane_id: Some("w1:p1".into()),
+        focused_pane_agent: Some("claude".into()),
+        focused_pane_cwd: Some("/w".into()),
+        ..HerdrContext::default()
+    };
+    let launch = plan_last(
+        &env(None, Some(context)),
+        &Config::default(),
+        OpenArgs::default(),
+        Path::new("/"),
+        PROCESS_INFO,
+    )
+    .expect("plans");
+    assert_eq!(launch.message, Some((91279, "claude".into())));
+    assert_eq!(launch.deliver.as_ref().map(|t| t.pane.as_str()), Some("w1:p1"));
+    let args = argv(&launch);
+    assert!(args.contains(&"PLANNOTATOR_TUI_MESSAGE_PID=91279".to_owned()));
+    assert!(args.contains(&"PLANNOTATOR_TUI_HOST=claude".to_owned()));
+    assert!(!args.iter().any(|a| a.starts_with("PLANNOTATOR_TUI_FILE=")));
+}
