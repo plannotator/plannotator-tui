@@ -36,9 +36,23 @@ impl CopilotHome {
             File::create(dir.join(format!("inuse.{pid}.lock"))).expect("lock");
         }
         let when = SystemTime::now() - Duration::from_secs(age_secs);
-        File::open(&dir).expect("open").set_modified(when).expect("mtime");
+        open_dir_for_mtime(&dir).expect("open").set_modified(when).expect("mtime");
         dir
     }
+}
+
+/// A handle that can change a directory's mtime. Windows needs write access and
+/// FILE_FLAG_BACKUP_SEMANTICS to open a directory at all.
+#[cfg(windows)]
+fn open_dir_for_mtime(dir: &Path) -> std::io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    fs::OpenOptions::new().write(true).custom_flags(FILE_FLAG_BACKUP_SEMANTICS).open(dir)
+}
+
+#[cfg(not(windows))]
+fn open_dir_for_mtime(dir: &Path) -> std::io::Result<File> {
+    File::open(dir)
 }
 
 impl Drop for CopilotHome {
