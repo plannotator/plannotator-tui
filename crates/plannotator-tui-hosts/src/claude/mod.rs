@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use crate::SessionMeta;
 
 pub use ladder::find_transcript;
-pub use messages::parse_messages;
+pub use messages::{parse_messages, parse_messages_file_order};
 
 /// Parse one `sessions/<pid>.json`. Fields beyond the four we use are ignored.
 pub fn parse_session_meta(json: &str) -> Option<SessionMeta> {

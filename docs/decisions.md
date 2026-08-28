@@ -275,3 +275,16 @@ Peer-reviewed against Plannotator's source at main by the plannotator-ops sessio
 exclusion, the `<task-notification>` prefix, the explicit Codex subagent skip, and
 multi-rollout grouping are stricter than Plannotator (which has an open bug, #1367, on the
 last one). Keep them; do not regress to match.
+
+Reference survey (plannotator-ops, 2026-08-28, Plannotator at main): only Claude Code,
+Codex, Copilot CLI and Droid have on-disk transcript readers there. Copilot sessions
+(`~/.copilot/session-state/<uuid>/`) are found through `inuse.<pid>.lock` files matched
+against the ancestor pids — in Herdr the pane's pid is a direct hit — with a cwd ladder as
+the fallback (`copilot-session.ts`); a lock only counts while its pid still names a Copilot
+process. Droid (`~/.factory/sessions/<slug>/`) reuses Claude's entry shape with `id` /
+`parentId`, has no rewind tree and no per-process metadata, so its current session is the
+newest log for the cwd's slug (else the first ancestor directory with logs), read in file
+order and never falling through to an older sibling. Both are mirrored here with fixtures
+cut from real sessions on this machine. OpenCode is an API bridge in Plannotator and Gemini
+CLI is env-detected only; neither has a format to mirror, so in Herdr they fall back to the
+pane's screen text.

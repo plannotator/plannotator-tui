@@ -18,6 +18,8 @@ const MACHINE_PREFIXES: [&str; 5] = [
 #[allow(clippy::struct_excessive_bools, reason = "each flag mirrors one field of the transcript line")]
 pub(crate) struct Entry {
     pub(crate) uuid: Option<String>,
+    /// Top-level `id`: Droid's entry identity (Claude uses `uuid`).
+    pub(crate) id: Option<String>,
     pub(crate) parent: Option<String>,
     pub(crate) kind: String,
     pub(crate) role: Option<String>,
@@ -49,12 +51,16 @@ impl Entry {
                 .collect(),
             _ => Vec::new(),
         };
-        let hidden = matches!(
-            object.get("visibility").and_then(Value::as_str),
-            Some("llm_only" | "assistant_only" | "hidden")
-        );
+        // Visibility sits on the entry (Claude) or inside `message` (Droid).
+        let visibility = object
+            .get("visibility")
+            .or_else(|| message.and_then(|m| m.get("visibility")))
+            .and_then(Value::as_str)
+            .map(|v| v.trim().to_ascii_lowercase());
+        let hidden = matches!(visibility.as_deref(), Some("llm_only" | "assistant_only" | "hidden"));
         Some(Self {
             uuid: string("uuid"),
+            id: string("id"),
             parent: string("parentUuid"),
             kind: string("type").unwrap_or_default(),
             role: message.and_then(|m| m.get("role")).and_then(Value::as_str).map(str::to_owned),

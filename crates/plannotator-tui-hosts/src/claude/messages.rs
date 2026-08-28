@@ -13,6 +13,9 @@ use crate::{Message, Role};
 /// may be nothing but the summary, and an empty result helps nobody.
 pub fn parse_messages(jsonl: &str, n: usize) -> Vec<Message> {
     let entries: Vec<Entry> = jsonl.lines().filter_map(Entry::parse).collect();
+    if entries.is_empty() {
+        return Vec::new();
+    }
     let rendered = match active_branch(&entries) {
         Some(active) => {
             let on_branch: Vec<&Entry> =
@@ -23,6 +26,13 @@ pub fn parse_messages(jsonl: &str, n: usize) -> Vec<Message> {
         None => render_all(&entries),
     };
     rendered.into_iter().rev().take(n).collect()
+}
+
+/// The newest `n` rendered messages in plain file order, newest first — for transcripts
+/// in Claude's shape that have no rewind tree (Droid).
+pub fn parse_messages_file_order(jsonl: &str, n: usize) -> Vec<Message> {
+    let entries: Vec<Entry> = jsonl.lines().filter_map(Entry::parse).collect();
+    render_all(&entries).into_iter().rev().take(n).collect()
 }
 
 fn render_all(entries: &[Entry]) -> Vec<Message> {
@@ -55,7 +65,13 @@ fn render(entries: &[&Entry]) -> Vec<Message> {
     let mut by_message: HashMap<String, usize> = HashMap::new();
     for entry in entries {
         if entry.is_assistant_text() {
-            let id = entry.message_id.clone().or_else(|| entry.uuid.clone()).unwrap_or_default();
+            // Streamed chunks share `message.id`; Droid entries carry only their own `id`.
+            let id = entry
+                .message_id
+                .clone()
+                .or_else(|| entry.id.clone())
+                .or_else(|| entry.uuid.clone())
+                .unwrap_or_default();
             let text = entry.texts.join("\n\n");
             if let Some(message) = by_message.get(&id).and_then(|&index| out.get_mut(index)) {
                 message.text.push_str("\n\n");
