@@ -115,8 +115,18 @@ On `y`:
    background sync. plannotui shells out to it via `PATH` and parses its output; if the
    binary is missing, the panel says so and links the install instructions. **plannotui
    does not talk to the documents API for sync** — one engine, the CLI's.
-3. `POST /v1/workspaces/{ws}/shares` → `share_url`, copied to the clipboard and shown.
+   (If we ever bypass the CLI: mint the id ourselves — `ws_` + 26 Crockford — so retries
+   replay instead of duplicating; `document: null`; then one `POST …/documents` per file,
+   **serially** — pushes queue behind a per-workspace mutex; honor `Retry-After` on 429.)
+3. `POST /v1/workspaces/{ws}/shares {"mode":"edit"}` → `ShareLink.share_url`. **Print that,
+   never `Workspace.share_url`** — the latter is the raw tot.page root, not the app link.
+   A share link keeps the workspace private and is independently revocable, which beats
+   flipping visibility. Deep-link a file as `/w/<wsId>/docs/<encoded doc_path>`.
 4. Record the share in `shares.json`.
+
+**Budget.** The API has no document-count limit, but the content store has a guardrail of
+**500 files / 50 MB per workspace** that surfaces as an unmapped `500`. The panel enforces
+its own budget below that (400 files / 40 MB) and warns as the selection approaches it.
 
 Update = change the selection, confirm: files added are linked in, files removed are
 deleted from the share folder (the sync CLI propagates the delete; annotations on a deleted
