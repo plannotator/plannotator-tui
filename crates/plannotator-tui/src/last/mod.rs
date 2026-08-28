@@ -52,7 +52,18 @@ pub(crate) fn run(options: &LastOptions) -> Result<()> {
             eprintln!("plannotator-tui last: {err:#}");
             return Ok(());
         }
-        Err(err) => return Err(err),
+        // Inside Herdr we can still show what the agent printed, whatever it is.
+        Err(err) => {
+            let Some(screen) = locate::screen_fallback(&crate::herdr::context::HerdrEnv::from_env()) else {
+                return Err(err);
+            };
+            let note = format!("{err:#} — showing the pane's recent output instead");
+            return cli::run_ui(|width| {
+                let mut app = App::open(screen, width, cli::delivery(true))?;
+                app.set_status(note.clone());
+                Ok(app)
+            });
+        }
     };
     if options.print {
         if let Some(newest) = located.messages.first() {
