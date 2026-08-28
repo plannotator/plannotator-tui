@@ -1,0 +1,10 @@
+{"timestamp": "2026-08-28T10:02:00.000Z", "type": "session_meta", "payload": {"session_id": "01a04583-a848-7b21-a890-f3ed0c9fef05", "id": "01a04583-a848-7b21-a890-f3ed0c9fef05", "timestamp": "2026-08-28T10:02:00.000Z", "cwd": "/Users/dev/repo", "originator": "Codex Desktop", "cli_version": "0.150.0", "source": "cli", "thread_source": "user", "model_provider": "openai"}}
+{"timestamp": "2026-08-28T10:02:00.000Z", "type": "event_msg", "payload": {"type": "task_started", "turn_id": "t2"}}
+{"timestamp": "2026-08-28T10:02:00.000Z", "type": "response_item", "payload": {"type": "message", "id": "m-u2", "role": "user", "content": [{"type": "input_text", "text": "user prompt 2"}]}}
+{"timestamp": "2026-08-28T10:02:00.000Z", "type": "response_item", "payload": {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "x"}}
+{"timestamp": "2026-08-28T10:03:00.000Z", "type": "response_item", "payload": {"type": "message", "id": "m-a3", "role": "assistant", "content": [{"type": "output_text", "text": "assistant text 3 (commentary)"}], "phase": "commentary"}}
+{"timestamp": "2026-08-28T10:03:00.000Z", "type": "response_item", "payload": {"type": "message", "id": "m-a4", "role": "assistant", "content": [{"type": "output_text", "text": "assistant text 4 (final)"}], "phase": "final_answer"}}
+{"timestamp": "2026-08-28T10:03:00.000Z", "type": "event_msg", "payload": {"type": "task_complete", "turn_id": "t2"}}
+{"timestamp": "2026-08-28T10:04:00.000Z", "type": "event_msg", "payload": {"type": "task_started", "turn_id": "t3"}}
+{"timestamp": "2026-08-28T10:04:00.000Z", "type": "response_item", "payload": {"type": "message", "id": "m-u3", "role": "user", "content": [{"type": "input_text", "text": "user prompt 3"}]}}
+{"timestamp": "2026-08-28T10:05:00.000Z", "type": "response_item", "payload": {"type": "message", "id": "m-a5", "role": "assistant", "content": [{"type": "output_text", "text": "assistant text 5 (in progress)"}], "phase": "commentary"}}
