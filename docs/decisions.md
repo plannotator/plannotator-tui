@@ -71,8 +71,8 @@ content, display name, `transient` flag, opaque provenance — not a path. A fil
 source; an agent's last message handed in as a string is another. Transient sources have
 no sidecar, no history, no drafts. Delivery is a separate seam: on submit, feedback goes
 back to wherever the source came from (a file's sidecar, a Workspaces document, an agent
-pane via Herdr). Extraction of the message from a host transcript stays on the host side
-of the seam; plannotui never parses transcripts.
+pane via Herdr). Transcript extraction is its own crate behind the source seam (decision
+8); the app core never sees transcript formats.
 
 ## 7. No abstraction ahead of a second caller (2026-08-28)
 
