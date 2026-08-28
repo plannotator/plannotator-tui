@@ -10,7 +10,6 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 /// Why a send did not land. The app reacts differently to each.
-#[allow(dead_code, reason = "wired by the herdr launcher and the send button in the phase 3 integration")]
 #[derive(Debug)]
 pub(crate) enum DeliveryError {
     /// The agent is at a dialog and Herdr refused the prompt; retry later.
@@ -40,7 +39,6 @@ pub(crate) trait Delivery {
     /// Shown in the footer and on the button, e.g. `clipboard` or `claude in w1:p1`.
     fn describe(&self) -> String;
     /// True when the target is an agent that will act on the feedback.
-    #[allow(dead_code, reason = "wired by the herdr launcher and the send button in the phase 3 integration")]
     fn is_agent(&self) -> bool {
         false
     }
@@ -80,7 +78,6 @@ impl Delivery for Discard {
 
 /// An agent running in a Herdr pane. `herdr agent prompt` pastes the feedback as the
 /// agent's next message and presses Enter.
-#[allow(dead_code, reason = "wired by the herdr launcher and the send button in the phase 3 integration")]
 #[derive(Debug)]
 pub(crate) struct HerdrAgent {
     bin: PathBuf,
@@ -89,7 +86,6 @@ pub(crate) struct HerdrAgent {
 }
 
 impl HerdrAgent {
-    #[allow(dead_code, reason = "wired by the herdr launcher and the send button in the phase 3 integration")]
     pub(crate) fn new(bin: PathBuf, pane: String, agent: Option<String>) -> Self {
         Self { bin, pane, agent }
     }
@@ -123,7 +119,6 @@ impl Delivery for HerdrAgent {
 
 /// Map a `herdr agent prompt` exit into an outcome. Herdr prints a JSON envelope
 /// `{"error":{"code","message"}}` on stderr when it refuses.
-#[allow(dead_code, reason = "wired by the herdr launcher and the send button in the phase 3 integration")]
 pub(crate) fn parse_response(success: bool, _stdout: &str, stderr: &str) -> Result<(), DeliveryError> {
     if success {
         return Ok(());

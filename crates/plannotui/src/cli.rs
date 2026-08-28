@@ -15,8 +15,9 @@ use ratatui::crossterm::execute;
 
 use crate::app::App;
 use crate::config::Config;
-use crate::delivery::{Clipboard, Delivery, Discard};
+use crate::delivery::{Clipboard, Delivery, Discard, HerdrAgent};
 use crate::doc::Document;
+use crate::herdr::context::HerdrEnv;
 use crate::layout::DocLayout;
 
 const USAGE: &str = "usage:
@@ -41,8 +42,21 @@ fn open_file(path: &PathBuf) -> Result<DocumentSource> {
 }
 
 /// A file opens on its own; a folder opens in folder mode on its first markdown file.
+/// Interactive runs send to the Herdr agent pane named by the environment, else the
+/// clipboard; headless runs send nowhere.
+fn delivery(interactive: bool) -> Box<dyn Delivery> {
+    if !interactive {
+        return Box::new(Discard);
+    }
+    let env = HerdrEnv::from_env();
+    match env.delivery_target() {
+        Some(target) if env.in_herdr => Box::new(HerdrAgent::new(env.bin, target.pane, target.agent)),
+        _ => Box::new(Clipboard),
+    }
+}
+
 fn open_app(path: &PathBuf, width: usize, interactive: bool) -> Result<App> {
-    let delivery: Box<dyn Delivery> = if interactive { Box::new(Clipboard) } else { Box::new(Discard) };
+    let delivery = delivery(interactive);
     if path.is_dir() {
         App::open_folder(path, width, delivery)
     } else {
@@ -133,7 +147,7 @@ fn herdr_command(args: &[String]) -> Result<()> {
             extra => anyhow::bail!("unexpected argument {extra:?}\n{USAGE}"),
         }
     }
-    let env = crate::herdr::context::HerdrEnv::from_env();
+    let env = HerdrEnv::from_env();
     let config = Config::load()?;
     let cwd = std::env::current_dir().context("current directory")?;
     let launch = plan(&env, &config, open, &cwd)?;

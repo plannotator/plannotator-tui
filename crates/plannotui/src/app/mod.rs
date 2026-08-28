@@ -9,6 +9,7 @@ mod send;
 #[cfg(test)]
 mod tests;
 
+use std::fmt::Write as _;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
@@ -325,7 +326,7 @@ impl App {
         for row in tree.rows.iter().filter(|r| !r.is_dir && r.annotations > 0) {
             let open = Open::new(read_file(&row.path)?, width, &self.data_dir, &self.project)?;
             let relative = row.path.strip_prefix(tree.root()).unwrap_or(&row.path);
-            out.push_str(&format!("## File: {}\n\n{}\n", relative.display(), Self::feedback_for(&open)));
+            let _ = writeln!(out, "## File: {}\n\n{}", relative.display(), Self::feedback_for(&open));
         }
         Ok(if out.is_empty() { "No changes detected.".to_owned() } else { out })
     }

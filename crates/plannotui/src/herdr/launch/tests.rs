@@ -136,3 +136,23 @@ fn run_refuses_outside_herdr() {
     let err = run(&HerdrEnv::default(), &launch).expect_err("refused");
     assert!(err.to_string().contains("not inside Herdr"));
 }
+
+#[test]
+fn a_human_in_a_plain_shell_pane_gets_no_agent_target() {
+    // A manifest action always carries a context; a focused pane without an agent is not a
+    // target, and HERDR_PANE_ID (set for the action too) must not become one either.
+    let context = HerdrContext { focused_pane_id: Some("w1:p2".into()), ..HerdrContext::default() };
+    let env = env(Some("w1:p2"), Some(context));
+    let launch = plan(&env, &Config::default(), OpenArgs::default(), Path::new("/tmp")).expect("plan");
+    assert_eq!(launch.deliver, None);
+    assert_eq!(launch.target_pane.as_deref(), Some("w1:p2"), "a split still opens beside the caller");
+}
+
+#[test]
+fn the_plugin_id_comes_from_the_environment() {
+    let env = HerdrEnv { in_herdr: true, plugin_id: Some("annotate".into()), ..HerdrEnv::default() };
+    let launch = plan(&env, &Config::default(), OpenArgs::default(), Path::new("/tmp")).expect("plan");
+    let args = argv(&launch);
+    let plugin = args.iter().position(|a| a == "--plugin").and_then(|i| args.get(i + 1));
+    assert_eq!(plugin.map(String::as_str), Some("annotate"));
+}

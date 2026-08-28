@@ -32,6 +32,8 @@ pub(crate) struct Launch {
     /// The pane a split opens next to.
     pub(crate) target_pane: Option<String>,
     pub(crate) deliver: Option<Target>,
+    /// The plugin id to open under: whatever plugin ships this binary.
+    pub(crate) plugin: String,
 }
 
 /// A `file://` URL as a local path; anything else is not ours to open.
@@ -90,9 +92,11 @@ pub(crate) fn plan(env: &HerdrEnv, config: &Config, args: OpenArgs, cwd: &Path) 
 
     let deliver = match args.deliver_to {
         Some(pane) => Some(Target { pane, agent: None }),
-        None => {
-            env.focused_agent_pane().or_else(|| env.pane_id.clone().map(|pane| Target { pane, agent: None }))
-        }
+        // With a context (a manifest action) the focused pane counts only when an agent
+        // runs there. Without one, the caller is an agent running the skill from its own
+        // pane, and HERDR_PANE_ID is that pane.
+        None if env.context.is_some() => env.focused_agent_pane(),
+        None => env.pane_id.clone().map(|pane| Target { pane, agent: None }),
     };
     let target_pane = deliver
         .as_ref()
@@ -108,12 +112,13 @@ pub(crate) fn plan(env: &HerdrEnv, config: &Config, args: OpenArgs, cwd: &Path) 
         popup: (config.herdr.popup_width.clone(), config.herdr.popup_height.clone()),
         target_pane,
         deliver,
+        plugin: env.plugin_id.clone().unwrap_or_else(|| "plannotui".to_owned()),
     })
 }
 
 /// The `herdr` arguments for a launch.
 pub(crate) fn argv(launch: &Launch) -> Vec<String> {
-    let mut out: Vec<String> = ["plugin", "pane", "open", "--plugin", "plannotui", "--entrypoint", "doc"]
+    let mut out: Vec<String> = ["plugin", "pane", "open", "--plugin", &launch.plugin, "--entrypoint", "doc"]
         .into_iter()
         .map(str::to_owned)
         .collect();

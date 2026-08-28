@@ -43,6 +43,8 @@ pub(crate) struct HerdrEnv {
     pub(crate) deliver_to: Option<String>,
     pub(crate) deliver_agent: Option<String>,
     pub(crate) placement: Option<String>,
+    /// `HERDR_PLUGIN_ID`: the plugin this binary ships in; `plannotui` when unset.
+    pub(crate) plugin_id: Option<String>,
 }
 
 impl HerdrEnv {
@@ -63,6 +65,7 @@ impl HerdrEnv {
             deliver_to: non_empty("PLANNOTUI_DELIVER_TO"),
             deliver_agent: non_empty("PLANNOTUI_DELIVER_AGENT"),
             placement: non_empty("PLANNOTUI_PLACEMENT"),
+            plugin_id: non_empty("HERDR_PLUGIN_ID"),
         }
     }
 
@@ -75,7 +78,6 @@ impl HerdrEnv {
 
     /// The in-app rule: an explicit `PLANNOTUI_DELIVER_TO`, else the context's focused
     /// pane when an agent runs there, else nothing. Never `HERDR_PANE_ID` — that is us.
-    #[allow(dead_code, reason = "wired into the app's delivery selection by part B")]
     pub(crate) fn delivery_target(&self) -> Option<Target> {
         if let Some(pane) = &self.deliver_to {
             return Some(Target { pane: pane.clone(), agent: self.deliver_agent.clone() });

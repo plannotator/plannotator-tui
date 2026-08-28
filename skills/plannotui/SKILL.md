@@ -38,6 +38,6 @@ If `plannotui` is not on `PATH`, the raw Herdr command is:
 
 ```bash
 herdr plugin pane open --plugin plannotui --entrypoint doc --placement split \
-  --direction right --target-pane "$HERDR_PANE_ID" --focus \
-  --env PLANNOTUI_FILE=docs/plans/auth.md --env PLANNOTUI_DELIVER_TO="$HERDR_PANE_ID"
+  --direction right --target-pane "$HERDR_PANE_ID" --focus --cwd "$PWD" \
+  --env PLANNOTUI_FILE="$PWD/docs/plans/auth.md" --env PLANNOTUI_DELIVER_TO="$HERDR_PANE_ID"
 ```
