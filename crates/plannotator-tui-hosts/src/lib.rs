@@ -7,6 +7,8 @@
 
 pub mod claude;
 pub mod codex;
+pub mod copilot;
+pub mod droid;
 pub mod pi;
 
 use std::path::PathBuf;
@@ -16,6 +18,10 @@ use std::path::PathBuf;
 pub enum Host {
     ClaudeCode,
     Codex,
+    /// GitHub Copilot CLI: `~/.copilot/session-state/<uuid>/events.jsonl`.
+    Copilot,
+    /// Droid (Factory): `~/.factory/sessions/<slug>/<session>.jsonl`, Claude's shape, file order.
+    Droid,
     Pi,
 }
 
@@ -25,9 +31,14 @@ impl Host {
         match self {
             Self::ClaudeCode => "claude",
             Self::Codex => "codex",
+            Self::Copilot => "copilot",
+            Self::Droid => "droid",
             Self::Pi => "pi",
         }
     }
+
+    /// Every host with a transcript reader, for messages that list them.
+    pub const ALL: [Host; 5] = [Host::ClaudeCode, Host::Codex, Host::Pi, Host::Copilot, Host::Droid];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,6 +106,8 @@ pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostErr
         match name.as_str() {
             "claude" | "claude-code" | "claude_code" => return Ok(Host::ClaudeCode),
             "codex" => return Ok(Host::Codex),
+            "copilot" | "copilot-cli" | "copilot_cli" => return Ok(Host::Copilot),
+            "droid" | "factory" => return Ok(Host::Droid),
             "pi" => return Ok(Host::Pi),
             _ => {}
         }
@@ -102,16 +115,14 @@ pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostErr
     if set("CODEX_THREAD_ID") {
         return Ok(Host::Codex);
     }
+    if set("COPILOT_CLI") {
+        return Ok(Host::Copilot);
+    }
     // pi exports both: the generic marker names the agent, the specific one is a flag.
     if env("AI_AGENT").is_some_and(|v| v.trim().eq_ignore_ascii_case("pi")) || set("PI_CODING_AGENT") {
         return Ok(Host::Pi);
     }
-    for (key, name) in [
-        ("COPILOT_CLI", "GitHub Copilot CLI"),
-        ("OPENCODE", "OpenCode"),
-        ("GEMINI_CLI", "Gemini CLI"),
-        ("OMPCODE", "OMP"),
-    ] {
+    for (key, name) in [("OPENCODE", "OpenCode"), ("GEMINI_CLI", "Gemini CLI"), ("OMPCODE", "OMP")] {
         if set(key) {
             return Err(HostError::Unsupported(name.to_owned()));
         }
