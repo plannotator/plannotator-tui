@@ -45,7 +45,8 @@ impl Home {
         let path = dir.join(format!("{session_id}.jsonl"));
         fs::write(&path, content).expect("transcript");
         let when = SystemTime::now() - Duration::from_secs(age_secs);
-        File::open(&path).expect("open").set_modified(when).expect("mtime");
+        // Windows needs write access to change a timestamp.
+        fs::OpenOptions::new().write(true).open(&path).expect("open").set_modified(when).expect("mtime");
         path
     }
 }
