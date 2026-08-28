@@ -14,10 +14,13 @@ pub(crate) struct Row {
     pub(crate) name: String,
     pub(crate) depth: usize,
     pub(crate) is_dir: bool,
+    /// Annotations recorded for this file; for a directory, the sum beneath it.
+    pub(crate) annotations: usize,
 }
 
 #[derive(Debug)]
 pub(crate) struct Tree {
+    root: PathBuf,
     pub(crate) rows: Vec<Row>,
 }
 
@@ -35,7 +38,11 @@ impl Tree {
     pub(crate) fn scan(root: &Path) -> Result<Self> {
         let mut rows = Vec::new();
         walk(root, 0, &mut rows)?;
-        Ok(Self { rows })
+        Ok(Self { root: root.to_path_buf(), rows })
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
     }
 
     /// Index of the row for `path`, if it is in the tree.
@@ -46,6 +53,29 @@ impl Tree {
     /// The first file in the tree, in display order.
     pub(crate) fn first_file(&self) -> Option<&Row> {
         self.rows.iter().find(|r| !r.is_dir)
+    }
+
+    /// Set each file's annotation count from `count`, then roll sums up into directories.
+    #[allow(clippy::indexing_slicing, reason = "indices come from enumerate over the same vec")]
+    pub(crate) fn set_counts(&mut self, count: impl Fn(&Path) -> usize) {
+        for row in &mut self.rows {
+            row.annotations = if row.is_dir { 0 } else { count(&row.path) };
+        }
+        // Rows are in walk order: a directory precedes its descendants, which all have a
+        // greater depth until the next row at the directory's depth or shallower.
+        for i in 0..self.rows.len() {
+            if !self.rows[i].is_dir {
+                continue;
+            }
+            let depth = self.rows[i].depth;
+            let sum: usize = self.rows[i + 1..]
+                .iter()
+                .take_while(|r| r.depth > depth)
+                .filter(|r| !r.is_dir)
+                .map(|r| r.annotations)
+                .sum();
+            self.rows[i].annotations = sum;
+        }
     }
 }
 
@@ -60,11 +90,11 @@ fn walk(dir: &Path, depth: usize, rows: &mut Vec<Row>) -> Result<()> {
     entries.sort();
 
     for path in entries.iter().filter(|p| p.is_file() && is_markdown(p)) {
-        rows.push(Row { name: file_name(path), path: path.clone(), depth, is_dir: false });
+        rows.push(Row { name: file_name(path), path: path.clone(), depth, is_dir: false, annotations: 0 });
     }
     for path in entries.iter().filter(|p| p.is_dir()) {
         let mark = rows.len();
-        rows.push(Row { name: file_name(path), path: path.clone(), depth, is_dir: true });
+        rows.push(Row { name: file_name(path), path: path.clone(), depth, is_dir: true, annotations: 0 });
         walk(path, depth + 1, rows)?;
         if rows.len() == mark + 1 {
             rows.pop(); // no markdown beneath: prune the directory row
@@ -78,7 +108,7 @@ fn file_name(path: &Path) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, reason = "tests assert by panicking")]
+#[allow(clippy::expect_used, clippy::indexing_slicing, reason = "tests assert by panicking")]
 mod tests {
     use super::*;
 
@@ -109,6 +139,11 @@ mod tests {
             ]
         );
         assert_eq!(tree.first_file().map(|r| r.name.as_str()), Some("a.MD"));
+
+        let mut tree = tree;
+        tree.set_counts(|p| usize::from(p.ends_with("plan.md")) * 3 + usize::from(p.ends_with("b.md")));
+        let counts: Vec<usize> = tree.rows.iter().map(|r| r.annotations).collect();
+        assert_eq!(counts, [0, 1, 3, 3, 3], "directories sum their descendants");
         std::fs::remove_dir_all(&root).expect("cleanup");
     }
 }

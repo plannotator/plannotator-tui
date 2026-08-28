@@ -12,19 +12,27 @@ cargo build --release
 
 | Where | Keys |
 |---|---|
-| anywhere | `Tab` cycle focus (tree · document · rail) · `E` copy feedback markdown · `r` reload · `q` quit |
+| anywhere | `Tab` cycle focus (tree · document · rail) · `E` send feedback (clipboard) · `t` show/hide tree · `r` reload · `q` quit |
 | document | drag with the mouse, or `v` then `hjkl` / `w` `b` / `0` `$` to select; `Enter` confirms · `j`/`k` or click selects a block · `c` comments on the block · `x` clears the block's annotations |
 | selection toolbar | `a` 👍 looks good · `c` 💬 comment (opens a box at the selection) · `d` ✗ delete · `Esc` clears |
 | rail | `j`/`k` move · `e` / `Enter` edit body · `x` remove · click a bubble to focus it |
-| tree | `j`/`k` move · `Enter` open |
+| tree | `j`/`k` move · `Enter` open · `E` send feedback for every annotated file · counts show per file |
 
 Selections and exports are copied to the terminal clipboard (OSC 52).
 
 ## Where things live
 
-Annotations are saved next to the file as `<name>.annotations.json`, in the same shape the
-Plannotator Workspaces API uses (`plannotui-schema`). Documents opened as transient sources
-(an agent's last message, stdin) are never persisted.
+Every annotation is saved the moment it is made, as JSON, in the Plannotator data directory:
+
+```
+~/.plannotator/clients/plannotui/annotations/<project>/<slug>/annotations.json
+```
+
+`<project>` and `<slug>` follow Plannotator's own rules (git repo name; basename + 8 hex of
+sha256 of the path), so one file maps to one directory in both tools. The records are in the
+Plannotator Workspaces wire shape (`plannotui-schema`); any agent can read them. Nothing is
+written next to your files. `PLANNOTATOR_DATA_DIR` relocates the directory. Transient
+documents (an agent's last message, stdin) are never persisted.
 
 ## Headless tools
 

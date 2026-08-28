@@ -1,7 +1,5 @@
 //! Keyboard and mouse handling.
 
-use std::io::Write as _;
-
 use anyhow::Result;
 use plannotui_schema::Kind;
 use ratatui::crossterm::event::{
@@ -11,6 +9,7 @@ use tui_input::backend::crossterm::EventHandler;
 
 use super::selection::Selection;
 use super::{App, Focus, GUTTER, Mode, Pending, TOOLBAR};
+use crate::delivery::Delivery as _;
 
 impl App {
     pub(crate) fn handle_event(&mut self, event: &Event) -> Result<()> {
@@ -35,8 +34,9 @@ impl App {
                 self.cycle_focus();
                 return Ok(());
             }
-            (KeyCode::Char('E'), _) => {
-                self.export_feedback();
+            (KeyCode::Char('E'), _) => return self.export_feedback(),
+            (KeyCode::Char('t'), _) => {
+                self.toggle_tree(self.geometry.doc.width + self.geometry.tree.width + GUTTER);
                 return Ok(());
             }
             (KeyCode::Char('r'), _) => return self.reload(),
@@ -252,15 +252,15 @@ impl App {
         Ok(())
     }
 
-    fn export_feedback(&mut self) {
-        let text = self.feedback();
-        let count = self.open.store.placed().len();
-        if self.clipboard {
-            copy_to_clipboard(&text);
-            self.status = Some(format!("copied feedback for {count} annotation(s) to clipboard"));
+    /// Send feedback: the open file's, or every annotated file's when the tree has focus.
+    fn export_feedback(&mut self) -> Result<()> {
+        let (text, what) = if self.focus == Focus::Tree {
+            (self.folder_feedback()?, "folder feedback".to_owned())
         } else {
-            self.status = Some(format!("feedback ready ({count} annotation(s)); clipboard off"));
-        }
+            (self.feedback(), format!("feedback for {} annotation(s)", self.open.store.placed().len()))
+        };
+        self.send(&text, &what);
+        Ok(())
     }
 
     fn mouse(&mut self, mouse: MouseEvent) -> Result<()> {
@@ -395,46 +395,12 @@ impl App {
         if self.clipboard
             && let Some(text) = source.get(range.clone())
         {
-            copy_to_clipboard(text);
+            let _ = crate::delivery::Clipboard.deliver(text);
         }
         if let Some(block) = self.open.doc.block_containing(range.start) {
             self.selected = block;
         }
         self.status = None;
         self.pending = Some(Pending { range, at: a });
-    }
-}
-
-/// OSC 52: hand text to the terminal's clipboard so Cmd-V works outside the app.
-fn copy_to_clipboard(text: &str) {
-    let mut out = std::io::stdout().lock();
-    let _ = write!(out, "\x1b]52;c;{}\x07", base64(text.as_bytes()));
-    let _ = out.flush();
-}
-
-fn base64(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = chunk.iter().fold(0u32, |acc, b| (acc << 8) | u32::from(*b)) << (8 * (3 - chunk.len()));
-        for i in 0..4 {
-            let ch =
-                if i <= chunk.len() { TABLE.get(((n >> (18 - 6 * i)) & 63) as usize).copied() } else { None };
-            out.push(ch.map_or('=', char::from));
-        }
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn base64_matches_reference_vectors() {
-        assert_eq!(base64(b""), "");
-        assert_eq!(base64(b"f"), "Zg==");
-        assert_eq!(base64(b"fo"), "Zm8=");
-        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
     }
 }

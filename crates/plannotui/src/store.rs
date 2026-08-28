@@ -1,9 +1,13 @@
-//! Annotations for one document: the sidecar file and the resolved view of it.
+//! Annotations for one document, saved automatically on every change.
 //!
-//! The sidecar holds `plannotui_schema::Annotation` values — the same shape the Workspaces
-//! API returns — so a local file and a server row are interchangeable. Resolution against
-//! the current source happens on load and on reload; an annotation whose text is gone is
-//! kept as an orphan.
+//! The record is `annotations.json` under the Plannotator data directory, keyed the way
+//! Plannotator keys files (`plannotui_schema::annotations_dir`). It holds
+//! `plannotui_schema::Annotation` values — the Workspaces wire shape — so a local record
+//! and a server row are interchangeable. Resolution against the current source happens on
+//! load; an annotation whose text is gone is kept as an orphan.
+//!
+//! A phase-2 sidecar (`<file>.annotations.json` next to the document) is imported once and
+//! left alone; nothing is written next to the document any more.
 
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -17,6 +21,7 @@ use crate::doc::Document;
 
 #[derive(Debug)]
 pub(crate) struct Store {
+    /// `None` for transient documents: nothing is ever written.
     path: Option<PathBuf>,
     annotations: Vec<Annotation>,
     /// Parallel to `annotations`.
@@ -24,7 +29,7 @@ pub(crate) struct Store {
 }
 
 #[derive(Default, Serialize, Deserialize)]
-struct Sidecar {
+struct Record {
     annotations: Vec<Annotation>,
 }
 
@@ -41,27 +46,53 @@ impl Placed<'_> {
     }
 }
 
-impl Store {
-    pub(crate) fn sidecar_path(doc_path: &Path) -> PathBuf {
+/// Where a document's annotations live, and its legacy sidecar if one exists.
+#[derive(Debug, Clone)]
+pub(crate) struct Location {
+    pub(crate) record: PathBuf,
+    pub(crate) legacy_sidecar: Option<PathBuf>,
+}
+
+impl Location {
+    /// `<data-dir>/clients/plannotui/annotations/<project>/<slug>/annotations.json`, plus
+    /// the phase-2 sidecar path when a file exists there.
+    pub(crate) fn for_file(data_dir: &Path, project: &str, doc_path: &Path) -> Self {
+        let resolved = doc_path.to_string_lossy();
+        let record = plannotui_schema::annotations_dir(data_dir, project, &resolved).join("annotations.json");
         let mut name = doc_path.file_name().map(std::ffi::OsStr::to_os_string).unwrap_or_default();
         name.push(".annotations.json");
-        doc_path.with_file_name(name)
+        let sidecar = doc_path.with_file_name(name);
+        Self { record, legacy_sidecar: sidecar.is_file().then_some(sidecar) }
     }
+}
 
-    /// Load the sidecar next to `doc_path`, or an empty store if there is none.
-    pub(crate) fn load(doc_path: &Path, doc: &Document) -> Result<Self> {
-        let path = Self::sidecar_path(doc_path);
-        let annotations = match std::fs::read_to_string(&path) {
-            Ok(json) => {
-                serde_json::from_str::<Sidecar>(&json)
-                    .with_context(|| format!("parsing {}", path.display()))?
-                    .annotations
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-            Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+fn read_record(path: &Path) -> Result<Option<Vec<Annotation>>> {
+    match std::fs::read_to_string(path) {
+        Ok(json) => {
+            let record: Record =
+                serde_json::from_str(&json).with_context(|| format!("parsing {}", path.display()))?;
+            Ok(Some(record.annotations))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
+    }
+}
+
+impl Store {
+    /// Load the record at `location`; import the legacy sidecar when the record is absent.
+    pub(crate) fn load(location: &Location, doc: &Document) -> Result<Self> {
+        let (annotations, imported) = match read_record(&location.record)? {
+            Some(found) => (found, false),
+            None => match &location.legacy_sidecar {
+                Some(sidecar) => (read_record(sidecar)?.unwrap_or_default(), true),
+                None => (Vec::new(), false),
+            },
         };
-        let mut store = Self { path: Some(path), annotations, resolved: Vec::new() };
+        let mut store = Self { path: Some(location.record.clone()), annotations, resolved: Vec::new() };
         store.resolve_all(doc);
+        if imported && !store.annotations.is_empty() {
+            store.save()?; // the import is now the record; the sidecar is left alone
+        }
         Ok(store)
     }
 
@@ -70,9 +101,21 @@ impl Store {
         Self { path: None, annotations: Vec::new(), resolved: Vec::new() }
     }
 
+    /// Count annotations recorded for a file without loading a document.
+    pub(crate) fn count_at(location: &Location) -> usize {
+        read_record(&location.record)
+            .ok()
+            .flatten()
+            .or_else(|| location.legacy_sidecar.as_deref().and_then(|p| read_record(p).ok().flatten()))
+            .map_or(0, |a| a.len())
+    }
+
     fn save(&self) -> Result<()> {
         let Some(path) = &self.path else { return Ok(()) };
-        let json = serde_json::to_string_pretty(&Sidecar { annotations: self.annotations.clone() })?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        }
+        let json = serde_json::to_string_pretty(&Record { annotations: self.annotations.clone() })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, json).with_context(|| format!("writing {}", tmp.display()))?;
         std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
@@ -217,6 +260,13 @@ fn local_id() -> String {
 mod tests {
     use super::*;
 
+    fn temp_root(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("plannotui-store-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
     #[test]
     fn civil_dates_are_correct() {
         assert_eq!(civil_from_days(0), (1970, 1, 1));
@@ -225,23 +275,47 @@ mod tests {
     }
 
     #[test]
-    fn sidecar_round_trips_and_re_resolves_after_an_edit() {
-        let dir = std::env::temp_dir().join(format!("plannotui-store-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("temp dir");
-        let doc_path = dir.join("doc.md");
+    fn saves_on_every_change_and_re_resolves_after_an_edit() {
+        let root = temp_root("save");
+        let data_dir = root.join("data");
+        let doc_path = root.join("doc.md");
+        let location = Location::for_file(&data_dir, "proj", &doc_path);
         let source = "# A\n\nfirst\n\nsecond thing\n".to_owned();
         let doc = Document::parse(source.clone());
-        let mut store = Store::load(&doc_path, &doc).expect("empty store");
+        let mut store = Store::load(&location, &doc).expect("empty store");
         let start = source.find("second").expect("present");
         store.add(&doc, start..start + 6, "second".into(), Kind::LooksGood, String::new()).expect("saved");
+        assert!(location.record.is_file(), "record written under the data dir on add");
+        assert!(location.record.starts_with(data_dir.join("clients/plannotui/annotations/proj")));
+        assert!(!doc_path.with_file_name("doc.md.annotations.json").exists(), "no sidecar");
 
         let edited = Document::parse("# A\n\ninserted\n\nfirst\n\nsecond thing\n".to_owned());
-        let reloaded = Store::load(&doc_path, &edited).expect("reloads");
+        let reloaded = Store::load(&location, &edited).expect("reloads");
         let placed = reloaded.placed();
         let expected = edited.source.find("second").expect("present");
         assert_eq!(placed.len(), 1);
-        assert_eq!(placed.first().map(|p| p.range.clone()), Some(expected..expected + 6));
-        assert_eq!(placed.first().map(Placed::kind), Some(Kind::LooksGood));
-        std::fs::remove_dir_all(&dir).expect("cleanup");
+        assert_eq!(placed[0].range.clone(), expected..expected + 6);
+        assert_eq!(placed[0].kind(), Kind::LooksGood);
+        assert_eq!(Store::count_at(&location), 1);
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn legacy_sidecar_is_imported_once_and_left_alone() {
+        let root = temp_root("import");
+        let doc_path = root.join("doc.md");
+        std::fs::write(&doc_path, "hello world\n").expect("doc");
+        let sidecar = root.join("doc.md.annotations.json");
+        let doc = Document::parse("hello world\n".to_owned());
+        let mut seed = Store { path: Some(sidecar.clone()), annotations: Vec::new(), resolved: Vec::new() };
+        seed.add(&doc, 0..5, "hello".into(), Kind::Comment, "hi".into()).expect("seed sidecar");
+        let before = std::fs::read_to_string(&sidecar).expect("sidecar");
+
+        let location = Location::for_file(&root.join("data"), "proj", &doc_path);
+        let store = Store::load(&location, &doc).expect("imports");
+        assert_eq!(store.len(), 1);
+        assert!(location.record.is_file(), "imported into the data dir");
+        assert_eq!(std::fs::read_to_string(&sidecar).expect("sidecar"), before, "sidecar untouched");
+        std::fs::remove_dir_all(&root).expect("cleanup");
     }
 }

@@ -2,12 +2,14 @@
 
 mod app;
 mod cli;
+mod delivery;
 mod doc;
 mod export;
 mod layout;
 mod srcmap;
 mod store;
 mod tree;
+mod workspace_paths;
 mod wrap;
 
 fn main() -> std::process::ExitCode {

@@ -13,11 +13,13 @@ use plannotui_schema::{DocumentSource, Kind, Provenance};
 use ratatui::layout::Rect;
 use tui_input::Input;
 
+use crate::delivery::Delivery;
 use crate::doc::Document;
 use crate::export;
 use crate::layout::DocLayout;
-use crate::store::Store;
+use crate::store::{Location, Store};
 use crate::tree::Tree;
+use crate::workspace_paths;
 use selection::Selection;
 
 /// Width of the marker column left of the document.
@@ -76,23 +78,30 @@ struct Open {
 }
 
 impl Open {
-    fn new(source: DocumentSource, width: usize) -> Result<Self> {
+    fn new(source: DocumentSource, width: usize, data_dir: &Path, project: &str) -> Result<Self> {
         let doc = Document::parse(source.content.clone());
         let layout = DocLayout::build(&doc, width);
         let store = match (&source.provenance, source.transient) {
-            (Provenance::File { path }, false) => Store::load(path, &doc)?,
+            (Provenance::File { path }, false) => {
+                Store::load(&Location::for_file(data_dir, project, path), &doc)?
+            }
             _ => Store::transient(),
         };
         Ok(Self { source, doc, layout, store })
     }
 }
 
-#[derive(Debug)]
 pub(crate) struct App {
     open: Open,
+    /// Where annotations are stored and how this folder is named there.
+    data_dir: PathBuf,
+    project: String,
     /// Present in folder mode.
     tree: Option<Tree>,
     tree_cursor: usize,
+    /// `t` toggles; `None` means "automatic by width".
+    tree_visible: Option<bool>,
+    delivery: Box<dyn Delivery>,
     focus: Focus,
     scroll: usize,
     selected: usize,
@@ -108,17 +117,36 @@ pub(crate) struct App {
     status: Option<String>,
     frame_ms: f64,
     frame_max_ms: f64,
-    /// Copy selections and exports to the terminal clipboard (off for headless runs).
+    /// Copy selections to the terminal clipboard (off for headless runs).
     pub(crate) clipboard: bool,
     pub(crate) quit: bool,
 }
 
+impl std::fmt::Debug for App {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("App")
+            .field("source", &self.open.source.name)
+            .field("project", &self.project)
+            .finish_non_exhaustive()
+    }
+}
+
 impl App {
-    pub(crate) fn open(source: DocumentSource, width: usize) -> Result<Self> {
+    pub(crate) fn open(source: DocumentSource, width: usize, delivery: Box<dyn Delivery>) -> Result<Self> {
+        let data_dir = workspace_paths::data_dir();
+        let folder = match &source.provenance {
+            Provenance::File { path } => path.parent().map_or_else(|| PathBuf::from("."), Path::to_path_buf),
+            _ => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        };
+        let project = workspace_paths::project_name(&folder);
         Ok(Self {
-            open: Open::new(source, width)?,
+            open: Open::new(source, width, &data_dir, &project)?,
+            data_dir,
+            project,
             tree: None,
             tree_cursor: 0,
+            tree_visible: None,
+            delivery,
             focus: Focus::Document,
             scroll: 0,
             selected: 0,
@@ -138,15 +166,46 @@ impl App {
     }
 
     /// Folder mode: a tree on the left, the first file open.
-    pub(crate) fn open_folder(root: &Path, width: usize) -> Result<Self> {
-        let tree = Tree::scan(root)?;
+    pub(crate) fn open_folder(root: &Path, width: usize, delivery: Box<dyn Delivery>) -> Result<Self> {
+        let mut tree = Tree::scan(root)?;
         let first =
             tree.first_file().with_context(|| format!("no markdown files under {}", root.display()))?;
         let path = first.path.clone();
-        let mut app = Self::open(read_file(&path)?, width)?;
+        let mut app = Self::open(read_file(&path)?, width, delivery)?;
+        // The project is the folder's, not the first file's parent's.
+        app.project = workspace_paths::project_name(root);
+        app.open = Open::new(read_file(&path)?, width, &app.data_dir, &app.project)?;
+        app.refresh_counts(&mut tree);
         app.tree_cursor = tree.position(&path).unwrap_or(0);
         app.tree = Some(tree);
         Ok(app)
+    }
+
+    /// Recompute the tree's annotation counts from the records on disk.
+    fn refresh_counts(&self, tree: &mut Tree) {
+        let (data_dir, project) = (self.data_dir.clone(), self.project.clone());
+        tree.set_counts(|path| Store::count_at(&Location::for_file(&data_dir, &project, path)));
+    }
+
+    /// Keep the tree's counts current after any annotation change.
+    fn sync_tree_counts(&mut self) {
+        if let Some(mut tree) = self.tree.take() {
+            self.refresh_counts(&mut tree);
+            self.tree = Some(tree);
+        }
+    }
+
+    /// Whether the tree is drawn at `width` columns: explicit toggle wins, else by width.
+    pub(super) fn tree_shown(&self, width: u16) -> bool {
+        self.tree.is_some() && self.tree_visible.unwrap_or(width >= draw::TREE_MIN_TOTAL_WIDTH)
+    }
+
+    fn toggle_tree(&mut self, width: u16) {
+        let shown = self.tree_shown(width);
+        self.tree_visible = Some(!shown);
+        if shown && self.focus == Focus::Tree {
+            self.focus = Focus::Document;
+        }
     }
 
     /// Switch to the file under the tree cursor.
@@ -161,7 +220,7 @@ impl App {
             return Ok(());
         }
         let width = self.open.layout.width;
-        self.open = Open::new(read_file(&path)?, width)?;
+        self.open = Open::new(read_file(&path)?, width, &self.data_dir, &self.project)?;
         self.scroll = 0;
         self.selected = 0;
         self.cursor = (0, 0);
@@ -177,10 +236,12 @@ impl App {
     }
 
     /// Annotate a source range: the rendered text is derived from the layout so the
-    /// Workspaces web client can find it.
+    /// Workspaces web client can find it. Saved immediately.
     fn annotate(&mut self, range: Range<usize>, kind: Kind, body: String) -> Result<()> {
         let rendered = self.open.layout.rendered_in_range(&self.open.doc.source, &range);
-        self.open.store.add(&self.open.doc, range, rendered, kind, body)
+        self.open.store.add(&self.open.doc, range, rendered, kind, body)?;
+        self.sync_tree_counts();
+        Ok(())
     }
 
     /// Apply a toolbar action to the pending selection.
@@ -214,15 +275,19 @@ impl App {
         if self.open.store.remove(&id)? {
             self.status = Some("annotation removed".into());
             self.rail_cursor = self.rail_cursor.min(self.open.store.placed().len().saturating_sub(1));
+            self.sync_tree_counts();
         }
         Ok(())
     }
 
-    /// The feedback document for every placed annotation, in source order.
+    /// The feedback document for every placed annotation of the open file.
     pub(crate) fn feedback(&self) -> String {
-        let source = &self.open.doc.source;
-        let entries: Vec<export::Entry<'_>> = self
-            .open
+        Self::feedback_for(&self.open)
+    }
+
+    fn feedback_for(open: &Open) -> String {
+        let source = &open.doc.source;
+        let entries: Vec<export::Entry<'_>> = open
             .store
             .placed()
             .into_iter()
@@ -233,6 +298,27 @@ impl App {
             })
             .collect();
         export::feedback(source, "plan", &entries)
+    }
+
+    /// Feedback for every annotated file in the folder, one `## File:` section each.
+    pub(crate) fn folder_feedback(&self) -> Result<String> {
+        let Some(tree) = &self.tree else { return Ok(self.feedback()) };
+        let width = self.open.layout.width;
+        let mut out = String::new();
+        for row in tree.rows.iter().filter(|r| !r.is_dir && r.annotations > 0) {
+            let open = Open::new(read_file(&row.path)?, width, &self.data_dir, &self.project)?;
+            let relative = row.path.strip_prefix(tree.root()).unwrap_or(&row.path);
+            out.push_str(&format!("## File: {}\n\n{}\n", relative.display(), Self::feedback_for(&open)));
+        }
+        Ok(if out.is_empty() { "No changes detected.".to_owned() } else { out })
+    }
+
+    /// Send feedback through the configured delivery (clipboard by default).
+    fn send(&mut self, text: &str, what: &str) {
+        self.status = Some(match self.delivery.deliver(text) {
+            Ok(()) => format!("sent {what} → {}", self.delivery.describe()),
+            Err(err) => format!("send failed: {err:#}"),
+        });
     }
 
     fn clear_selection(&mut self) {

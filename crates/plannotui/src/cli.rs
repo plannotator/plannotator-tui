@@ -14,6 +14,7 @@ use ratatui::crossterm::event::{self, DisableMouseCapture, EnableMouseCapture};
 use ratatui::crossterm::execute;
 
 use crate::app::App;
+use crate::delivery::{Clipboard, Delivery, Discard};
 use crate::doc::Document;
 use crate::layout::DocLayout;
 
@@ -37,8 +38,13 @@ fn open_file(path: &PathBuf) -> Result<DocumentSource> {
 }
 
 /// A file opens on its own; a folder opens in folder mode on its first markdown file.
-fn open_app(path: &PathBuf, width: usize) -> Result<App> {
-    if path.is_dir() { App::open_folder(path, width) } else { App::open(open_file(path)?, width) }
+fn open_app(path: &PathBuf, width: usize, interactive: bool) -> Result<App> {
+    let delivery: Box<dyn Delivery> = if interactive { Box::new(Clipboard) } else { Box::new(Discard) };
+    if path.is_dir() {
+        App::open_folder(path, width, delivery)
+    } else {
+        App::open(open_file(path)?, width, delivery)
+    }
 }
 
 fn parse_kind(s: Option<&str>) -> Kind {
@@ -55,25 +61,26 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
     match arg(0) {
         Some("--bench") => bench(&path(1)?),
         Some("--export") => {
-            let app = App::open(open_file(&path(1)?)?, 100)?;
-            print!("{}", app.feedback());
+            let target = path(1)?;
+            let app = open_app(&target, 100, false)?;
+            print!("{}", if target.is_dir() { app.folder_feedback()? } else { app.feedback() });
             Ok(())
         }
         Some("--blocks") => {
-            let app = App::open(open_file(&path(1)?)?, 100)?;
+            let app = open_app(&path(1)?, 100, false)?;
             for line in app.describe_blocks() {
                 println!("{line}");
             }
             Ok(())
         }
         Some("--annotate") => {
-            let mut app = App::open(open_file(&path(1)?)?, 100)?;
+            let mut app = open_app(&path(1)?, 100, false)?;
             let quote = arg(2).context(USAGE)?;
             let body = arg(3).context(USAGE)?.to_owned();
             app.add_quote_annotation(quote, parse_kind(arg(4)), body)
         }
         Some("--annotate-block") => {
-            let mut app = App::open(open_file(&path(1)?)?, 100)?;
+            let mut app = open_app(&path(1)?, 100, false)?;
             let block: usize = arg(2).and_then(|s| s.parse().ok()).context(USAGE)?;
             let body = arg(3).context(USAGE)?.to_owned();
             app.add_block_annotation(block, Kind::Comment, body)
@@ -94,7 +101,7 @@ fn interactive(path: &PathBuf) -> Result<()> {
     let mut terminal = ratatui::init();
     execute!(stdout(), EnableMouseCapture)?;
     let width = doc_width(terminal.size().map_or(120, |s| s.width));
-    let result = open_app(path, width).and_then(|app| event_loop(&mut terminal, app));
+    let result = open_app(path, width, true).and_then(|app| event_loop(&mut terminal, app));
     let _ = execute!(stdout(), DisableMouseCapture);
     ratatui::restore();
     result
@@ -166,7 +173,7 @@ fn snapshot(path: &PathBuf, cols: u16, rows: u16, scroll: i64, select: Option<&s
     use ratatui::backend::TestBackend;
     use ratatui::style::{Color, Modifier};
     let mut terminal = ratatui::Terminal::new(TestBackend::new(cols, rows))?;
-    let mut app = open_app(path, doc_width(cols))?;
+    let mut app = open_app(path, doc_width(cols), false)?;
     terminal.draw(|frame| app.draw(frame))?;
     app.scroll_for_snapshot(scroll);
     if let Some(quote) = select {

@@ -18,8 +18,8 @@ const RAIL_MIN_WIDTH: u16 = 28;
 /// Below this the rail is dropped and annotations are only marked in the gutter.
 const RAIL_MIN_TOTAL_WIDTH: u16 = 80;
 const TREE_WIDTH: u16 = 28;
-/// Below this the tree is hidden; Tab still reaches it and it appears when focused.
-const TREE_MIN_TOTAL_WIDTH: u16 = 120;
+/// Below this the tree is hidden unless toggled on; Tab still reaches it.
+pub(super) const TREE_MIN_TOTAL_WIDTH: u16 = 120;
 const COMPOSE_WIDTH: u16 = 48;
 
 pub(crate) const COMMENT_BG: Color = Color::Indexed(58);
@@ -51,8 +51,7 @@ impl App {
         let [header, body, footer] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)]).areas(area);
 
-        let show_tree =
-            self.tree.is_some() && (area.width >= TREE_MIN_TOTAL_WIDTH || self.focus == Focus::Tree);
+        let show_tree = self.tree_shown(area.width) || (self.tree.is_some() && self.focus == Focus::Tree);
         let tree_width = if show_tree { TREE_WIDTH } else { 0 };
         let rail_width = if area.width.saturating_sub(tree_width) >= RAIL_MIN_TOTAL_WIDTH {
             (area.width * 3 / 10).clamp(RAIL_MIN_WIDTH, RAIL_WIDTH)
@@ -120,7 +119,7 @@ impl App {
             .take(usize::from(inner.height))
             .map(|(i, row)| {
                 let indent = "  ".repeat(row.depth);
-                let text = if row.is_dir {
+                let name = if row.is_dir {
                     format!("{indent}{}/", row.name)
                 } else {
                     format!("{indent}{}", row.name)
@@ -129,10 +128,21 @@ impl App {
                 if open_path == Some(row.path.as_path()) {
                     style = style.bold().fg(Color::Cyan);
                 }
-                if focused && i == self.tree_cursor {
-                    style = style.bg(BLOCK_BG);
+                let row_bg = (focused && i == self.tree_cursor).then_some(BLOCK_BG);
+                if let Some(bg) = row_bg {
+                    style = style.bg(bg);
                 }
-                Line::from(Span::styled(format!(" {text}"), style))
+                // Name on the left, annotation count right-aligned; nothing shown at zero.
+                let count = if row.annotations > 0 { row.annotations.to_string() } else { String::new() };
+                let width = usize::from(inner.width);
+                let name: String = name.chars().take(width.saturating_sub(count.len() + 2)).collect();
+                let pad = width.saturating_sub(1 + name.chars().count() + count.len());
+                let with_bg = |s: Style| row_bg.map_or(s, |bg| s.bg(bg));
+                Line::from(vec![
+                    Span::styled(format!(" {name}"), style),
+                    Span::styled(" ".repeat(pad), with_bg(Style::new())),
+                    Span::styled(count, with_bg(Style::new().fg(Color::Yellow))),
+                ])
             })
             .collect();
         frame.render_widget(Paragraph::new(lines), inner);
@@ -362,14 +372,17 @@ impl App {
         if frame.area().width < RAIL_MIN_TOTAL_WIDTH {
             parts.push("rail hidden: widen to ≥80 cols".into());
         }
+        let target = self.delivery.describe();
         let help = match self.focus {
-            _ if self.pending.is_some() => "a looks good · c comment · d delete · esc clear ",
-            Focus::Tree => "j/k move · enter open · tab focus · q quit ",
-            Focus::Rail => "j/k move · e edit · x remove · tab focus · q quit ",
-            Focus::Document => "drag or v to select · j/k block · c comment · E export · tab focus · q quit ",
+            _ if self.pending.is_some() => "a looks good · c comment · d delete · esc clear ".to_owned(),
+            Focus::Tree => format!("j/k move · enter open · E send folder → {target} · t hide · q quit "),
+            Focus::Rail => "j/k move · e edit · x remove · tab focus · q quit ".to_owned(),
+            Focus::Document => {
+                format!("drag or v select · c comment · E send → {target} · tab focus · q quit ")
+            }
         };
         let [left_area, right_area] =
-            Layout::horizontal([Constraint::Min(10), Constraint::Length(help.len() as u16)]).areas(area);
+            Layout::horizontal([Constraint::Min(10), Constraint::Length(help.width() as u16)]).areas(area);
         frame.render_widget(
             Paragraph::new(Line::from(Span::raw(format!(" {}", parts.join(" · "))).dim())),
             left_area,
