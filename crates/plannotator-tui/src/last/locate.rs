@@ -6,6 +6,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use plannotator_tui_hosts::{Host, HostError, Message, Role, claude, codex, detect_host, pi};
+use plannotator_tui_schema::{DocumentSource, Provenance};
 
 use super::LastOptions;
 
@@ -61,6 +62,31 @@ fn host_for(options: &LastOptions) -> Result<Host> {
         }
         Err(err) => Err(err.into()),
     }
+}
+
+/// The agent pane's recent output as a document, when Herdr and a target pane are known.
+/// Lossy (no markdown structure survives a terminal), so only a fallback.
+pub(crate) fn screen_fallback(env: &crate::herdr::context::HerdrEnv) -> Option<DocumentSource> {
+    let target = env.delivery_target()?;
+    if !env.in_herdr {
+        return None;
+    }
+    let output = Command::new(&env.bin)
+        .args(["agent", "read", &target.pane, "--source", "recent-unwrapped", "--format", "text"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let text = String::from_utf8_lossy(&output.stdout).trim_end().to_owned();
+    if text.is_empty() {
+        return None;
+    }
+    let host = env.host.clone().or(target.agent).unwrap_or_else(|| "agent".to_owned());
+    Some(DocumentSource::new(
+        text,
+        format!("{host} · screen"),
+        true,
+        Provenance::AgentMessage { host, session: None, message_id: None },
+    ))
 }
 
 fn home() -> PathBuf {
