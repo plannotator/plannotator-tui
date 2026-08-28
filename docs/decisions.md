@@ -189,8 +189,14 @@ pub(crate) trait Delivery {
 
 - `Clipboard` is the only implementation in 2b, and the default everywhere.
 - The Herdr plugin (phase 5) adds `HerdrAgent { pane_id }`: `herdr agent prompt <pane>
-  <feedback>`. The target comes from `HERDR_PLUGIN_CONTEXT_JSON.focused_pane_id` or an
-  explicit `--deliver-to <pane>`; the footer always names it.
+  <feedback>`. Verified in Herdr's source (2026-08-28): an overlay/split pane's
+  `HERDR_PLUGIN_CONTEXT_JSON` is snapshotted **before** the new pane spawns
+  (`src/app/api/plugins/panes.rs:51`), so `focused_pane_id` / `focused_pane_agent` name the
+  pane that was focused when plannotui was triggered — the agent's pane. An explicit
+  `--deliver-to <pane>` overrides. `agent prompt` takes the text as one argument, honors
+  the pane's bracketed-paste mode, sends Enter after 300 ms, and returns `agent_blocked`
+  without sending if the agent is waiting on a dialog; the footer shows that. The footer
+  always names the target.
 - `plannotui last` (phase 4) adds the host deliveries (stdout with exit 0, hook JSON).
 - The feedback text is produced by one function (`export::feedback`) regardless of target,
   so what an agent receives from Herdr is byte-identical to what the clipboard gets.
