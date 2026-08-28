@@ -2,7 +2,7 @@
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, reason = "tests assert by panicking")]
 
-use std::fs::{self, File};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
