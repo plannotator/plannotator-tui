@@ -156,13 +156,37 @@ mode and sends Enter 300 ms later, so multi-line feedback is safe. Outcomes the 
 
 `q` with unsent annotations asks once: `send to claude in w1:p2? (y/n/esc)`.
 
-## What each placement means for the user
+## Placement: full screen or beside the agent
 
-- **overlay** (#1, #4): full-tab, restores the previous focus and zoom on exit. Real
-  pane: can be unzoomed or moved. Default.
-- **split** (#3): beside the agent; both visible; you watch the agent react to the review.
-- **popup** (#6): modal, singleton, swallows Escape and the prefix key, no pane id. Good for
-  a quick one-file review, wrong for a folder session.
+Verified geometry (`src/ui.rs::desktop_tab_bar_and_terminal_area`, `src/popup_size.rs`,
+`src/app/input/navigate.rs::spawn_overlay_argv_command`): the largest region any plugin
+pane can occupy is the tab's **pane area** — everything except Herdr's sidebar and tab bar.
+Two placements reach it:
+
+- **overlay**: a real pane, zoomed over the whole pane area no matter how many panes the
+  tab has; Herdr restores the previous zoom and focus when it exits. Not modal: prefix keys,
+  sidebar toggle, and tab switching still work, so the user can collapse the sidebar with
+  their own `toggle_sidebar` key for an edge-to-edge review.
+- **popup** at `width = "100%"`, `height = "100%"`: the same area minus a one-cell border,
+  drawn as a floating box. Modal, singleton, swallows Escape and the prefix key, no pane id.
+
+Neither can cover the sidebar or tab bar; no plugin API collapses the sidebar (only the
+user's key or `ui.sidebar_start_collapsed`). If that matters it is a Herdr feature request.
+
+So "full-screen popover" = **overlay**, and it is the default. The user preference is one
+line in plannotui's own config (read by `open.sh`; there is no per-user manifest config):
+
+```toml
+# ~/.config/plannotui/config.toml
+[herdr]
+placement = "overlay"   # overlay | split | popup
+```
+
+- **overlay** (default): full pane area, restores on exit.
+- **split**: beside the agent; both visible; you watch the agent react to the review. The
+  agent's skill (#3) uses split by default because watching the reaction is the point.
+- **popup**: modal quick review. Kept because it costs one manifest entry; not recommended
+  for folder sessions.
 
 ## Verified vs to confirm
 
