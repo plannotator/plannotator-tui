@@ -1,0 +1,45 @@
+# Publish the crates to crates.io once a release exists (binaries built, tag verified).
+# Runs when a GitHub release is published, or on demand for a given tag. Order matters:
+# the binary crate depends on the two libraries.
+name: publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "release tag to publish, e.g. v0.2.0"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  crates-io:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: tag matches Cargo.toml
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          tag="${{ inputs.tag || github.event.release.tag_name }}"
+          test "v$version" = "$tag" || { echo "tag $tag != v$version"; exit 1; }
+      - name: publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          for crate in plannotator-tui-schema plannotator-tui-hosts plannotator-tui; do
+            if cargo publish -p "$crate" 2> err.log; then
+              echo "published $crate"
+            elif grep -q "already exists\|already uploaded" err.log; then
+              echo "$crate: this version is already on crates.io; skipping"
+            else
+              cat err.log; exit 1
+            fi
+          done
