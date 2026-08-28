@@ -156,7 +156,9 @@ mod tests {
             data_dir(env_of(&[("XDG_DATA_HOME", "/xdg")]), home, legacy_exists),
             Path::new("/home/u/.plannotator")
         );
-        // XDG applies only when absolute and the legacy dir is absent
+        // XDG applies only when absolute and the legacy dir is absent (`/xdg` is absolute
+        // on Unix only; Windows never sets XDG_DATA_HOME in practice).
+        #[cfg(unix)]
         assert_eq!(
             data_dir(env_of(&[("XDG_DATA_HOME", "/xdg")]), home, nothing),
             Path::new("/xdg/plannotator")
