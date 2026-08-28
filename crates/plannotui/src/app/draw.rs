@@ -1,5 +1,6 @@
-//! Drawing: header, gutter + document, annotation rail, footer, and the floating toolbar
-//! and compose box. Pure over `App` except for recording geometry for hit-testing.
+//! Drawing: header, optional tree, gutter + document, annotation rail, footer, and the
+//! floating toolbar and compose box. Pure over `App` except for recording geometry for
+//! hit-testing.
 
 use plannotui_schema::Kind;
 use ratatui::Frame;
@@ -9,19 +10,23 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-use super::{App, GUTTER, Geometry, Mode, TOOLBAR, glyph, label};
+use super::{App, Focus, GUTTER, Geometry, Mode, TOOLBAR, glyph, label};
 use crate::wrap::wrap_line;
 
 const RAIL_WIDTH: u16 = 36;
 const RAIL_MIN_WIDTH: u16 = 28;
 /// Below this the rail is dropped and annotations are only marked in the gutter.
 const RAIL_MIN_TOTAL_WIDTH: u16 = 80;
+const TREE_WIDTH: u16 = 28;
+/// Below this the tree is hidden; Tab still reaches it and it appears when focused.
+const TREE_MIN_TOTAL_WIDTH: u16 = 120;
 const COMPOSE_WIDTH: u16 = 48;
 
 pub(crate) const COMMENT_BG: Color = Color::Indexed(58);
 pub(crate) const APPROVE_BG: Color = Color::Indexed(22);
 const BLOCK_BG: Color = Color::Indexed(236);
 const TOOLBAR_BG: Color = Color::Indexed(238);
+const CURSOR_BG: Color = Color::Indexed(240);
 
 fn accent(kind: Kind) -> Color {
     match kind {
@@ -46,62 +51,107 @@ impl App {
         let [header, body, footer] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)]).areas(area);
 
-        let rail_width = if area.width >= RAIL_MIN_TOTAL_WIDTH {
+        let show_tree =
+            self.tree.is_some() && (area.width >= TREE_MIN_TOTAL_WIDTH || self.focus == Focus::Tree);
+        let tree_width = if show_tree { TREE_WIDTH } else { 0 };
+        let rail_width = if area.width.saturating_sub(tree_width) >= RAIL_MIN_TOTAL_WIDTH {
             (area.width * 3 / 10).clamp(RAIL_MIN_WIDTH, RAIL_WIDTH)
         } else {
             0
         };
-        let [gutter, doc, _gap, rail] = Layout::horizontal([
+        let [tree, gutter, doc, _gap, rail] = Layout::horizontal([
+            Constraint::Length(tree_width),
             Constraint::Length(GUTTER),
             Constraint::Min(20),
             Constraint::Length(u16::from(rail_width > 0)),
             Constraint::Length(rail_width),
         ])
         .areas(body);
-        self.geometry = Geometry { doc, toolbar: None };
+        self.geometry = Geometry { tree, doc, toolbar: None, bubbles: Vec::new() };
 
-        if self.layout.width != usize::from(doc.width) {
-            self.layout.reflow(usize::from(doc.width));
+        if self.open.layout.width != usize::from(doc.width) {
+            self.open.layout.reflow(usize::from(doc.width));
             self.clear_selection();
             self.scroll_by(0);
         }
 
         self.draw_header(frame, header);
+        if show_tree {
+            self.draw_tree(frame, tree);
+        }
         self.draw_document(frame, gutter, doc);
         if rail_width > 0 {
             self.draw_rail(frame, rail);
         }
         self.draw_footer(frame, footer);
-        if self.mode == Mode::Compose {
-            self.draw_compose(frame);
-        } else if self.pending.is_some() {
-            self.draw_toolbar(frame);
+        match &self.mode {
+            Mode::Compose => self.draw_compose(frame, " comment · enter saves · esc cancels "),
+            Mode::Edit(_) => self.draw_compose(frame, " edit · enter saves · esc cancels "),
+            Mode::Browse if self.pending.is_some() => self.draw_toolbar(frame),
+            Mode::Browse => {}
         }
     }
 
     fn draw_header(&self, frame: &mut Frame, area: Rect) {
         let title = Line::from(vec![
             Span::raw(" ").dim(),
-            Span::styled(self.source.name.clone(), Style::new().bold()),
+            Span::styled(self.open.source.name.clone(), Style::new().bold()),
         ]);
         let right = Line::from(Span::raw("plannotui ").dim()).right_aligned();
         frame.render_widget(Paragraph::new(title), area);
         frame.render_widget(Paragraph::new(right), area);
     }
 
+    fn draw_tree(&self, frame: &mut Frame, area: Rect) {
+        let Some(tree) = &self.tree else { return };
+        let focused = self.focus == Focus::Tree;
+        let border = if focused { Style::new().fg(Color::Cyan) } else { Style::new().fg(Color::DarkGray) };
+        let block = Block::default().borders(Borders::RIGHT).border_style(border);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        let open_path = match &self.open.source.provenance {
+            plannotui_schema::Provenance::File { path } => Some(path.as_path()),
+            _ => None,
+        };
+        let lines: Vec<Line<'static>> = tree
+            .rows
+            .iter()
+            .enumerate()
+            .take(usize::from(inner.height))
+            .map(|(i, row)| {
+                let indent = "  ".repeat(row.depth);
+                let text = if row.is_dir {
+                    format!("{indent}{}/", row.name)
+                } else {
+                    format!("{indent}{}", row.name)
+                };
+                let mut style = if row.is_dir { Style::new().dim() } else { Style::new() };
+                if open_path == Some(row.path.as_path()) {
+                    style = style.bold().fg(Color::Cyan);
+                }
+                if focused && i == self.tree_cursor {
+                    style = style.bg(BLOCK_BG);
+                }
+                Line::from(Span::styled(format!(" {text}"), style))
+            })
+            .collect();
+        frame.render_widget(Paragraph::new(lines), inner);
+    }
+
     fn draw_document(&self, frame: &mut Frame, gutter: Rect, doc: Rect) {
-        let placed = self.store.placed();
+        let placed = self.open.store.placed();
         let text_selection_active = self.selection.is_some();
+        let doc_focused = self.focus == Focus::Document;
         let buf = frame.buffer_mut();
 
         for y in 0..doc.height {
             let row_index = self.scroll + usize::from(y);
-            let Some(block) = self.layout.block_at_row(row_index) else { continue };
-            let Some(row) = self.layout.row(row_index) else { continue };
+            let Some(block) = self.open.layout.block_at_row(row_index) else { continue };
+            let Some(row) = self.open.layout.row(row_index) else { continue };
             let screen_y = doc.y + y;
             buf.set_line(doc.x, screen_y, &row.line, doc.width);
 
-            if block == self.selected && !text_selection_active && self.pending.is_none() {
+            if block == self.selected && !text_selection_active && self.pending.is_none() && doc_focused {
                 buf.set_style(
                     Rect { x: doc.x, y: screen_y, width: doc.width, height: 1 },
                     Style::new().bg(BLOCK_BG),
@@ -135,6 +185,12 @@ impl App {
                     let rect = Rect { x: doc.x + start, y: screen_y, width: end - start, height: 1 };
                     buf.set_style(rect, Style::new().add_modifier(Modifier::REVERSED));
                 }
+            }
+
+            // Keyboard cursor, visible while selecting with the keyboard.
+            if doc_focused && self.selection.is_some_and(|s| s.dragging) && row_index == self.cursor.0 {
+                let x = doc.x + (self.cursor.1.min(usize::from(doc.width).saturating_sub(1))) as u16;
+                buf.set_style(Rect { x, y: screen_y, width: 1, height: 1 }, Style::new().bg(CURSOR_BG));
             }
 
             let marker = match (block == self.selected, row_has_annotation) {
@@ -187,14 +243,23 @@ impl App {
         self.geometry.toolbar = Some((rect, spans));
     }
 
-    fn draw_compose(&self, frame: &mut Frame) {
-        let Some(rect) = self.float_origin(3, COMPOSE_WIDTH) else { return };
+    /// The compose box: at the pending selection when there is one, else over the rail
+    /// bubble being edited, else centered.
+    fn draw_compose(&self, frame: &mut Frame, title: &str) {
+        let rect = self
+            .float_origin(3, COMPOSE_WIDTH)
+            .or_else(|| self.edit_origin(3, COMPOSE_WIDTH))
+            .unwrap_or_else(|| {
+                let area = frame.area();
+                let width = COMPOSE_WIDTH.min(area.width);
+                Rect { x: (area.width - width) / 2, y: area.height / 2, width, height: 3 }
+            });
         frame.render_widget(Clear, rect);
         let boxed = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::new().fg(Color::Yellow))
-            .title(Span::styled(" comment · enter saves · esc cancels ", Style::new().dim()));
+            .title(Span::styled(title.to_owned(), Style::new().dim()));
         let inner = boxed.inner(rect);
         frame.render_widget(boxed, rect);
         let width = usize::from(inner.width.saturating_sub(1));
@@ -206,14 +271,26 @@ impl App {
         frame.set_cursor_position((cursor_x.min(inner.right().saturating_sub(1)), inner.y));
     }
 
-    fn draw_rail(&self, frame: &mut Frame, rail: Rect) {
+    /// Where to put the edit box: over the bubble being edited, if it is on screen.
+    fn edit_origin(&self, height: u16, width: u16) -> Option<Rect> {
+        let Mode::Edit(id) = &self.mode else { return None };
+        let (rect, _) = self.geometry.bubbles.iter().find(|(_, bubble_id)| bubble_id == id)?;
+        let area = self.geometry.doc.union(*rect);
+        let x = rect.right().saturating_sub(width).max(area.x);
+        Some(Rect { x, y: rect.y, width: width.min(area.width), height })
+    }
+
+    fn draw_rail(&mut self, frame: &mut Frame, rail: Rect) {
         let view_end = self.scroll + usize::from(rail.height);
+        let rail_focused = self.focus == Focus::Rail;
         let mut next_y = rail.y;
-        for placed in self.store.placed() {
-            let Some(block) = self.doc.block_containing(placed.range.start) else { continue };
-            let Some(rendered) = self.layout.blocks.get(block) else { continue };
+        let placed = self.open.store.placed();
+        let mut bubbles = Vec::new();
+        for (index, placed) in placed.iter().enumerate() {
+            let Some(block) = self.open.doc.block_containing(placed.range.start) else { continue };
+            let Some(rendered) = self.open.layout.blocks.get(block) else { continue };
             let anchor_row =
-                self.layout.first_row_in_range(block, placed.range).unwrap_or(rendered.first_row);
+                self.open.layout.first_row_in_range(block, placed.range).unwrap_or(rendered.first_row);
             if anchor_row + 1 < self.scroll.saturating_sub(2)
                 || anchor_row >= view_end
                 || next_y >= rail.bottom()
@@ -235,11 +312,10 @@ impl App {
             if height < 3 {
                 break;
             }
-            let border = if block == self.selected {
-                Style::new().fg(accent(kind))
-            } else {
-                Style::new().fg(Color::DarkGray)
-            };
+            let highlighted = if rail_focused { index == self.rail_cursor } else { block == self.selected };
+            let border =
+                if highlighted { Style::new().fg(accent(kind)) } else { Style::new().fg(Color::DarkGray) };
+            let border = if rail_focused && index == self.rail_cursor { border.bold() } else { border };
             let title = Span::styled(
                 format!(" {} {} ", glyph(kind), short_id(&placed.annotation.id)),
                 Style::new().fg(accent(kind)),
@@ -256,25 +332,27 @@ impl App {
                 if placed.annotation.body.is_empty() { Style::new().dim().italic() } else { Style::new() };
             let text_area = Rect { x: inner.x + 1, width: inner.width.saturating_sub(1), ..inner };
             frame.render_widget(Paragraph::new(lines).style(body_style), text_area);
+            bubbles.push((rect, placed.annotation.id.clone()));
             next_y = y + height;
         }
+        self.geometry.bubbles = bubbles;
     }
 
     fn draw_footer(&self, frame: &mut Frame, area: Rect) {
-        let orphans = self.store.orphans();
+        let orphans = self.open.store.orphans();
         let mut parts = vec![
-            format!("{} blocks", self.doc.blocks.len()),
+            format!("{} blocks", self.open.doc.blocks.len()),
             format!(
                 "{} annotations{}",
-                self.store.len(),
+                self.open.store.len(),
                 if orphans > 0 { format!(" ({orphans} orphaned)") } else { String::new() }
             ),
             match &self.pending {
-                Some(p) => format!(
-                    "selected {} chars",
-                    self.doc.source.get(p.range.clone()).map_or(0, |s| s.chars().count())
-                ),
-                None => format!("block {}/{}", self.selected + 1, self.doc.blocks.len()),
+                Some(p) => {
+                    let chars = self.open.doc.source.get(p.range.clone()).map_or(0, |s| s.chars().count());
+                    format!("selected {chars} chars")
+                }
+                None => format!("block {}/{}", self.selected + 1, self.open.doc.blocks.len()),
             },
             format!("frame {:.2}ms (max {:.1})", self.frame_ms, self.frame_max_ms),
         ];
@@ -284,10 +362,11 @@ impl App {
         if frame.area().width < RAIL_MIN_TOTAL_WIDTH {
             parts.push("rail hidden: widen to ≥80 cols".into());
         }
-        let help = if self.pending.is_some() {
-            "a looks good · c comment · d delete · esc clear · q quit "
-        } else {
-            "drag to select · j/k block · c comment block · x clear block · r reload · q quit "
+        let help = match self.focus {
+            _ if self.pending.is_some() => "a looks good · c comment · d delete · esc clear ",
+            Focus::Tree => "j/k move · enter open · tab focus · q quit ",
+            Focus::Rail => "j/k move · e edit · x remove · tab focus · q quit ",
+            Focus::Document => "drag or v to select · j/k block · c comment · E export · tab focus · q quit ",
         };
         let [left_area, right_area] =
             Layout::horizontal([Constraint::Min(10), Constraint::Length(help.len() as u16)]).areas(area);
@@ -301,6 +380,6 @@ impl App {
 
 /// The tail of an id, enough to tell bubbles apart: `anno_…F0123` → `F0123`.
 fn short_id(id: &str) -> String {
-    let tail: String = id.chars().rev().take(5).collect::<Vec<_>>().into_iter().rev().collect();
-    tail
+    let tail: Vec<char> = id.chars().rev().take(5).collect();
+    tail.into_iter().rev().collect()
 }

@@ -18,7 +18,8 @@ use crate::doc::Document;
 use crate::layout::DocLayout;
 
 const USAGE: &str = "usage:
-  plannotui <file.md>
+  plannotui <file.md | folder>
+  plannotui --export <file.md>
   plannotui --bench <file.md>
   plannotui --blocks <file.md>
   plannotui --annotate <file.md> <quote> <text> [comment|looks_good|delete]
@@ -35,6 +36,11 @@ fn open_file(path: &PathBuf) -> Result<DocumentSource> {
     Ok(DocumentSource::file(path.clone(), content))
 }
 
+/// A file opens on its own; a folder opens in folder mode on its first markdown file.
+fn open_app(path: &PathBuf, width: usize) -> Result<App> {
+    if path.is_dir() { App::open_folder(path, width) } else { App::open(open_file(path)?, width) }
+}
+
 fn parse_kind(s: Option<&str>) -> Kind {
     match s {
         Some("looks_good" | "approve") => Kind::LooksGood,
@@ -48,6 +54,11 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
     let path = |i: usize| arg(i).map(PathBuf::from).context(USAGE);
     match arg(0) {
         Some("--bench") => bench(&path(1)?),
+        Some("--export") => {
+            let app = App::open(open_file(&path(1)?)?, 100)?;
+            print!("{}", app.feedback());
+            Ok(())
+        }
         Some("--blocks") => {
             let app = App::open(open_file(&path(1)?)?, 100)?;
             for line in app.describe_blocks() {
@@ -80,17 +91,16 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
 }
 
 fn interactive(path: &PathBuf) -> Result<()> {
-    let source = open_file(path)?;
     let mut terminal = ratatui::init();
     execute!(stdout(), EnableMouseCapture)?;
-    let result = event_loop(&mut terminal, source);
+    let width = doc_width(terminal.size().map_or(120, |s| s.width));
+    let result = open_app(path, width).and_then(|app| event_loop(&mut terminal, app));
     let _ = execute!(stdout(), DisableMouseCapture);
     ratatui::restore();
     result
 }
 
-fn event_loop(terminal: &mut ratatui::DefaultTerminal, source: DocumentSource) -> Result<()> {
-    let mut app = App::open(source, doc_width(terminal.size()?.width))?;
+fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<()> {
     app.clipboard = true;
     let mut dirty = true;
     while !app.quit {
@@ -156,7 +166,7 @@ fn snapshot(path: &PathBuf, cols: u16, rows: u16, scroll: i64, select: Option<&s
     use ratatui::backend::TestBackend;
     use ratatui::style::{Color, Modifier};
     let mut terminal = ratatui::Terminal::new(TestBackend::new(cols, rows))?;
-    let mut app = App::open(open_file(path)?, doc_width(cols))?;
+    let mut app = open_app(path, doc_width(cols))?;
     terminal.draw(|frame| app.draw(frame))?;
     app.scroll_for_snapshot(scroll);
     if let Some(quote) = select {

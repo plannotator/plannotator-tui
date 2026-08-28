@@ -116,21 +116,40 @@ impl Store {
 
     /// Remove every annotation resolved into `block`. Returns how many were removed.
     pub(crate) fn remove_in_block(&mut self, doc: &Document, block: usize) -> Result<usize> {
-        let before = self.annotations.len();
-        let keep: Vec<bool> = self
-            .resolved
+        let ids: Vec<String> = self
+            .annotations
             .iter()
-            .map(|r| match r {
-                Resolution::Range(range) => doc.block_containing(range.start) != Some(block),
-                Resolution::Orphan => true,
-            })
+            .zip(&self.resolved)
+            .filter(|(_, r)| matches!(r, Resolution::Range(range) if doc.block_containing(range.start) == Some(block)))
+            .map(|(a, _)| a.id.clone())
             .collect();
-        let mut keep_iter = keep.iter();
-        self.annotations.retain(|_| keep_iter.next().copied().unwrap_or(true));
-        let mut keep_iter = keep.iter();
-        self.resolved.retain(|_| keep_iter.next().copied().unwrap_or(true));
+        for id in &ids {
+            self.remove_unsaved(id);
+        }
         self.save()?;
-        Ok(before - self.annotations.len())
+        Ok(ids.len())
+    }
+
+    pub(crate) fn remove(&mut self, id: &str) -> Result<bool> {
+        let removed = self.remove_unsaved(id);
+        self.save()?;
+        Ok(removed)
+    }
+
+    fn remove_unsaved(&mut self, id: &str) -> bool {
+        let Some(index) = self.annotations.iter().position(|a| a.id == id) else { return false };
+        self.annotations.remove(index);
+        self.resolved.remove(index);
+        true
+    }
+
+    /// Replace the body of annotation `id`.
+    pub(crate) fn edit_body(&mut self, id: &str, body: String) -> Result<bool> {
+        let Some(annotation) = self.annotations.iter_mut().find(|a| a.id == id) else { return Ok(false) };
+        annotation.body = body;
+        annotation.updated_at = timestamp();
+        self.save()?;
+        Ok(true)
     }
 
     pub(crate) fn resolve_all(&mut self, doc: &Document) {
