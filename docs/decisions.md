@@ -11,7 +11,7 @@ Validated with workspaces-ops against the Workspaces code.
 {
   "originalText": "<rendered selection text>",
   "quote": "<same>",
-  "plannotui": {
+  "plannotator-tui": {
     "kind": "comment" | "looks_good" | "delete",
     "source": { "start": <byte>, "end": <byte>, "version": "<git blob sha of the raw markdown>" },
     "prefix": "<up to 32 chars of RAW source before>",
@@ -24,7 +24,7 @@ Validated with workspaces-ops against the Workspaces code.
 - The server stores the anchor opaquely (16 KiB cap; only a top-level `point` is inspected).
 - The web client renders from `originalText` (falls back to `quote`): exact substring over the
   rendered text, first occurrence, whitespace-collapsed fallback. It ignores everything else.
-- Everything plannotui-only lives under one `plannotui` key. Top level carries only
+- Everything plannotator-tui-only lives under one `plannotator_tui` key. Top level carries only
   `originalText`, `quote`, and that namespace. Never claim `startMeta`, `endMeta`,
   `htmlAnchor`, `htmlAdditionalTargets`, `point`, `kind`, `state`, `source` at top level.
 - `prefix`/`suffix` are RAW source, same coordinate system as the byte offsets. One system
@@ -36,7 +36,7 @@ Validated with workspaces-ops against the Workspaces code.
 
 `looks_good` and `delete` are tags in the namespace, not body text. The body is the human
 sentence a teammate should read (may be empty for looks_good). The web shows an ordinary
-comment; plannotui shows the glyph. No verdict convention exists on the annotation surface
+comment; plannotator-tui shows the glyph. No verdict convention exists on the annotation surface
 (verdicts are approval rounds, a different object).
 
 ## 3. Cross-block selections join with no separator (2026-08-28)
@@ -49,13 +49,13 @@ normalizes toward a space the haystack never has). This is what the browser's ow
 `Range.toString()` produces, which is why in-app cross-block annotations already work.
 
 So: `originalText`/`quote` = rendered block texts concatenated directly. The raw-source
-form with real newlines stays under `plannotui.source`. No clamping. An upstream ask is
+form with real newlines stays under `plannotator-tui.source`. No clamping. An upstream ask is
 filed so `"\n\n"` eventually works too; we do not wait on it.
 
 ## 4. Document version = git blob sha (2026-08-28)
 
 The document `ETag` is `sha1("blob " + len + "\0" + bytes)` over the exact bytes returned —
-byte-identical to `git hash-object`. Computed locally; used as `plannotui.source.version`.
+byte-identical to `git hash-object`. Computed locally; used as `plannotator-tui.source.version`.
 When comparing, strip `W/` and quotes first.
 
 ## 5. Polling cannot use `?since=` for updates (2026-08-28)
@@ -79,10 +79,10 @@ pane via Herdr). Transcript extraction is its own crate behind the source seam (
 Traits exist only at seams to external systems: document source, delivery, Workspaces
 client, clipboard. Everything else is concrete.
 
-## 8. plannotui owns "last message" extraction (2026-08-28)
+## 8. plannotator-tui owns "last message" extraction (2026-08-28)
 
 A standalone app cannot depend on the Plannotator CLI (a Bun + browser install) to read an
-agent's last reply. `plannotui last` extracts it itself, in a `plannotui-hosts` crate: one
+agent's last reply. `plannotator-tui last` extracts it itself, in a `plannotator-tui-hosts` crate: one
 small module per agent behind one trait — `detect`, `last_message`, `deliver`. Claude Code
 first (JSONL session log: last assistant entry on the active branch, text blocks joined),
 Codex second; others on demand. Each host module carries one real transcript fixture and
@@ -91,16 +91,16 @@ are the format reference — knowledge copied, not code. Decision 6 is unchanged
 message is a transient document source, delivery is a seam, and inside Herdr `deliver`
 may target the pane's agent.
 
-## 9. `plannotui last`: detection and extraction, from the Plannotator source (2026-08-28)
+## 9. `plannotator-tui last`: detection and extraction, from the Plannotator source (2026-08-28)
 
 Read directly from `/Users/ramos/plannotator/plannotator` (`apps/hook/server/index.ts:505-520`,
 `:1348-1520`; `session-log.ts`; `codex-session.ts`) and verified on this machine. This is the
-reference for `plannotui-hosts`; knowledge copied, not code.
+reference for `plannotator-tui-hosts`; knowledge copied, not code.
 
 **Host detection is an env-var chain, then a fallback.** `PLANNOTATOR_ORIGIN` override
 (validated) > `CODEX_THREAD_ID` > `COPILOT_CLI` > `OPENCODE` > `GEMINI_CLI` > `OMPCODE`
 (last: OMP exports it into every shell it spawns) > default Claude Code. We mirror it with
-`PLANNOTUI_HOST` as the override. `cwd` is never identity.
+`PLANNOTATOR_TUI_HOST` as the override. `cwd` is never identity.
 
 **Claude Code session resolution — the deterministic part.** Claude Code writes
 `~/.claude/sessions/<pid>.json` per running session: `{pid, sessionId, cwd, startedAt, …}`
@@ -151,7 +151,7 @@ from a Bash bang-prefix aborts the prompt before the model reads it). `--json` p
 approve/close and `{"decision":"block","reason":"…"}` on annotate. No size framing, no
 bracketed paste. Hosts may kill our process group on a shell timeout (OpenCode: 120 s).
 
-**Explicit input first.** `plannotui last --stdin` and `PLANNOTUI_HOST`/`PLANNOTUI_SESSION`
+**Explicit input first.** `plannotator-tui last --stdin` and `PLANNOTATOR_TUI_HOST`/`PLANNOTATOR_TUI_SESSION`
 overrides ship before any detection, so the tool is usable and testable without a host.
 
 **Tests.** Every resolver and parser is a pure function over strings/paths with injected
@@ -166,7 +166,7 @@ freeze Codex file layout or anything derived from process tables.
 
 Found by a test in phase 1: reconstructing the quote from prefix/suffix is unsound — an
 empty suffix matches anywhere, so a deleted quote "resolved" to whatever now sits after the
-prefix. `plannotui.quote` holds the selected raw-source text and is the only thing the
+prefix. `plannotator-tui.quote` holds the selected raw-source text and is the only thing the
 resolver searches for. The byte range is a shortcut (trusted only when it still holds the
 quote between its context); prefix/suffix and the block hint only rank occurrences. A quote
 that is not in the document is an orphan, always.
@@ -192,12 +192,12 @@ pub(crate) trait Delivery {
   <feedback>`. Verified in Herdr's source (2026-08-28): an overlay/split pane's
   `HERDR_PLUGIN_CONTEXT_JSON` is snapshotted **before** the new pane spawns
   (`src/app/api/plugins/panes.rs:51`), so `focused_pane_id` / `focused_pane_agent` name the
-  pane that was focused when plannotui was triggered — the agent's pane. An explicit
+  pane that was focused when plannotator-tui was triggered — the agent's pane. An explicit
   `--deliver-to <pane>` overrides. `agent prompt` takes the text as one argument, honors
   the pane's bracketed-paste mode, sends Enter after 300 ms, and returns `agent_blocked`
   without sending if the agent is waiting on a dialog; the footer shows that. The footer
   always names the target.
-- `plannotui last` (phase 4) adds the host deliveries (stdout with exit 0, hook JSON).
+- `plannotator-tui last` (phase 4) adds the host deliveries (stdout with exit 0, hook JSON).
 - The feedback text is produced by one function (`export::feedback`) regardless of target,
   so what an agent receives from Herdr is byte-identical to what the clipboard gets.
 
@@ -206,21 +206,21 @@ Herdr; `HERDR_ENV=1` only selects the implementation.
 
 ## 12. Placement is the user's, and one launcher serves humans and agents (2026-08-28)
 
-Where plannotui opens inside Herdr — full-screen overlay, split beside the agent, or a
-modal popup — is a preference, not a property of the entry point. It lives in plannotui's
-own config (`[herdr] placement`, `~/.config/plannotui/config.toml`), because Herdr has no
+Where plannotator-tui opens inside Herdr — full-screen overlay, split beside the agent, or a
+modal popup — is a preference, not a property of the entry point. It lives in plannotator-tui's
+own config (`[herdr] placement`, `~/.config/plannotator-tui/config.toml`), because Herdr has no
 per-user plugin settings and a manifest cannot express "the user prefers". The parser is
 strict: an unknown key is an error that names it, so a typo never silently falls back.
-`PLANNOTUI_PLACEMENT` and `--placement` override for one launch; the agent skill uses
+`PLANNOTATOR_TUI_PLACEMENT` and `--placement` override for one launch; the agent skill uses
 `split` because watching the agent react is the point of that path.
 
-All entry points run the same command, `plannotui herdr open [PATH]`. A manifest action runs
+All entry points run the same command, `plannotator-tui herdr open [PATH]`. A manifest action runs
 it with Herdr's invocation context (the focused pane's folder, or the Ctrl-clicked
 `file://` link, and the focused pane's agent as the feedback target); an agent runs it from
 its own pane, where `HERDR_PANE_ID` is the caller and therefore the target. The launcher
 resolves file, target and placement, then execs `herdr plugin pane open` with explicit
-`PLANNOTUI_FILE` / `PLANNOTUI_DELIVER_TO` / `PLANNOTUI_DELIVER_AGENT`, so the pane never
-has to guess where it came from. Inside the pane `HERDR_PANE_ID` is plannotui's own pane
+`PLANNOTATOR_TUI_FILE` / `PLANNOTATOR_TUI_DELIVER_TO` / `PLANNOTATOR_TUI_DELIVER_AGENT`, so the pane never
+has to guess where it came from. Inside the pane `HERDR_PANE_ID` is plannotator-tui's own pane
 and is never a target. `argv` construction is a pure function with exact-string tests.
 
 Verified live (Herdr 0.8.2, disposable named session, a `cat` renamed `claude` standing in

@@ -5,7 +5,7 @@ phase 2 for durable records; the sidecar remains as a per-file working copy (see
 
 ## Why this matters
 
-People keep their annotations and review them over time; that data is valuable. plannotui
+People keep their annotations and review them over time; that data is valuable. plannotator-tui
 saves every annotation as JSON, automatically, in the Plannotator data dir under its own
 directory, keyed the same way Plannotator keys files. Any agent can read the JSON.
 
@@ -55,7 +55,7 @@ Data dir: `$PLANNOTATOR_DATA_DIR` if set; else an existing `~/.plannotator`; els
 
 ```
 ~/.plannotator/
-  clients/plannotui/annotations/<project>/<slug>/annotations.json
+  clients/plannotator-tui/annotations/<project>/<slug>/annotations.json
 ```
 
 - Same data-dir resolution and the same `project` / `slug` rules as Plannotator (above),
@@ -65,7 +65,7 @@ Data dir: `$PLANNOTATOR_DATA_DIR` if set; else an existing `~/.plannotator`; els
   remove, 👍, ✗. There is no submit, no export step, no session boundary.
 - We write nothing anywhere else in the data dir. `history/`, `plans/`, and the rest are
   Plannotator's. No markdown records: the JSON is the record, and an agent reads JSON.
-- `clients/plannotui/` survives Plannotator's `uninstall --purge` (it only removes its own
+- `clients/plannotator-tui/` survives Plannotator's `uninstall --purge` (it only removes its own
   known entries); deleting it is the user's call.
 - No sidecar next to the file. An existing phase-2 sidecar is imported on first open and
   left alone. Annotating a repo leaves no trace in it.
@@ -94,4 +94,4 @@ sidecar opt-in. Each waits for a reader that needs it.
 ## Phasing
 
 - **2b:** data-dir resolution, project/slug port with fixture tests, the
-  `clients/plannotui` JSON store, sidecar import, tree counts, tree toggle, folder export.
+  `clients/plannotator-tui` JSON store, sidecar import, tree counts, tree toggle, folder export.

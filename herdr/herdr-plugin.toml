@@ -1,13 +1,13 @@
-id = "plannotui"
-name = "plannotui"
+id = "plannotator-tui"
+name = "plannotator-tui"
 version = "0.2.0"
 min_herdr_version = "0.8.0"
 description = "Annotate Markdown in a pane: select text, comment, looks-good, delete; send feedback to the agent."
 platforms = ["macos", "linux"]
 
-# Where plannotui opens is the user's choice, not the manifest's: `[herdr] placement` in
-# ~/.config/plannotui/config.toml (overlay | split | popup), or PLANNOTUI_PLACEMENT. The
-# launcher (`plannotui herdr open`) passes --placement, which overrides the default below.
+# Where plannotator-tui opens is the user's choice, not the manifest's: `[herdr] placement` in
+# ~/.config/plannotator-tui/config.toml (overlay | split | popup), or PLANNOTATOR_TUI_PLACEMENT. The
+# launcher (`plannotator-tui herdr open`) passes --placement, which overrides the default below.
 # overlay = a real pane zoomed over the whole tab; Herdr restores focus and zoom on exit.
 
 [[build]]
@@ -15,9 +15,9 @@ command = ["cargo", "build", "--release", "--manifest-path", "../Cargo.toml"]
 
 [[panes]]
 id = "doc"
-title = "plannotui"
+title = "plannotator-tui"
 placement = "overlay"
-command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotui\" \"${PLANNOTUI_FILE:-$PWD}\""]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotator-tui\" \"${PLANNOTATOR_TUI_FILE:-$PWD}\""]
 
 # Human entry points. Both run the launcher, which reads Herdr's invocation context: the
 # focused pane's folder (open) or the clicked file:// link (open-link), and the focused
@@ -26,13 +26,13 @@ command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotui\" 
 id = "open"
 title = "Annotate: open here"
 contexts = ["workspace", "pane"]
-command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotui\" herdr open"]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotator-tui\" herdr open"]
 
 [[actions]]
 id = "open-link"
 title = "Annotate this file"
 contexts = ["pane"]
-command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotui\" herdr open"]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotator-tui\" herdr open"]
 
 # Ctrl-click on a file:// markdown link. Anchored on the scheme so web links never match.
 [[link_handlers]]

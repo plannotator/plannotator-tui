@@ -1,14 +1,14 @@
-# Spec: plannotui inside Herdr
+# Spec: plannotator-tui inside Herdr
 
 Status: implemented for #1, #3, #4, #6 and the Send button (2026-08-28); #5 waits for
-`plannotui last`. Verified live against Herdr 0.8.2 in a disposable named session; see
+`plannotator-tui last`. Verified live against Herdr 0.8.2 in a disposable named session; see
 `docs/decisions.md` 12–13 for what was exercised.
 
 ## The shape
 
-Herdr never renders plannotui. It does four things for it: **opens it in a pane** with the
+Herdr never renders plannotator-tui. It does four things for it: **opens it in a pane** with the
 right file and the right context, **tells it which agent** to send feedback to, **routes
-clicks and keys** to it, and **delivers feedback** into an agent's pane. plannotui stays a
+clicks and keys** to it, and **delivers feedback** into an agent's pane. plannotator-tui stays a
 standalone app; the plugin is a manifest plus a few shell lines. Delivery is the seam from
 decision 11: `HerdrAgent { pane }` = `$HERDR_BIN_PATH agent prompt <pane> <feedback>`.
 
@@ -16,10 +16,10 @@ decision 11: `HerdrAgent { pane }` = `$HERDR_BIN_PATH agent prompt <pane> <feedb
 
 | # | Who starts it | How the file is chosen | How the target agent is known | Herdr mechanism |
 |---|---|---|---|---|
-| 1 | Human, keybind | The tree: plannotui opens on the pane's cwd in folder mode with the tree focused — that *is* the file dialog | `HERDR_PLUGIN_CONTEXT_JSON.focused_pane_id` (the agent's pane, snapshotted before plannotui's pane spawns) | `[[keys.command]] type="plugin_action"` → action → `plugin pane open --placement overlay` |
+| 1 | Human, keybind | The tree: plannotator-tui opens on the pane's cwd in folder mode with the tree focused — that *is* the file dialog | `HERDR_PLUGIN_CONTEXT_JSON.focused_pane_id` (the agent's pane, snapshotted before plannotator-tui's pane spawns) | `[[keys.command]] type="plugin_action"` → action → `plugin pane open --placement overlay` |
 | 3 | **Agent**, via a skill | The agent wrote the plan to a file and names it | The agent passes its own `$HERDR_PANE_ID` | agent runs `herdr plugin pane open … --placement split --target-pane $HERDR_PANE_ID --env …` |
 | 4 | Human, Ctrl-click | The clicked `file://…md` link the agent printed (OSC 8) | focused pane at click time | `[[link_handlers]]` → action → pane open |
-| 5 | Human, keybind | The agent's **last message**, extracted from its transcript | focused pane; the agent process pid from `herdr pane process-info` finds the session file directly | action → `plannotui last --deliver-to <pane>` (phase 4 hosts crate) |
+| 5 | Human, keybind | The agent's **last message**, extracted from its transcript | focused pane; the agent process pid from `herdr pane process-info` finds the session file directly | action → `plannotator-tui last --deliver-to <pane>` (phase 4 hosts crate) |
 | 6 | Human, quick | One file, in a **popup** (modal, no pane id) | same as 1 | `[[panes]] placement="popup"` — a second entrypoint for "review this one thing and send" |
 
 Not built: a Herdr-side path prompt. Herdr has no input dialog for plugins; a popup picker
@@ -31,8 +31,8 @@ The tree-as-dialog in #1 is the same gesture with none of that.
 Environment the pane command reads, in precedence order:
 
 ```
-PLANNOTUI_FILE          file or folder to open       (explicit, from an action or the agent)
-PLANNOTUI_DELIVER_TO    pane id to send feedback to  (explicit)
+PLANNOTATOR_TUI_FILE          file or folder to open       (explicit, from an action or the agent)
+PLANNOTATOR_TUI_DELIVER_TO    pane id to send feedback to  (explicit)
 HERDR_PLUGIN_CONTEXT_JSON
   .focused_pane_id      fallback delivery target: the agent's pane when a human triggered it
   .focused_pane_agent   shown in the footer: "send → claude in w1:p2"
@@ -42,14 +42,14 @@ HERDR_ENV=1             selects HerdrAgent delivery; absent → clipboard
 HERDR_BIN_PATH          the herdr binary (fallback: `herdr` on PATH)
 ```
 
-`plannotui` resolves: `PLANNOTUI_FILE` → `clicked_url` (as a path) → `workspace_cwd`. Delivery: `PLANNOTUI_DELIVER_TO` → `focused_pane_id` →
+`plannotator-tui` resolves: `PLANNOTATOR_TUI_FILE` → `clicked_url` (as a path) → `workspace_cwd`. Delivery: `PLANNOTATOR_TUI_DELIVER_TO` → `focused_pane_id` →
 clipboard. The footer always names the target before the user presses `E`.
 
 ## Manifest
 
 ```toml
-id = "plannotui"
-name = "plannotui"
+id = "plannotator-tui"
+name = "plannotator-tui"
 version = "0.2.0"
 min_herdr_version = "0.8.0"
 platforms = ["macos", "linux"]
@@ -59,17 +59,17 @@ command = ["bash", "herdr/install.sh"]          # prebuilt binary per platform, 
 
 [[panes]]                                       # #1 #3 #4: a real pane
 id = "doc"
-title = "plannotui"
+title = "plannotator-tui"
 placement = "overlay"
-command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/plannotui\" \"${PLANNOTUI_FILE:-$PWD}\""]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/plannotator-tui\" \"${PLANNOTATOR_TUI_FILE:-$PWD}\""]
 
 [[panes]]                                       # #6: quick modal review
 id = "quick"
-title = "plannotui"
+title = "plannotator-tui"
 placement = "popup"
 width = "90%"
 height = "85%"
-command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/plannotui\" \"${PLANNOTUI_FILE:-$PWD}\""]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/plannotator-tui\" \"${PLANNOTATOR_TUI_FILE:-$PWD}\""]
 
 [[actions]]                                     # #1
 id = "open"
@@ -97,8 +97,8 @@ command = ["bash", "herdr/last.sh"]
 ```
 
 `open.sh` is ~20 lines: read the context JSON, pick the file per the precedence above, then
-`exec "$HERDR_BIN_PATH" plugin pane open --plugin plannotui --entrypoint doc --focus
---cwd "$folder" --env PLANNOTUI_FILE="$file" --env PLANNOTUI_DELIVER_TO="$pane"`.
+`exec "$HERDR_BIN_PATH" plugin pane open --plugin plannotator-tui --entrypoint doc --focus
+--cwd "$folder" --env PLANNOTATOR_TUI_FILE="$file" --env PLANNOTATOR_TUI_DELIVER_TO="$pane"`.
 
 Keybindings the user adds (Herdr has no manifest keybindings):
 
@@ -106,26 +106,26 @@ Keybindings the user adds (Herdr has no manifest keybindings):
 [[keys.command]]
 key = "prefix+a"
 type = "plugin_action"
-command = "plannotui.open"
+command = "plannotator-tui.open"
 
 [[keys.command]]
 key = "prefix+l"
 type = "plugin_action"
-command = "plannotui.last"
+command = "plannotator-tui.last"
 ```
 
 ## The agent side (#3): one skill
 
-`skills/plannotui/SKILL.md`, installed like Herdr's own skill. The whole instruction:
+`skills/plannotator-tui/SKILL.md`, installed like Herdr's own skill. The whole instruction:
 
 > When you want the human to review a plan or document: write it to a file, then run
-> `herdr plugin pane open --plugin plannotui --entrypoint doc --placement split
-> --direction right --target-pane "$HERDR_PANE_ID" --focus --env PLANNOTUI_FILE=<path>
-> --env PLANNOTUI_DELIVER_TO="$HERDR_PANE_ID"`, and **end your turn**. The review arrives
+> `herdr plugin pane open --plugin plannotator-tui --entrypoint doc --placement split
+> --direction right --target-pane "$HERDR_PANE_ID" --focus --env PLANNOTATOR_TUI_FILE=<path>
+> --env PLANNOTATOR_TUI_DELIVER_TO="$HERDR_PANE_ID"`, and **end your turn**. The review arrives
 > as your next user message, as numbered feedback (`## 1. (line 12) Feedback on: "…"`).
 > Address each item. Only when `HERDR_ENV=1`.
 
-The agent never waits on plannotui and never parses its output. Feedback is a normal turn.
+The agent never waits on plannotator-tui and never parses its output. Feedback is a normal turn.
 
 ## The Send button
 
@@ -175,10 +175,10 @@ Neither can cover the sidebar or tab bar; no plugin API collapses the sidebar (o
 user's key or `ui.sidebar_start_collapsed`). If that matters it is a Herdr feature request.
 
 So "full-screen popover" = **overlay**, and it is the default. The user preference is one
-line in plannotui's own config (read by `open.sh`; there is no per-user manifest config):
+line in plannotator-tui's own config (read by `open.sh`; there is no per-user manifest config):
 
 ```toml
-# ~/.config/plannotui/config.toml
+# ~/.config/plannotator-tui/config.toml
 [herdr]
 placement = "overlay"   # overlay | split | popup
 ```
@@ -225,7 +225,7 @@ env var, or JSON field was read from `src/cli/plugin.rs`, `src/cli/agent.rs`,
   `workspace_cwd`, `tab_id`, `focused_pane_id`, `focused_pane_cwd`, `focused_pane_agent`,
   `focused_pane_status`, `selected_text`, `invocation_source` (`keybinding`|`api`|`cli`|…),
   `clicked_url`, `link_handler_id`. The snapshot is taken before the new pane spawns.
-- Keybinding: `[[keys.command]] type = "plugin_action" command = "plannotui.open"`.
+- Keybinding: `[[keys.command]] type = "plugin_action" command = "plannotator-tui.open"`.
 - `herdr agent prompt <pane-id|agent-name> <text>`: stdout JSON + exit 0 on success; stderr
   `{"id":…,"error":{"code":…,"message":…}}` + exit 1 on failure. Codes we handle:
   `agent_blocked` (at a dialog), `agent_not_ready`, `agent_not_found`, `empty_agent_prompt`.
@@ -233,25 +233,25 @@ env var, or JSON field was read from `src/cli/plugin.rs`, `src/cli/agent.rs`,
   assume `HERDR_BIN_PATH` there — fall back to `herdr` on `PATH`.
 - `herdr plugin link <dir>` registers a local plugin directory (dev install).
 
-### Environment read by plannotui
+### Environment read by plannotator-tui
 
 ```
-PLANNOTUI_FILE            file or folder to open (launcher → pane)
-PLANNOTUI_DELIVER_TO      pane id feedback goes to (launcher → pane)
-PLANNOTUI_DELIVER_AGENT   agent name for the label, e.g. "claude" (launcher → pane)
-PLANNOTUI_PLACEMENT       overlay | split | popup; beats the config file
-PLANNOTUI_CONFIG          path of the config file; beats XDG
-HERDR_*                   as above; HERDR_PANE_ID inside the pane is plannotui's OWN pane
+PLANNOTATOR_TUI_FILE            file or folder to open (launcher → pane)
+PLANNOTATOR_TUI_DELIVER_TO      pane id feedback goes to (launcher → pane)
+PLANNOTATOR_TUI_DELIVER_AGENT   agent name for the label, e.g. "claude" (launcher → pane)
+PLANNOTATOR_TUI_PLACEMENT       overlay | split | popup; beats the config file
+PLANNOTATOR_TUI_CONFIG          path of the config file; beats XDG
+HERDR_*                   as above; HERDR_PANE_ID inside the pane is plannotator-tui's OWN pane
 ```
 
-Inside the app the delivery target is: `PLANNOTUI_DELIVER_TO` → context `focused_pane_id`
+Inside the app the delivery target is: `PLANNOTATOR_TUI_DELIVER_TO` → context `focused_pane_id`
 when `focused_pane_agent` is set → none (clipboard). `HERDR_PANE_ID` is never a target
 inside the app. The launcher (below) is the only place `HERDR_PANE_ID` means "the caller".
 
 ### Config
 
-`$PLANNOTUI_CONFIG` → `$XDG_CONFIG_HOME/plannotui/config.toml` → `~/.config/plannotui/config.toml`.
-Missing file = defaults. Unknown keys are errors that name the key. `plannotui config`
+`$PLANNOTATOR_TUI_CONFIG` → `$XDG_CONFIG_HOME/plannotator-tui/config.toml` → `~/.config/plannotator-tui/config.toml`.
+Missing file = defaults. Unknown keys are errors that name the key. `plannotator-tui config`
 prints the path and the effective values.
 
 ```toml
@@ -262,7 +262,7 @@ popup_width = "90%"          # popup only; cells or percent
 popup_height = "85%"
 ```
 
-### The launcher: `plannotui herdr open [PATH] [--placement P] [--deliver-to PANE]`
+### The launcher: `plannotator-tui herdr open [PATH] [--placement P] [--deliver-to PANE]`
 
 One command for humans (via the manifest actions) and agents (via the skill). It reads
 the env above, resolves, and execs `herdr plugin pane open`. Resolution, in order:
@@ -271,26 +271,26 @@ the env above, resolves, and execs `herdr plugin pane open`. Resolution, in orde
 - deliver-to: `--deliver-to` → context `focused_pane_id` when `focused_pane_agent` is set →
   `HERDR_PANE_ID` (the caller: an agent running the skill from its own pane).
 - split target pane: the deliver-to pane → `focused_pane_id` → `HERDR_PANE_ID`.
-- placement: `--placement` → `PLANNOTUI_PLACEMENT` → config → overlay.
+- placement: `--placement` → `PLANNOTATOR_TUI_PLACEMENT` → config → overlay.
 
-It passes `PLANNOTUI_FILE`, `PLANNOTUI_DELIVER_TO`, `PLANNOTUI_DELIVER_AGENT` explicitly so
+It passes `PLANNOTATOR_TUI_FILE`, `PLANNOTATOR_TUI_DELIVER_TO`, `PLANNOTATOR_TUI_DELIVER_AGENT` explicitly so
 the pane never has to guess. `argv` construction is a pure, tested function.
 
 ### Modules and ownership
 
 ```
-crates/plannotui/src/config.rs          Config, HerdrConfig, Placement, SplitDirection,
+crates/plannotator-tui/src/config.rs          Config, HerdrConfig, Placement, SplitDirection,
                                         config_path(), Config::load(), Config::parse()
-crates/plannotui/src/herdr/mod.rs       pub(crate) mod context; pub(crate) mod launch;
-crates/plannotui/src/herdr/context.rs   HerdrContext (serde of the context JSON),
+crates/plannotator-tui/src/herdr/mod.rs       pub(crate) mod context; pub(crate) mod launch;
+crates/plannotator-tui/src/herdr/context.rs   HerdrContext (serde of the context JSON),
                                         HerdrEnv::from_env(), Target { pane, agent }
-crates/plannotui/src/herdr/launch.rs    Launch, plan(), argv(), run()
-crates/plannotui/src/delivery.rs        DeliveryError { Blocked, Unavailable, Failed },
+crates/plannotator-tui/src/herdr/launch.rs    Launch, plan(), argv(), run()
+crates/plannotator-tui/src/delivery.rs        DeliveryError { Blocked, Unavailable, Failed },
                                         HerdrAgent { bin, pane, agent }, parse_response()
-crates/plannotui/src/store.rs           Record.deliveries, record_delivery(), all_delivered()
-crates/plannotui/src/app/mod.rs         SendState, send(), send_label(), is_agent target
-crates/plannotui/src/app/draw.rs        header Send button + geometry.send_button
-crates/plannotui/src/app/input.rs       button click, q → confirm when unsent
+crates/plannotator-tui/src/store.rs           Record.deliveries, record_delivery(), all_delivered()
+crates/plannotator-tui/src/app/mod.rs         SendState, send(), send_label(), is_agent target
+crates/plannotator-tui/src/app/draw.rs        header Send button + geometry.send_button
+crates/plannotator-tui/src/app/input.rs       button click, q → confirm when unsent
 herdr/herdr-plugin.toml                 doc pane, open / open-link actions, link handler
-skills/plannotui/SKILL.md               the agent instruction (draft; not wired yet)
+skills/plannotator-tui/SKILL.md               the agent instruction (draft; not wired yet)
 ```

@@ -1,0 +1,19 @@
+[package]
+name = "plannotator-tui-schema"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Annotation and anchor types shared by plannotator-tui and Plannotator Workspaces."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha1 = "0.11.0"
+sha2 = "0.11.0"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+jsonschema = { version = "0.52.0", default-features = false }

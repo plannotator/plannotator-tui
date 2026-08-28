@@ -1,4 +1,4 @@
-# plannotui — engineering notes
+# plannotator-tui — engineering notes
 
 A small open-source terminal application. Optimize for a reader who has never seen the
 code: clear module boundaries, boring Rust, no cleverness that needs a comment to defend it.
@@ -6,13 +6,13 @@ code: clear module boundaries, boring Rust, no cleverness that needs a comment t
 ## Shape
 
 ```
-crates/plannotui-schema   annotation + anchor types and resolvers. Wire-exact with
+crates/plannotator-tui-schema   annotation + anchor types and resolvers. Wire-exact with
                           Plannotator Workspaces. No I/O, no UI, no async. Pure functions.
-crates/plannotui          the app: parse → layout → draw → input. Talks to the schema crate,
+crates/plannotator-tui          the app: parse → layout → draw → input. Talks to the schema crate,
                           never the other way round. Network clients live in their own
                           modules behind a trait so the app has one seam per external system.
 herdr/                    the Herdr plugin manifest. The launcher it runs is
-                          `plannotui herdr open` (src/herdr/); no shell logic here.
+                          `plannotator-tui herdr open` (src/herdr/); no shell logic here.
 ```
 
 Markdown parsing is `pulldown-cmark`; rendering to styled text is `tui-markdown`. We never
@@ -37,7 +37,7 @@ interpret markdown ourselves. Anything that needs to know "what is a heading" is
   `TestBackend` over a fake terminal, real fixtures over builders.
 - **Performance is structural, not micro.** Render once per block and cache; wrap on
   resize; touch only visible rows per frame; never reparse a whole document on an edit.
-  Measure with `plannotui --bench` before and after anything that changes those paths.
+  Measure with `plannotator-tui --bench` before and after anything that changes those paths.
 - **Errors carry context, not stack traces.** `anyhow` at the app boundary, typed errors in
   the schema crate. A user-facing failure names the file and what was being done.
 - **No abstraction without a second caller.** No traits for one impl, no generics for one
@@ -52,5 +52,5 @@ interpret markdown ourselves. Anything that needs to know "what is a heading" is
 
 Annotations are the Workspaces wire shape. The anchor object is opaque to the server; the
 web client reads `originalText` (rendered text). Our fields ride alongside. See
-`crates/plannotui-schema/src/lib.rs` for the source of truth; do not redefine these types
+`crates/plannotator-tui-schema/src/lib.rs` for the source of truth; do not redefine these types
 elsewhere.

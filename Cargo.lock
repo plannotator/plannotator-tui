@@ -1346,11 +1346,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
-name = "plannotui"
+name = "plannotator-tui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "plannotui-schema",
+ "plannotator-tui-schema",
  "pulldown-cmark",
  "ratatui",
  "serde",
@@ -1363,7 +1363,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "plannotui-schema"
+name = "plannotator-tui-schema"
 version = "0.1.0"
 dependencies = [
  "jsonschema",
