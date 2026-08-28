@@ -351,7 +351,7 @@ impl App {
         }
         let orphans = self.open.store.orphans();
         let mut parts = vec![
-            format!("{} blocks", self.open.doc.blocks.len()),
+            self.open.source.name.clone(),
             format!(
                 "{} annotations{}",
                 self.open.store.len(),
@@ -364,7 +364,6 @@ impl App {
                 }
                 None => format!("block {}/{}", self.selected + 1, self.open.doc.blocks.len()),
             },
-            format!("frame {:.2}ms (max {:.1})", self.frame_ms, self.frame_max_ms),
         ];
         if let Some(status) = &self.status {
             parts.push(status.clone());
@@ -372,14 +371,11 @@ impl App {
         if frame.area().width < RAIL_MIN_TOTAL_WIDTH {
             parts.push("rail hidden: widen to ≥80 cols".into());
         }
-        let target = self.delivery.describe();
         let help = match self.focus {
-            _ if self.pending.is_some() => "a looks good · c comment · d delete · esc clear ".to_owned(),
-            Focus::Tree => format!("j/k move · enter open · E send folder → {target} · t hide · q quit "),
-            Focus::Rail => "j/k move · e edit · x remove · tab focus · q quit ".to_owned(),
-            Focus::Document => {
-                format!("drag or v select · c comment · E send → {target} · tab focus · q quit ")
-            }
+            _ if self.pending.is_some() => "a looks good · c comment · d delete · esc clear ",
+            Focus::Tree => "j/k · enter open · E send · t hide · q quit ",
+            Focus::Rail => "j/k · e edit · x remove · tab · q quit ",
+            Focus::Document => "drag or v select · c comment · E send · tab · q quit ",
         };
         let [left_area, right_area] =
             Layout::horizontal([Constraint::Min(10), Constraint::Length(help.width() as u16)]).areas(area);

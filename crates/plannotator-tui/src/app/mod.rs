@@ -331,6 +331,54 @@ impl App {
         Ok(if out.is_empty() { "No changes detected.".to_owned() } else { out })
     }
 
+    /// Paths of every annotated file in the folder, the open one included.
+    fn annotated_files(&self) -> Vec<PathBuf> {
+        self.tree.as_ref().map_or_else(Vec::new, |tree| {
+            tree.rows.iter().filter(|r| !r.is_dir && r.annotations > 0).map(|r| r.path.clone()).collect()
+        })
+    }
+
+    fn is_open(&self, path: &Path) -> bool {
+        matches!(&self.open.source.provenance, Provenance::File { path: p } if p == path)
+    }
+
+    /// Remember the send on every file it covered: the open one in memory, the rest on disk.
+    fn record_delivery(&mut self, target: &str) -> Result<()> {
+        if self.tree.is_none() {
+            return self.open.store.record_delivery(target);
+        }
+        let width = self.open.layout.width;
+        for path in self.annotated_files() {
+            if self.is_open(&path) {
+                self.open.store.record_delivery(target)?;
+            } else {
+                let mut open = Open::new(read_file(&path)?, width, &self.data_dir, &self.project)?;
+                open.store.record_delivery(target)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// True when every annotated file in the folder has been sent since it last changed.
+    fn folder_all_delivered(&self) -> Result<bool> {
+        let files = self.annotated_files();
+        if files.is_empty() {
+            return Ok(false);
+        }
+        let width = self.open.layout.width;
+        for path in files {
+            let delivered = if self.is_open(&path) {
+                self.open.store.all_delivered()
+            } else {
+                Open::new(read_file(&path)?, width, &self.data_dir, &self.project)?.store.all_delivered()
+            };
+            if !delivered {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     fn clear_selection(&mut self) {
         self.selection = None;
         self.pending = None;
