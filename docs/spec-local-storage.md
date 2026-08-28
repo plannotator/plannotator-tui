@@ -5,12 +5,9 @@ phase 2 for durable records; the sidecar remains as a per-file working copy (see
 
 ## Why this matters
 
-People keep their annotations. Plannotator users review what they wrote over months —
-the `plannotator-compound` skill reads the archive to find patterns in what they reject
-and how their feedback evolves. On this machine `~/.plannotator` holds 1,267 submission
-records and 41 plan feedback files. plannotui's annotations should land in that same
-archive so they compound with everything else, and should add what Plannotator's records
-lack: the structured data.
+People keep their annotations and review them over time; that data is valuable. plannotui
+saves every annotation as JSON, automatically, in the Plannotator data dir under its own
+directory, keyed the same way Plannotator keys files. Any agent can read the JSON.
 
 ## How Plannotator stores annotations today (verified in the source)
 
@@ -54,107 +51,47 @@ Data dir: `$PLANNOTATOR_DATA_DIR` if set; else an existing `~/.plannotator`; els
 
 ## Design
 
-### 1. plannotui writes into the Plannotator data dir, under its own directory
+**One rule: every annotation is saved to JSON, automatically, the moment it is made.**
 
 ```
 ~/.plannotator/
-  clients/plannotui/                        # everything plannotui owns
-    annotations/<project>/<slug>/
-      annotations.json                      #   the live set for one file, auto-saved
-  history/<project>/<slug>/
-    submissions/<stamp>-plannotui.md        #   Plannotator's format, written by us too
+  clients/plannotui/annotations/<project>/<slug>/annotations.json
 ```
 
-Rules:
-- Same data-dir resolution, same `project` and `slug` functions, ported exactly and
-  pinned by tests. A file annotated in Plannotator and in plannotui shares one
-  `history/<project>/<slug>/` directory.
-- **Rulings from plannotator-ops, honored as written:**
-  - Our top-level directory is `clients/plannotui/`, not `tui/`. Plannotator's
-    `uninstall --purge` removes only its own top-level entries and reports anything else as
-    "preserved (unrecognized custom entry)", so `clients/` survives a purge and plannotui
-    owns its own uninstall story (`plannotui --uninstall-data`, documented). The copies we
-    append under `history/` **are** purge-owned and will be deleted with it. Both halves
-    are correct; this asymmetry is deliberate and documented here so nobody is surprised.
-  - Submission files we write are named `<stamp>-plannotui.md` — the client suffix makes a
-    cross-writer filename collision structurally impossible (Plannotator's own collision
-    probe is `existsSync`, which is racy across processes) and shows provenance in a
-    listing. Nothing parses submission filenames beyond listing them.
-  - We write **only** into `history/<project>/<slug>/submissions/` and `NNN.md` snapshots;
-    never any other file into the slug root, whose namespace readers assume is snapshots.
-  - `- Client: plannotui` is **appended after** the existing three metadata lines, never
-    reordering them. Nothing parses submission bodies strictly today; that is an
-    observation, not a guarantee, so we stay format-compatible.
-  - When we add version snapshots: exclusive-create (`O_EXCL`), re-scan on `EEXIST`,
-    dedupe by byte-equality against the latest only. Not in 2b.
-- We never write under `plans/`, `drafts/`, or any other Plannotator-owned path, and never
-  modify a file we did not create.
-- Gates, matching Plannotator's: `PLANNOTATOR_ANNOTATE_HISTORY=0|false` (env wins) or
-  `config.json { "annotateHistory": false }` disables submission records under
-  `history/`. Transient documents (an agent's last message, stdin) never get them.
-  `clients/plannotui/` always holds the working set.
+- Same data-dir resolution and the same `project` / `slug` rules as Plannotator (above),
+  so one file maps to one directory, and a future tool can join the two archives by path.
+- `annotations.json` is the wire-shape `Annotation` array (phase 1) with the document
+  version each anchor was made against. Rewritten atomically on every change — add, edit,
+  remove, 👍, ✗. There is no submit, no export step, no session boundary.
+- We write nothing anywhere else in the data dir. `history/`, `plans/`, and the rest are
+  Plannotator's. No markdown records: the JSON is the record, and an agent reads JSON.
+- `clients/plannotui/` survives Plannotator's `uninstall --purge` (it only removes its own
+  known entries); deleting it is the user's call.
+- No sidecar next to the file. An existing phase-2 sidecar is imported on first open and
+  left alone. Annotating a repo leaves no trace in it.
+- Transient documents (an agent's last message, stdin) are never saved.
 
-### 2. Two records per file, both automatic
+`E` copies the feedback text to the clipboard for pasting into an agent. It is a
+convenience, not storage.
 
-- **`annotations.json`** — the live set: the wire-shape `Annotation` array (phase 1) with
-  the document version each anchor was made against. Rewritten atomically on **every
-  change** — add, edit, remove, 👍, ✗. The user never does anything to make an
-  annotation durable.
-- **`history/<project>/<slug>/submissions/<stamp>-plannotui.md`** — the Plannotator-format
-  feedback record, written **when a session on the file ends** (switching files or
-  quitting) if any annotation changed during it. One record per sitting, like
-  Plannotator's one per submit. No timers, no debouncing, no user action. This is what
-  the compound skill reads.
-
-`E` copies the current feedback text to the clipboard. It does not gate storage.
-
-Deliberately not built until something reads them: structured per-session snapshots
-(`annotations.json` already holds the data), version snapshots `NNN.md` (they power a
-"diff since I annotated" view we do not have yet), `recent.json`, `--uninstall-data`.
-
-### 3. No sidecars
-
-The phase-2 `<file>.annotations.json` next to the document goes away: annotating a repo
-leaves no trace in it. An existing sidecar is imported on first open (§5) and left alone.
-
-### 4. The folder experience (local, no sharing)
+## Folder experience (local, no sharing)
 
 What exists after phase 2: tree pane, `Tab` focus cycling, per-file open, per-file store.
-What this slice adds:
+This slice adds:
 
-- **Annotation counts in the tree.** Each file row shows its count (`plans/auth.md  3`),
-  dimmed at zero; directories show the sum. One stat per file at scan.
-- **Tree that stays out of the way.** `t` hides/shows it; it auto-hides under 120 columns;
-  `Tab` still reaches it (it appears while focused).
-- **Folder-wide export.** `E` in the tree copies feedback for every annotated file as one
-  document with a `## File: <path>` heading per file.
+- **Annotation counts in the tree.** Each file row shows its count, dimmed at zero;
+  directories show the sum.
+- **Tree that stays out of the way.** `t` hides/shows it; auto-hides under 120 columns;
+  `Tab` still reaches it.
+- **Folder-wide export.** `E` in the tree copies feedback for every annotated file, with
+  a `## File: <path>` heading per file.
 
-### 5. Migration from phase-2 sidecars
+## Not built
 
-On opening a file that has a sidecar and no `tui/` record, import the sidecar into
-`tui/annotations/<project>/<slug>/annotations.json` and leave the sidecar in place. No
-data is moved or deleted.
-
-## Non-goals
-
-- Reading or displaying Plannotator's `plans/` archive. Different object (plan reviews
-  with verdicts); compound covers it.
-- A history browser UI. The data is laid out so one can exist; building it is a later
-  slice.
-- Sharing. `docs/spec-share-folder.md`, deferred.
-
-## Resolved with plannotator-ops (2026-08-28)
-
-All seven questions answered from the source; the answers are folded into §1–§4 above:
-slug hash and input rules, data-dir order, `sanitizeTag` incl. the null-under-2 rule,
-second-writer safety (no lock; client-suffixed filenames; submissions dir only), snapshot
-dedupe and `O_EXCL`, the history gates, and the `clients/plannotui/` name with its purge
-asymmetry.
+Version snapshots, submission records, a history view, `recent`, `--uninstall-data`,
+sidecar opt-in. Each waits for a reader that needs it.
 
 ## Phasing
 
-- **2b (this spec):** data-dir resolution, project/slug port with fixture tests,
-  `clients/plannotui/annotations` store (auto-saved on every change), session-end
-  submission records in Plannotator's format, sidecar import, tree counts, tree toggle,
-  folder export.
-- Later, when something reads them: version snapshots, history view, search.
+- **2b:** data-dir resolution, project/slug port with fixture tests, the
+  `clients/plannotui` JSON store, sidecar import, tree counts, tree toggle, folder export.
