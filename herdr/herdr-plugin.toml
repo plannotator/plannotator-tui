@@ -11,7 +11,7 @@ platforms = ["macos", "linux"]
 id = "doc"
 title = "plannotui"
 placement = "overlay"
-command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotui\" \"${PLANNOTUI_FILE:-$HERDR_PLUGIN_ROOT/../samples/plugins.md}\""]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotui\" \"${PLANNOTUI_FILE:-$PWD}\""]
 
 [[actions]]
 id = "open"
