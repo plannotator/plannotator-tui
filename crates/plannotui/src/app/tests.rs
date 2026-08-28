@@ -1,5 +1,5 @@
-//! Behaviour of the header's Send button, drawn into a `TestBackend` the way the
-//! `--snapshot` CLI does.
+//! Behaviour of the header's Send button and the quit confirmation, drawn into a
+//! `TestBackend` the way the `--snapshot` CLI does.
 
 #![allow(clippy::expect_used, reason = "tests assert by panicking")]
 
@@ -8,10 +8,12 @@ use std::path::PathBuf;
 use plannotui_schema::{DocumentSource, Kind, Provenance};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 
-use super::App;
 use super::send::SendState;
+use super::{App, Mode};
 use crate::delivery::{Delivery, Discard, HerdrAgent};
 
 /// A transient source: the app runs exactly as it does on a file, but nothing is written
@@ -72,4 +74,19 @@ fn clicking_the_send_button_sends() {
     });
     app.handle_event(&click).expect("click");
     assert_eq!(app.send_state, SendState::Sent);
+}
+
+#[test]
+fn quitting_with_unsent_feedback_asks_before_it_quits() {
+    let mut app = app(agent());
+    app.add_block_annotation(0, Kind::Comment, "x".to_owned()).expect("annotation");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('q')))).expect("q");
+    assert_eq!(app.mode, Mode::ConfirmQuit);
+    assert!(!app.quit, "the question is asked instead of quitting");
+    let rows = draw(&mut app);
+    let footer = row(&rows, 19);
+    assert!(footer.contains("before quitting? y send · n quit · esc cancel"), "footer was {footer:?}");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('n')))).expect("n");
+    assert!(app.quit, "n quits without sending");
+    assert_eq!(app.send_state, SendState::Ready, "nothing was sent");
 }

@@ -87,7 +87,7 @@ impl App {
             Mode::Compose => self.draw_compose(frame, " comment · enter saves · esc cancels "),
             Mode::Edit(_) => self.draw_compose(frame, " edit · enter saves · esc cancels "),
             Mode::Browse if self.pending.is_some() => self.draw_toolbar(frame),
-            Mode::Browse => {}
+            Mode::Browse | Mode::ConfirmQuit => {}
         }
     }
 
@@ -339,6 +339,16 @@ impl App {
     }
 
     fn draw_footer(&self, frame: &mut Frame, area: Rect) {
+        if self.mode == Mode::ConfirmQuit {
+            // The question owns the footer: the browse help would name keys that are not
+            // live while it is up.
+            let question = format!(
+                " send feedback to {} before quitting? y send · n quit · esc cancel",
+                self.delivery.describe()
+            );
+            frame.render_widget(Paragraph::new(Line::from(Span::raw(question).bold())), area);
+            return;
+        }
         let orphans = self.open.store.orphans();
         let mut parts = vec![
             format!("{} blocks", self.open.doc.blocks.len()),

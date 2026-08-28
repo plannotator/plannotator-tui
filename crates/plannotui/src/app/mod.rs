@@ -44,6 +44,8 @@ enum Mode {
     Compose,
     /// Editing the body of an existing annotation (by id).
     Edit(String),
+    /// Quit was asked for while feedback is unsent; the footer asks first.
+    ConfirmQuit,
 }
 
 /// Which pane keyboard input goes to.

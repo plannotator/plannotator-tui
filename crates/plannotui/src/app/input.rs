@@ -8,6 +8,7 @@ use ratatui::crossterm::event::{
 use tui_input::backend::crossterm::EventHandler;
 
 use super::selection::Selection;
+use super::send::SendState;
 use super::{App, Focus, GUTTER, Mode, Pending, TOOLBAR};
 use crate::delivery::Delivery as _;
 
@@ -16,6 +17,7 @@ impl App {
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => match &self.mode {
                 Mode::Browse => self.browse_key(*key),
+                Mode::ConfirmQuit => self.confirm_quit_key(*key),
                 Mode::Compose | Mode::Edit(_) => self.text_key(*key, event),
             },
             Event::Mouse(mouse) if self.mode == Mode::Browse => self.mouse(*mouse),
@@ -27,7 +29,7 @@ impl App {
         // Global keys first.
         match (key.code, key.modifiers) {
             (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                self.quit = true;
+                self.request_quit();
                 return Ok(());
             }
             (KeyCode::Tab, _) => {
@@ -47,6 +49,25 @@ impl App {
             Focus::Document => self.document_key(key),
             Focus::Rail => self.rail_key(key),
         }
+    }
+
+    /// The quit confirmation: send first, quit anyway, or stay.
+    fn confirm_quit_key(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
+                self.mode = Mode::Browse;
+                self.send_feedback()?;
+                // A refused send keeps the app open so the footer can say why.
+                self.quit = self.send_state == SendState::Sent;
+            }
+            KeyCode::Char('n' | 'N') => {
+                self.mode = Mode::Browse;
+                self.quit = true;
+            }
+            KeyCode::Esc => self.mode = Mode::Browse,
+            _ => {}
+        }
+        Ok(())
     }
 
     fn cycle_focus(&mut self) {
@@ -112,7 +133,7 @@ impl App {
                 if self.pending.is_some() || self.selection.is_some() {
                     self.clear_selection();
                 } else {
-                    self.quit = true;
+                    self.request_quit();
                 }
             }
             (KeyCode::Char('v'), _) => {
@@ -239,7 +260,7 @@ impl App {
                             self.status = Some("annotation updated".into());
                         }
                     }
-                    Mode::Compose | Mode::Browse => {
+                    Mode::Compose | Mode::Browse | Mode::ConfirmQuit => {
                         if !body.is_empty()
                             && let Some(pending) = self.pending.take()
                         {

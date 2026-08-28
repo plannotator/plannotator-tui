@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use super::{App, Focus};
+use super::{App, Focus, Mode};
 use crate::delivery::{Clipboard, Delivery as _, DeliveryError};
 
 /// What the Send button says. Re-derived from the store on load and file switch.
@@ -79,9 +79,17 @@ impl App {
     }
 
     /// True when an agent is waiting on feedback that has not been sent since it changed.
-    #[allow(dead_code, reason = "wired by the quit confirmation")]
     pub(super) fn has_unsent(&self) -> bool {
         self.delivery.is_agent() && self.open.store.len() > 0 && self.send_state != SendState::Sent
+    }
+
+    /// Quit, unless an agent is still waiting on feedback: then ask in the footer first.
+    pub(super) fn request_quit(&mut self) {
+        if self.has_unsent() {
+            self.mode = Mode::ConfirmQuit;
+        } else {
+            self.quit = true;
+        }
     }
 
     /// Recompute the send state from the record (on load and file switch).
