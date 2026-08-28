@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 keywords = ["annotation", "markdown", "agents"]
 categories = ["text-processing"]
-description = "Find a coding agent's transcript and read its recent messages (Claude Code, Codex)."
+description = "Find a coding agent's transcript and read its recent messages (Claude Code, Codex, pi)."
 
 [dependencies]
 serde_json.workspace = true

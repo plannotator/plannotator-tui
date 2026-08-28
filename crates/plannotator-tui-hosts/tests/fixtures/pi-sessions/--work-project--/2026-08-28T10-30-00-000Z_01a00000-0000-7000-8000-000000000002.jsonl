@@ -1,0 +1,2 @@
+{"type":"session","version":3,"id":"01a00000-0000-7000-8000-000000000002","timestamp":"2026-08-28T10:30:00.000Z","cwd":"/work/project"}
+{"type":"model_change","id":"11111111","parentId":null,"timestamp":"2026-08-28T10:30:00.010Z","provider":"anthropic","modelId":"claude-fable-5"}

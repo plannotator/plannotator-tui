@@ -7,6 +7,7 @@
 
 pub mod claude;
 pub mod codex;
+pub mod pi;
 
 use std::path::PathBuf;
 
@@ -15,6 +16,7 @@ use std::path::PathBuf;
 pub enum Host {
     ClaudeCode,
     Codex,
+    Pi,
 }
 
 impl Host {
@@ -23,6 +25,7 @@ impl Host {
         match self {
             Self::ClaudeCode => "claude",
             Self::Codex => "codex",
+            Self::Pi => "pi",
         }
     }
 }
@@ -92,11 +95,16 @@ pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostErr
         match name.as_str() {
             "claude" | "claude-code" | "claude_code" => return Ok(Host::ClaudeCode),
             "codex" => return Ok(Host::Codex),
+            "pi" => return Ok(Host::Pi),
             _ => {}
         }
     }
     if set("CODEX_THREAD_ID") {
         return Ok(Host::Codex);
+    }
+    // pi exports both: the generic marker names the agent, the specific one is a flag.
+    if env("AI_AGENT").is_some_and(|v| v.trim().eq_ignore_ascii_case("pi")) || set("PI_CODING_AGENT") {
+        return Ok(Host::Pi);
     }
     for (key, name) in [
         ("COPILOT_CLI", "GitHub Copilot CLI"),

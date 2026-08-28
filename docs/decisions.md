@@ -275,3 +275,20 @@ Peer-reviewed against Plannotator's source at main by the plannotator-ops sessio
 exclusion, the `<task-notification>` prefix, the explicit Codex subagent skip, and
 multi-rollout grouping are stricter than Plannotator (which has an open bug, #1367, on the
 last one). Keep them; do not regress to match.
+
+**Pi** (2026-08-28). Sessions live in `~/.pi/agent/sessions/--<cwd with its leading slash
+dropped and `/`, `\`, `:` as `-`>--/<timestamp>_<uuid>.jsonl` (`PI_CODING_AGENT_SESSION_DIR`
+or `PI_CODING_AGENT_DIR` override; legacy flat files directly under `sessions/` still
+exist). Every entry carries `id`/`parentId` — messages, model and thinking-level changes,
+compactions, custom entries — so the active branch is the chain from the newest entry with
+an id, which is what pi's own `getBranch()` returns (no lane records are written to v3 files;
+operation records are in-memory only, so there is no on-disk turn marker). Unlike Claude
+Code there is **no file-order fallback**: a chain that cannot be reconstructed yields nothing
+rather than the wrong messages. Rendering matches Plannotator's `pi-extension/assistant-message.ts`
+exactly: a `message` entry whose `content` is an array, text = the `text` blocks joined with
+`\n`, whitespace-only (toolCall-only) entries skipped, one entry = one message keyed by the
+entry id, timestamps normalized to ISO (numbers are Unix ms). There is
+no pid registry, so a running pi is matched by cwd (the Herdr launcher passes the agent
+pane's cwd as `PLANNOTATOR_TUI_CWD`), newest first, skipping sessions that hold no message
+yet. pi exports `PI_CODING_AGENT=true` and `AI_AGENT=pi` into the shells it spawns; both
+select the pi host after the Codex marker.
