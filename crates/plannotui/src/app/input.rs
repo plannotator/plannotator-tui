@@ -34,7 +34,7 @@ impl App {
                 self.cycle_focus();
                 return Ok(());
             }
-            (KeyCode::Char('E'), _) => return self.export_feedback(),
+            (KeyCode::Char('E'), _) => return self.send_feedback(),
             (KeyCode::Char('t'), _) => {
                 self.toggle_tree(self.geometry.doc.width + self.geometry.tree.width + GUTTER);
                 return Ok(());
@@ -141,6 +141,10 @@ impl App {
             }
             (KeyCode::Char('x'), _) => {
                 let removed = self.open.store.remove_in_block(&self.open.doc, self.selected)?;
+                if removed > 0 {
+                    self.mark_unsent();
+                    self.sync_tree_counts();
+                }
                 self.status = Some(format!("removed {removed} annotation(s) on block"));
             }
             _ => {}
@@ -231,6 +235,7 @@ impl App {
                         if body.is_empty() {
                             self.status = Some("edit cancelled: empty".into());
                         } else if self.open.store.edit_body(&id, body)? {
+                            self.mark_unsent();
                             self.status = Some("annotation updated".into());
                         }
                     }
@@ -249,17 +254,6 @@ impl App {
                 self.input.handle_event(event);
             }
         }
-        Ok(())
-    }
-
-    /// Send feedback: the open file's, or every annotated file's when the tree has focus.
-    fn export_feedback(&mut self) -> Result<()> {
-        let (text, what) = if self.focus == Focus::Tree {
-            (self.folder_feedback()?, "folder feedback".to_owned())
-        } else {
-            (self.feedback(), format!("feedback for {} annotation(s)", self.open.store.placed().len()))
-        };
-        self.send(&text, &what);
         Ok(())
     }
 
