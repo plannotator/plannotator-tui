@@ -1,7 +1,8 @@
 # Spec: plannotui inside Herdr
 
-Status: draft for review, 2026-08-28. Every Herdr fact below was verified in the Herdr
-source (`~/oss/herdr/herdr`); the two things that need a live check are marked.
+Status: implemented for #1, #3, #4, #6 and the Send button (2026-08-28); #5 waits for
+`plannotui last`. Verified live against Herdr 0.8.2 in a disposable named session; see
+`docs/decisions.md` 12–13 for what was exercised.
 
 ## The shape
 

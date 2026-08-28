@@ -11,7 +11,8 @@ crates/plannotui-schema   annotation + anchor types and resolvers. Wire-exact wi
 crates/plannotui          the app: parse → layout → draw → input. Talks to the schema crate,
                           never the other way round. Network clients live in their own
                           modules behind a trait so the app has one seam per external system.
-herdr/                    the Herdr plugin: manifest + launch scripts only. No logic.
+herdr/                    the Herdr plugin manifest. The launcher it runs is
+                          `plannotui herdr open` (src/herdr/); no shell logic here.
 ```
 
 Markdown parsing is `pulldown-cmark`; rendering to styled text is `tui-markdown`. We never
