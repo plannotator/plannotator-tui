@@ -55,6 +55,9 @@ mod tests {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
         assert_eq!(absolute(Path::new("docs/plan.md")), cwd.join("docs/plan.md"));
         assert_eq!(absolute(Path::new("./docs/../docs/plan.md")), cwd.join("docs/plan.md"));
+        #[cfg(unix)]
         assert_eq!(absolute(Path::new("/a/b/../c/./d.md")), PathBuf::from("/a/c/d.md"));
+        #[cfg(windows)]
+        assert_eq!(absolute(Path::new(r"C:\a\b\..\c\.\d.md")), PathBuf::from(r"C:\a\c\d.md"));
     }
 }
