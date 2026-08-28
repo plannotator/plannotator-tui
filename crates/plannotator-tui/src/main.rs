@@ -1,4 +1,4 @@
-//! plannotator_tui: annotate Markdown in the terminal.
+//! plannotator-tui: annotate Markdown in the terminal.
 
 mod app;
 mod base64;
