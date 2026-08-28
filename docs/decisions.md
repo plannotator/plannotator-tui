@@ -39,12 +39,18 @@ sentence a teammate should read (may be empty for looks_good). The web shows an 
 comment; plannotui shows the glyph. No verdict convention exists on the annotation surface
 (verdicts are approval rounds, a different object).
 
-## 3. Cross-client anchors clamp to one block (2026-08-28)
+## 3. Cross-block selections join with no separator (2026-08-28)
 
-The web matcher's behaviour across a paragraph break is unverified. A selection spanning
-blocks is allowed locally; when posting to Workspaces the `originalText` is clamped to the
-first block and the full range is kept under `plannotui.source`. Revisit if spanning
-selections matter cross-client (workspaces-ops offered to verify or fix the web matcher).
+Verified by workspaces-ops with an executed DOM test through the real viewer: the rendered
+DOM contributes no character between blocks (`textContent` is `"...words.The second..."`),
+so a cross-paragraph `originalText` resolves only when the block texts are joined with
+**no separator**. `"\n\n"` and space joins both fail (the whitespace-collapse fallback
+normalizes toward a space the haystack never has). This is what the browser's own
+`Range.toString()` produces, which is why in-app cross-block annotations already work.
+
+So: `originalText`/`quote` = rendered block texts concatenated directly. The raw-source
+form with real newlines stays under `plannotui.source`. No clamping. An upstream ask is
+filed so `"\n\n"` eventually works too; we do not wait on it.
 
 ## 4. Document version = git blob sha (2026-08-28)
 
@@ -72,3 +78,15 @@ of the seam; plannotui never parses transcripts.
 
 Traits exist only at seams to external systems: document source, delivery, Workspaces
 client, clipboard. Everything else is concrete.
+
+## 8. plannotui owns "last message" extraction (2026-08-28)
+
+A standalone app cannot depend on the Plannotator CLI (a Bun + browser install) to read an
+agent's last reply. `plannotui last` extracts it itself, in a `plannotui-hosts` crate: one
+small module per agent behind one trait — `detect`, `last_message`, `deliver`. Claude Code
+first (JSONL session log: last assistant entry on the active branch, text blocks joined),
+Codex second; others on demand. Each host module carries one real transcript fixture and
+one test. The Plannotator sources (`apps/hook/server/session-log.ts`, `codex-session.ts`)
+are the format reference — knowledge copied, not code. Decision 6 is unchanged: the
+message is a transient document source, delivery is a seam, and inside Herdr `deliver`
+may target the pane's agent.
