@@ -262,6 +262,9 @@ impl App {
             MouseEventKind::ScrollDown => self.scroll_by(3),
             MouseEventKind::ScrollUp => self.scroll_by(-3),
             MouseEventKind::Down(MouseButton::Left) => {
+                if self.send_button_hit(mouse.column, mouse.row) {
+                    return self.send_feedback();
+                }
                 if let Some(kind) = self.toolbar_hit(mouse.column, mouse.row) {
                     return self.act(kind);
                 }
@@ -306,6 +309,12 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    fn send_button_hit(&self, column: u16, row: u16) -> bool {
+        self.geometry
+            .send_button
+            .is_some_and(|rect| row == rect.y && column >= rect.x && column < rect.right())
     }
 
     fn toolbar_hit(&self, column: u16, row: u16) -> Option<Kind> {

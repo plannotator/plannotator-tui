@@ -53,7 +53,7 @@ impl App {
 
     /// Annotations the next send covers: the open file's, or the folder's when the tree
     /// has focus.
-    fn send_count(&self) -> usize {
+    pub(super) fn send_count(&self) -> usize {
         match (&self.tree, self.focus) {
             (Some(tree), Focus::Tree) => tree.rows.iter().filter(|r| !r.is_dir).map(|r| r.annotations).sum(),
             _ => self.open.store.placed().len(),
@@ -61,7 +61,6 @@ impl App {
     }
 
     /// Text for the Send button.
-    #[allow(dead_code, reason = "wired by the herdr launcher and the send button in the phase 3 integration")]
     pub(super) fn send_label(&self) -> String {
         let target = self.delivery.describe();
         let count = self.send_count();
@@ -80,7 +79,7 @@ impl App {
     }
 
     /// True when an agent is waiting on feedback that has not been sent since it changed.
-    #[allow(dead_code, reason = "wired by the herdr launcher and the send button in the phase 3 integration")]
+    #[allow(dead_code, reason = "wired by the quit confirmation")]
     pub(super) fn has_unsent(&self) -> bool {
         self.delivery.is_agent() && self.open.store.len() > 0 && self.send_state != SendState::Sent
     }

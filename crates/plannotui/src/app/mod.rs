@@ -2,9 +2,12 @@
 //! the data they share and the operations that change it.
 
 mod draw;
+mod header;
 mod input;
 mod selection;
 mod send;
+#[cfg(test)]
+mod tests;
 
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -60,6 +63,8 @@ struct Geometry {
     toolbar: Option<(Rect, [Range<u16>; 3])>,
     /// Screen rects of the rail bubbles drawn last frame, with their annotation ids.
     bubbles: Vec<(Rect, String)>,
+    /// The header's Send button; `None` when the header was too narrow for it.
+    send_button: Option<Rect>,
 }
 
 /// A finished selection waiting for an action.

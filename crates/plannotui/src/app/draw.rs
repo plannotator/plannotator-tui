@@ -66,7 +66,7 @@ impl App {
             Constraint::Length(rail_width),
         ])
         .areas(body);
-        self.geometry = Geometry { tree, doc, toolbar: None, bubbles: Vec::new() };
+        self.geometry = Geometry { tree, doc, toolbar: None, bubbles: Vec::new(), send_button: None };
 
         if self.open.layout.width != usize::from(doc.width) {
             self.open.layout.reflow(usize::from(doc.width));
@@ -89,16 +89,6 @@ impl App {
             Mode::Browse if self.pending.is_some() => self.draw_toolbar(frame),
             Mode::Browse => {}
         }
-    }
-
-    fn draw_header(&self, frame: &mut Frame, area: Rect) {
-        let title = Line::from(vec![
-            Span::raw(" ").dim(),
-            Span::styled(self.open.source.name.clone(), Style::new().bold()),
-        ]);
-        let right = Line::from(Span::raw("plannotui ").dim()).right_aligned();
-        frame.render_widget(Paragraph::new(title), area);
-        frame.render_widget(Paragraph::new(right), area);
     }
 
     fn draw_tree(&self, frame: &mut Frame, area: Rect) {
