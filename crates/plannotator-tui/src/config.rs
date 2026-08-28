@@ -109,6 +109,10 @@ pub(crate) fn config_path(env: impl Fn(&str) -> Option<String>, home: &Path) -> 
     if let Some(explicit) = env("PLANNOTATOR_TUI_CONFIG").filter(|s| !s.is_empty()) {
         return PathBuf::from(explicit);
     }
+    #[cfg(windows)]
+    if let Some(appdata) = env("APPDATA").map(PathBuf::from).filter(|p| p.is_absolute()) {
+        return appdata.join("plannotator-tui").join("config.toml");
+    }
     let xdg = env("XDG_CONFIG_HOME").map(PathBuf::from).filter(|p| p.is_absolute());
     xdg.unwrap_or_else(|| home.join(".config")).join("plannotator-tui").join("config.toml")
 }
@@ -170,6 +174,17 @@ mod tests {
         assert_eq!(config.herdr.popup_width, "90%");
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn config_lives_under_appdata_on_windows() {
+        let lookup = |k: &str| (k == "APPDATA").then(|| r"C:\Users\u\AppData\Roaming".to_owned());
+        assert_eq!(
+            config_path(lookup, Path::new(r"C:\Users\u")),
+            PathBuf::from(r"C:\Users\u\AppData\Roaming\plannotator-tui\config.toml")
+        );
+    }
+
+    #[cfg(unix)]
     #[test]
     fn config_path_precedence() {
         let home = Path::new("/home/u");

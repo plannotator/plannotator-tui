@@ -80,7 +80,11 @@ fn agent_skill_delivers_to_and_splits_beside_the_calling_pane() {
 #[test]
 fn ctrl_click_opens_the_linked_file() {
     let root = temp_folder("click");
-    let url = format!("file://{}/docs/plan.md", root.display());
+    // `file:///abs/path` on Unix; `file:///C:/abs/path` on Windows.
+    let url = format!(
+        "file:///{}/docs/plan.md",
+        root.display().to_string().replace('\\', "/").trim_start_matches('/')
+    );
     let context = HerdrContext {
         focused_pane_id: Some("w1:p1".into()),
         focused_pane_agent: Some("claude".into()),

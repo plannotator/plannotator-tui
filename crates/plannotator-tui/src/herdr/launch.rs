@@ -45,7 +45,16 @@ fn file_url_path(url: &str) -> Option<PathBuf> {
         Some(slash) if matches!(&rest[..slash], "" | "localhost") => &rest[slash..],
         _ => return None,
     };
-    Some(PathBuf::from(percent_decode(path)))
+    let decoded = percent_decode(path);
+    // Windows: `file:///C:/x` carries a leading slash before the drive letter.
+    #[cfg(windows)]
+    let decoded = match decoded.as_bytes() {
+        [b'/', drive, b':', ..] if drive.is_ascii_alphabetic() => {
+            decoded.get(1..).unwrap_or_default().to_owned()
+        }
+        _ => decoded,
+    };
+    Some(PathBuf::from(decoded))
 }
 
 fn percent_decode(s: &str) -> String {
