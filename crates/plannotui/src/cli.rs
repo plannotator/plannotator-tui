@@ -14,6 +14,7 @@ use ratatui::crossterm::event::{self, DisableMouseCapture, EnableMouseCapture};
 use ratatui::crossterm::execute;
 
 use crate::app::App;
+use crate::config::Config;
 use crate::delivery::{Clipboard, Delivery, Discard};
 use crate::doc::Document;
 use crate::layout::DocLayout;
@@ -25,7 +26,9 @@ const USAGE: &str = "usage:
   plannotui --blocks <file.md>
   plannotui --annotate <file.md> <quote> <text> [comment|looks_good|delete]
   plannotui --annotate-block <file.md> <block> <text>
-  plannotui --snapshot <file.md> [cols rows scroll] [select-quote]";
+  plannotui --snapshot <file.md> [cols rows scroll] [select-quote]
+  plannotui config
+  plannotui herdr open [file.md | folder] [--placement overlay|split|popup] [--deliver-to <pane>]";
 
 /// Width the document gets when nothing else is known: gutter + rail + gap subtracted.
 fn doc_width(cols: u16) -> usize {
@@ -91,10 +94,50 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
             let scroll: i64 = arg(4).and_then(|s| s.parse().ok()).unwrap_or(0);
             snapshot(&path(1)?, cols, rows, scroll, arg(5))
         }
+        Some("config") => show_config(),
+        Some("herdr") => herdr_command(args.get(1..).unwrap_or_default()),
         Some(flag) if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{USAGE}"),
         Some(_) => interactive(&path(0)?),
         None => anyhow::bail!(USAGE),
     }
+}
+
+/// `plannotui config`: where the file is and what is in effect.
+fn show_config() -> Result<()> {
+    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from);
+    let path = crate::config::config_path(|k| std::env::var(k).ok(), &home);
+    let config = Config::load_from(&path)?;
+    let state = if path.is_file() { "" } else { " (not present; defaults)" };
+    println!("# {}{state}", path.display());
+    print!("{}", config.to_toml()?);
+    Ok(())
+}
+
+/// `plannotui herdr open [PATH] [--placement P] [--deliver-to PANE]`.
+fn herdr_command(args: &[String]) -> Result<()> {
+    use crate::herdr::launch::{OpenArgs, plan, run};
+    let Some("open") = args.first().map(String::as_str) else { anyhow::bail!(USAGE) };
+    let mut open = OpenArgs::default();
+    let mut rest = args.get(1..).unwrap_or_default().iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--placement" => {
+                let value = rest.next().context("--placement needs a value")?;
+                open.placement = Some(value.parse()?);
+            }
+            "--deliver-to" => {
+                open.deliver_to = Some(rest.next().context("--deliver-to needs a value")?.clone());
+            }
+            flag if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{USAGE}"),
+            path if open.path.is_none() => open.path = Some(PathBuf::from(path)),
+            extra => anyhow::bail!("unexpected argument {extra:?}\n{USAGE}"),
+        }
+    }
+    let env = crate::herdr::context::HerdrEnv::from_env();
+    let config = Config::load()?;
+    let cwd = std::env::current_dir().context("current directory")?;
+    let launch = plan(&env, &config, open, &cwd)?;
+    run(&env, &launch)
 }
 
 fn interactive(path: &PathBuf) -> Result<()> {

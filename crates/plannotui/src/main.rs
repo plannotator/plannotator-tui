@@ -2,9 +2,11 @@
 
 mod app;
 mod cli;
+mod config;
 mod delivery;
 mod doc;
 mod export;
+mod herdr;
 mod layout;
 mod srcmap;
 mod store;
