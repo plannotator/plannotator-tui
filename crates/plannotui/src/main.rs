@@ -1,6 +1,7 @@
 //! plannotui: annotate Markdown in the terminal.
 
 mod app;
+mod base64;
 mod cli;
 mod delivery;
 mod doc;
