@@ -158,16 +158,43 @@ anonymous shares.
 - Editing bodies from plannotui. It is an annotator; the sync CLI carries edits made in
   the user's editor.
 
-## Open questions (for workspaces-ops / the handoff)
+## Answers from the API (verified in the Workspaces source, 2026-08-28)
 
-1. Path rules: charset, max length, case sensitivity; does the server require `.md`?
-2. Can plannotui create a workspace with a chosen id, or is it always minted?
-3. Deleting a document: are its annotations deleted, orphaned, or kept and hidden?
-4. Is there an API way to resolve a `share_url` to `(workspace_id, api_origin, token)` for
-   the "teammate opens a link in their terminal" path, or must we parse the URL?
-5. Does the sync CLI expose `files.document_id` stably enough to read (schema version),
-   or should plannotui ask `GET /v1/workspaces/{ws}` and map by `doc_path` instead?
-6. Rate limits on a burst of ~200 document creates during first connect.
+1. **Path rules** (`packages/core/src/paths.ts:27`): `/` only (backslash rejected), no
+   leading/trailing/double slash, no `.`/`..`/`.git` segment, no control chars or `\ ? # %`,
+   255 UTF-8 **bytes** per component, no depth or total cap, **case-sensitive and
+   byte-exact**, `.md` **not** required. NFC-equal-but-not-identical paths → `409
+   path_conflict`; macOS gives NFD names, so normalize to NFC before upload. Documents and
+   assets share one namespace.
+2. **Ids**: the workspace id may be client-minted (`ws_` + 26 Crockford chars) and is the
+   only create-idempotency handle — but it is **permanently single-use, even after
+   deletion**. Document ids are always server-minted. `kind` is never inferred from the
+   extension; send `kind: "markdown"` explicitly.
+3. **Deleting a document** is permanent, no trash; its annotations go with it (keyed on
+   document id). Deleting the last document leaves an empty workspace. **Rename/move is
+   `PATCH {doc_path}` and keeps the id**, so annotations follow — never delete-and-re-add.
+4. **Share links**: `POST /v1/workspaces/{ws}/shares {mode: view|edit}` → `{id, token,
+   share_url}`; the token is shown **once**, no expiry field exists, revoke is immediate.
+   `share_url` is `…/w/{wsId}?share=<token>`, so the teammate path parses the id and token
+   from the URL. A link holder on `edit` can add/move/delete documents and delete **any**
+   comment; can never delete the workspace.
+5. **Sync CLI state** is a Go-private `state.sqlite`; do not read or share it. Read the
+   document ids from `GET /v1/workspaces/{ws}` (`documents[]` by `doc_path`) instead.
+6. **Rate limits apply to anonymous traffic only**; a human session or API key is exempt.
+   Anonymous: 10 workspace mints/min, 60 writes/min per IP, `429` with `Retry-After`.
+7. **Credentials**: `POST /v1/api-keys` needs a browser session — plannotui cannot
+   bootstrap its own key; the user pastes one. Better: the **`cli_token` flow**
+   (`GET /cli/login` loopback + PKCE), which counts as the human's own hand — never gated
+   by workspace rules, never turned into a proposal. That is the credential to implement.
+8. **Two gotchas that change behaviour**: an agent credential's `PUT`/`PATCH` may return
+   `202` (a proposal, not applied) — another reason for `cli_token`; and an **anonymous
+   `link_edit` workspace has no owner and can never be deleted** by anyone — always create
+   with a credential.
+9. **`workspaces connect` requires org membership** — a link-shared workspace cannot be
+   connected as a folder by the teammate. So the "teammate opens the link in their
+   terminal" path (3c) must use the REST API directly, not the sync CLI.
+
+Full report: `.local/prd/herdr-knowledge/report-workspaces-folder-model.md` (herdr repo).
 
 ## Phasing
 
@@ -176,4 +203,6 @@ anonymous shares.
   contents and the manifest.
 - **3b**: shell out to `workspaces connect/disconnect`, mint the share link, annotation
   round-trip via the API. Needs a real account and the web app open.
-- **3c**: `plannotui open <share_url>` for the teammate side.
+- **3c**: `plannotui open <share_url>` for the teammate side — REST only (see answer 9):
+  fetch the document list and bodies with `?share=`, annotate, post comments. No local
+  sync folder for link holders.
