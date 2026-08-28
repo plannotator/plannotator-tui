@@ -18,8 +18,8 @@ use crate::wrap::{Row, clip_line, wrap_line};
 const BLOCK_GAP: usize = 1;
 
 /// House style: no `#` markers, headings carry weight through bold/underline rather than
-/// background color, so the palette stays available for selection and comments.
-#[derive(Clone)]
+/// background color, so the palette stays available for selection and annotations.
+#[derive(Debug, Clone)]
 struct Styles;
 
 impl StyleSheet for Styles {
@@ -30,7 +30,7 @@ impl StyleSheet for Styles {
             _ => Style::new().fg(Color::LightCyan).add_modifier(Modifier::BOLD),
         }
     }
-    fn heading_marker(&self, _level: u8) -> &str {
+    fn heading_marker(&self, _level: u8) -> &'static str {
         ""
     }
     fn code(&self) -> Style {
@@ -44,29 +44,32 @@ impl StyleSheet for Styles {
     }
 }
 
-pub struct RenderedBlock {
+#[derive(Debug)]
+pub(crate) struct RenderedBlock {
     /// Width-independent styled lines from the renderer (owned, cached).
     text: Text<'static>,
     /// Per line, per char: absolute source byte offset (cached with `text`).
     offsets: Vec<LineOffsets>,
     kind: BlockKind,
     /// Rows for the current width.
-    pub rows: Vec<Row>,
+    pub(crate) rows: Vec<Row>,
     /// First screen row of this block in document coordinates.
-    pub first_row: usize,
+    pub(crate) first_row: usize,
 }
 
-pub struct DocLayout {
-    pub width: usize,
-    pub blocks: Vec<RenderedBlock>,
-    pub total_rows: usize,
+#[derive(Debug)]
+pub(crate) struct DocLayout {
+    pub(crate) width: usize,
+    pub(crate) blocks: Vec<RenderedBlock>,
+    pub(crate) total_rows: usize,
 }
 
 fn render_block(doc: &Document, index: usize) -> (Text<'static>, Vec<LineOffsets>) {
     let source = doc.block_text(index);
     let text = own(tui_markdown::from_str_with_options(source, &Options::new(Styles)));
-    let plain: Vec<String> = text.lines.iter().map(|l| l.to_string()).collect();
-    let offsets = align(&plain, source, doc.blocks[index].range.start);
+    let plain: Vec<String> = text.lines.iter().map(ToString::to_string).collect();
+    let base = doc.blocks.get(index).map_or(0, |b| b.range.start);
+    let offsets = align(&plain, source, base);
     (text, offsets)
 }
 
@@ -75,12 +78,9 @@ fn own(text: Text<'_>) -> Text<'static> {
         .lines
         .into_iter()
         .map(|line| {
-            let spans = line
-                .spans
-                .into_iter()
-                .map(|s| ratatui::text::Span::styled(s.content.into_owned(), s.style))
-                .collect::<Vec<_>>();
-            Line::from(spans).style(line.style)
+            let spans =
+                line.spans.into_iter().map(|s| ratatui::text::Span::styled(s.content.into_owned(), s.style));
+            Line::from(spans.collect::<Vec<_>>()).style(line.style)
         })
         .collect::<Vec<_>>();
     Text::from(lines).style(text.style)
@@ -88,11 +88,14 @@ fn own(text: Text<'_>) -> Text<'static> {
 
 impl DocLayout {
     /// Render every block once (the expensive part) and lay out for `width`.
-    pub fn build(doc: &Document, width: usize) -> Self {
-        let blocks = (0..doc.blocks.len())
-            .map(|i| {
+    pub(crate) fn build(doc: &Document, width: usize) -> Self {
+        let blocks = doc
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(i, block)| {
                 let (text, offsets) = render_block(doc, i);
-                RenderedBlock { text, offsets, kind: doc.blocks[i].kind, rows: Vec::new(), first_row: 0 }
+                RenderedBlock { text, offsets, kind: block.kind, rows: Vec::new(), first_row: 0 }
             })
             .collect();
         let mut layout = Self { width: 0, blocks, total_rows: 0 };
@@ -101,7 +104,7 @@ impl DocLayout {
     }
 
     /// Re-wrap for a new width without re-rendering markdown.
-    pub fn reflow(&mut self, width: usize) {
+    pub(crate) fn reflow(&mut self, width: usize) {
         let width = width.max(1);
         self.width = width;
         let mut row = 0usize;
@@ -119,26 +122,73 @@ impl DocLayout {
     }
 
     /// Which block owns a document row (gap rows belong to nobody).
-    pub fn block_at_row(&self, row: usize) -> Option<usize> {
+    pub(crate) fn block_at_row(&self, row: usize) -> Option<usize> {
         let idx = self.blocks.partition_point(|b| b.first_row <= row);
         let i = idx.checked_sub(1)?;
-        let block = &self.blocks[i];
+        let block = self.blocks.get(i)?;
         (row < block.first_row + block.rows.len()).then_some(i)
     }
 
     /// The row at document coordinate `row`, if it exists (None for gap rows).
-    pub fn row(&self, row: usize) -> Option<&Row> {
-        let i = self.block_at_row(row)?;
-        let block = &self.blocks[i];
+    pub(crate) fn row(&self, row: usize) -> Option<&Row> {
+        let block = self.blocks.get(self.block_at_row(row)?)?;
         block.rows.get(row - block.first_row)
     }
 
     /// First document row on which any cell falls inside `range`.
-    pub fn first_row_in_range(&self, block: usize, range: &Range<usize>) -> Option<usize> {
+    pub(crate) fn first_row_in_range(&self, block: usize, range: &Range<usize>) -> Option<usize> {
         let b = self.blocks.get(block)?;
         b.rows
             .iter()
             .position(|r| r.cells.iter().any(|c| c.is_some_and(|o| range.contains(&o))))
             .map(|i| b.first_row + i)
+    }
+
+    /// The rendered text under a source range, in the web client's form: rendered
+    /// characters whose source offset falls in `range`, blocks joined with no separator.
+    ///
+    /// The renderer maps a soft line break to nothing, so a break inside a wrapping block
+    /// is recovered from the source: when consecutive rendered characters skip over
+    /// whitespace in the source, one space is emitted (the DOM renders a soft break as a
+    /// space). Code and tables keep their newlines.
+    pub(crate) fn rendered_in_range(&self, source: &str, range: &Range<usize>) -> String {
+        let mut out = String::new();
+        for block in &self.blocks {
+            let break_char = if block.kind.preserves_columns() { '\n' } else { ' ' };
+            let mut last_offset: Option<usize> = None;
+            let chars = block.text.lines.iter().zip(&block.offsets).flat_map(|(line, offsets)| {
+                line.spans.iter().flat_map(|s| s.content.chars()).zip(offsets.iter())
+            });
+            for (ch, offset) in chars {
+                let Some(offset) = offset.filter(|o| range.contains(o)) else { continue };
+                if let Some(prev) = last_offset
+                    && let Some(skipped) = source.get(prev..offset)
+                    && skipped.chars().any(char::is_whitespace)
+                    && !out.ends_with(char::is_whitespace)
+                {
+                    out.push(break_char);
+                }
+                out.push(ch);
+                last_offset = Some(offset + ch.len_utf8());
+            }
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "tests assert by panicking")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rendered_text_strips_markup_and_joins_blocks_without_separator() {
+        let doc = Document::parse("Ship the **login page**\nby Friday.\n\nNext para.\n".to_owned());
+        let layout = DocLayout::build(&doc, 80);
+        let whole = 0..doc.source.len();
+        assert_eq!(layout.rendered_in_range(&doc.source, &whole), "Ship the login page by Friday.Next para.");
+        let bold = doc.source.find("**login").expect("present");
+        let bold_range = bold..bold + "**login page**".len();
+        assert_eq!(layout.rendered_in_range(&doc.source, &bold_range), "login page");
     }
 }

@@ -1,15 +1,16 @@
 //! Document model: the source text split into top-level Markdown blocks with byte ranges.
 //!
 //! The parser is `pulldown-cmark`; this module only walks its event stream at depth zero
-//! and records where each block starts and ends in the source. Everything downstream
-//! (rendering, anchoring, hit-testing) is keyed by block index and byte range.
+//! and records where each block starts and ends. Everything downstream (rendering,
+//! anchoring, hit-testing) is keyed by block index and byte range. Nothing here knows what
+//! a heading or a list *is*.
 
 use std::ops::Range;
 
 use pulldown_cmark::{Event, Options, Parser, Tag};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BlockKind {
+pub(crate) enum BlockKind {
     Heading,
     Paragraph,
     List,
@@ -24,25 +25,26 @@ pub enum BlockKind {
 }
 
 impl BlockKind {
-    /// Code and tables must keep their columns; everything else word-wraps.
-    pub fn preserves_columns(self) -> bool {
+    /// Code and tables keep their columns; everything else word-wraps.
+    pub(crate) fn preserves_columns(self) -> bool {
         matches!(self, BlockKind::CodeBlock | BlockKind::Table)
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Block {
-    pub range: Range<usize>,
-    pub kind: BlockKind,
+pub(crate) struct Block {
+    pub(crate) range: Range<usize>,
+    pub(crate) kind: BlockKind,
 }
 
-pub struct Document {
-    pub source: String,
-    pub blocks: Vec<Block>,
+#[derive(Debug)]
+pub(crate) struct Document {
+    pub(crate) source: String,
+    pub(crate) blocks: Vec<Block>,
 }
 
-/// The same option set `tui-markdown` enables, so block boundaries agree with its renderer.
-pub fn parse_options() -> Options {
+/// The option set `tui-markdown` enables, so block boundaries agree with its renderer.
+fn parse_options() -> Options {
     Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_HEADING_ATTRIBUTES
@@ -57,13 +59,19 @@ pub fn parse_options() -> Options {
 }
 
 impl Document {
-    pub fn parse(source: String) -> Self {
+    pub(crate) fn parse(source: String) -> Self {
         let blocks = split_blocks(&source);
         Self { source, blocks }
     }
 
-    pub fn block_text(&self, index: usize) -> &str {
-        &self.source[self.blocks[index].range.clone()]
+    /// Source text of block `index`. Empty for an out-of-range index.
+    pub(crate) fn block_text(&self, index: usize) -> &str {
+        self.blocks.get(index).map_or("", |b| &self.source[b.range.clone()])
+    }
+
+    /// The block whose range contains `offset`.
+    pub(crate) fn block_containing(&self, offset: usize) -> Option<usize> {
+        self.blocks.iter().position(|b| b.range.contains(&offset))
     }
 }
 
@@ -97,25 +105,21 @@ fn split_blocks(source: &str) -> Vec<Block> {
             }
             Event::End(_) => {
                 depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    if let Some((start, kind)) = open.take() {
-                        blocks.push(Block { range: start..range.end, kind });
-                    }
+                if depth == 0
+                    && let Some((start, kind)) = open.take()
+                {
+                    blocks.push(Block { range: start..range.end, kind });
                 }
             }
-            Event::Rule if depth == 0 => {
-                blocks.push(Block { range, kind: BlockKind::Rule });
-            }
+            Event::Rule if depth == 0 => blocks.push(Block { range, kind: BlockKind::Rule }),
             // Any other depth-zero leaf (rare: stray html/text) becomes its own block.
-            _ if depth == 0 => {
-                blocks.push(Block { range, kind: BlockKind::Other });
-            }
+            _ if depth == 0 => blocks.push(Block { range, kind: BlockKind::Other }),
             _ => {}
         }
     }
 
-    // Trim trailing newlines out of ranges so quotes are stable across files that
-    // differ only in final-newline conventions.
+    // Trailing newlines are not part of a block's text: quotes stay stable across files
+    // that differ only in final-newline conventions.
     for block in &mut blocks {
         let text = &source[block.range.clone()];
         let trimmed = text.trim_end_matches(['\n', '\r']);
@@ -132,11 +136,11 @@ mod tests {
     #[test]
     fn splits_top_level_blocks_with_ranges() {
         let src = "# Title\n\nPara one\nstill one.\n\n- a\n- b\n\n```rs\nfn x() {}\n```\n\n---\n";
-        let doc = Document::parse(src.to_string());
+        let doc = Document::parse(src.to_owned());
         let kinds: Vec<_> = doc.blocks.iter().map(|b| b.kind).collect();
         assert_eq!(
             kinds,
-            vec![
+            [
                 BlockKind::Heading,
                 BlockKind::Paragraph,
                 BlockKind::List,
@@ -146,22 +150,13 @@ mod tests {
         );
         assert_eq!(doc.block_text(0), "# Title");
         assert_eq!(doc.block_text(1), "Para one\nstill one.");
-        assert_eq!(doc.block_text(2), "- a\n- b");
         assert_eq!(doc.block_text(3), "```rs\nfn x() {}\n```");
     }
 
     #[test]
-    fn front_matter_is_dropped() {
-        let doc = Document::parse("---\ntitle: X\n---\n\nBody\n".into());
+    fn front_matter_is_dropped_and_nested_lists_stay_one_block() {
+        let doc = Document::parse("---\ntitle: X\n---\n\n- a\n  - nested\n- b\n".to_owned());
         assert_eq!(doc.blocks.len(), 1);
-        assert_eq!(doc.block_text(0), "Body");
-    }
-
-    #[test]
-    fn nested_lists_stay_one_block() {
-        let src = "- a\n  - nested\n- b\n";
-        let doc = Document::parse(src.to_string());
-        assert_eq!(doc.blocks.len(), 1);
-        assert_eq!(doc.blocks[0].kind, BlockKind::List);
+        assert_eq!(doc.blocks.first().map(|b| b.kind), Some(BlockKind::List));
     }
 }

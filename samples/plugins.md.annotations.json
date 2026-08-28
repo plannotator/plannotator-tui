@@ -1,172 +1,82 @@
 {
-  "comments": [
+  "annotations": [
     {
-      "id": 1,
-      "kind": "comment",
+      "id": "local_18cfdfb3d944e418",
+      "document_id": "",
       "anchor": {
+        "originalText": "Treat a plugin like any extension you add to an editor, shell, or coding agent.",
+        "quote": "Treat a plugin like any extension you add to an editor, shell, or coding agent.",
+        "plannotui": {
+          "kind": "looks_good",
+          "quote": "Treat a plugin like any extension you add to an editor, shell, or coding\nagent.",
+          "source": {
+            "start": 1960,
+            "end": 2039,
+            "version": "4085e24234d34debfd6e7079f3209083a80d4c92"
+          },
+          "prefix": "nd can call the full Herdr\nCLI. ",
+          "suffix": "\n\nInstall or link plugins only f",
+          "block": 6
+        }
+      },
+      "body": "",
+      "author": null,
+      "state": "open",
+      "created_at": "2026-08-28T05:05:40Z",
+      "updated_at": "2026-08-28T05:05:40Z",
+      "replies": []
+    },
+    {
+      "id": "local_18cfdfb3db1e91d0",
+      "document_id": "",
+      "anchor": {
+        "originalText": "inherit your environment",
         "quote": "inherit your environment",
-        "prefix": "time\ncommands run as your user, ",
-        "suffix": ", and can call the full Herdr\nCL",
-        "block_hint": 6
+        "plannotui": {
+          "kind": "comment",
+          "quote": "inherit your environment",
+          "source": {
+            "start": 1901,
+            "end": 1925,
+            "version": "4085e24234d34debfd6e7079f3209083a80d4c92"
+          },
+          "prefix": "time\ncommands run as your user, ",
+          "suffix": ", and can call the full Herdr\nCL",
+          "block": 6
+        }
       },
-      "body": "Worth a warning box, not a clause.",
-      "created_at": 1787889914
+      "body": "Worth a warning box.",
+      "author": null,
+      "state": "open",
+      "created_at": "2026-08-28T05:05:40Z",
+      "updated_at": "2026-08-28T05:05:40Z",
+      "replies": []
     },
     {
-      "id": 2,
-      "kind": "approve",
+      "id": "local_18cfdfb3db9f1ff8",
+      "document_id": "",
       "anchor": {
-        "quote": "Treat a plugin like any extension you add to an editor, shell, or coding\nagent.",
-        "prefix": "nd can call the full Herdr\nCLI. ",
-        "suffix": "\n\nInstall or link plugins only f",
-        "block_hint": 6
-      },
-      "body": "",
-      "created_at": 1787889914
-    },
-    {
-      "id": 3,
-      "kind": "delete",
-      "anchor": {
+        "originalText": "skim the",
         "quote": "skim the",
-        "prefix": "fore\ninstalling or linking one, ",
-        "suffix": " `herdr-plugin.toml` manifest an",
-        "block_hint": 7
+        "plannotui": {
+          "kind": "delete",
+          "quote": "skim the",
+          "source": {
+            "start": 2145,
+            "end": 2153,
+            "version": "4085e24234d34debfd6e7079f3209083a80d4c92"
+          },
+          "prefix": "fore\ninstalling or linking one, ",
+          "suffix": " `herdr-plugin.toml` manifest an",
+          "block": 7
+        }
       },
       "body": "",
-      "created_at": 1787889927
-    },
-    {
-      "id": 4,
-      "kind": "approve",
-      "anchor": {
-        "quote": "d records logs. The commands call back into Herdr through\nthe CLI or socket when they",
-        "prefix": "starts the\ndeclared commands, an",
-        "suffix": " need to do more work.\n\nThere is",
-        "block_hint": 2
-      },
-      "body": "",
-      "created_at": 1787890085
-    },
-    {
-      "id": 5,
-      "kind": "comment",
-      "anchor": {
-        "quote": "ugin, and a plugin can\nrun anything you can run yourself as `herdr ...`. Most plugins should call Herdr\nthrough `HERDR_BIN_PATH`, which points at the running Herdr binary. Tha",
-        "prefix": "reference/) is available to a pl",
-        "suffix": "t keeps\nplugins portable across ",
-        "block_hint": 3
-      },
-      "body": "sdfsadfa",
-      "created_at": 1787890250
-    },
-    {
-      "id": 6,
-      "kind": "comment",
-      "anchor": {
-        "quote": "[[build]]\ncommand = [\"npm\", \"run\", \"build\"]\nplatforms = [\"linux\", \"macos\"]\n\n[[startup]]\ncommand = [\"node\", \"dist/restore.js\"]",
-        "prefix": "uild]]\ncommand = [\"npm\", \"ci\"]\n\n",
-        "suffix": "\n\n[[actions]]\nid = \"apply\"\ntitle",
-        "block_hint": 11
-      },
-      "body": "sadfasdf",
-      "created_at": 1787890255
-    },
-    {
-      "id": 7,
-      "kind": "delete",
-      "anchor": {
-        "quote": "Inside the command, call back into Herdr with `HERDR_BIN_PATH`:\n\n```js\nconst { spawnSync } = require(\"node:child_process\");\n\nconst herdr = process.env.HERDR_BIN_PATH ?? \"herdr\";\nconst result = spawnSync(herdr, [\"workspace\", \"list\"], {\n  encoding: \"utf8\",\n  stdio: [\"ignore\", \"pipe\", \"pipe\"],\n});",
-        "prefix": "and = [\"node\", \"index.js\"]\n```\n\n",
-        "suffix": "\n\nprocess.stdout.write(result.st",
-        "block_hint": 20
-      },
-      "body": "",
-      "created_at": 1787890258
-    },
-    {
-      "id": 8,
-      "kind": "approve",
-      "anchor": {
-        "quote": "tall` accepts GitHub shorthand only, such as\n`owner/repo/subdir`. It clones with `git`, shows a preview in interactive\nterminals, runs supported build commands, then stores the checkout under\nHerdr-managed plugin data and registers it. Use `--yes` for noninteractive\ninstalls. Reinstalling a GitHub-managed plugin replaces that managed checkout.\nInstalled and linked plugins, including their enabled state, are global to the\ncurrent user and available in every Herdr session. Both `plugin install` and\n`plugin link` can register plugins while no Herdr server is running. Plugins\ninstalled only in a named session on Herdr 0.7.3 must be installed or linked\nagain. Existing plugin config and state remain in place.\nInstalling over a locally linked plugin is refused; unlink or uninstall the\nlocal plugin first. `plugin install` and `plugin link` create the plugin's\nconfig and state directories, and `plugin co",
-        "prefix": " example.layout\n```\n\n`plugin ins",
-        "suffix": "nfig-dir <id>` prints the config",
-        "block_hint": 28
-      },
-      "body": "",
-      "created_at": 1787890260
-    },
-    {
-      "id": 9,
-      "kind": "comment",
-      "anchor": {
-        "quote": "xample plugins in subdirectories, including `agent-telegram-notify`,\n`github-link-preview`, and `dev-layout-bootstrap`. Use them as examples to copy;\nHerdr does not maintain them as official plugins.\n\n## Build commands\n\nBuild commands run during GitHub `plugin install` after confirmation and before\nHerdr registers the plugin. If a build command fails, install aborts and the\nplugin is not registered. `plugin link` does not run build commands; local\nauthors build their working tree themselves. Build commands may generate files,\nbut changing `herdr-plugin.toml` after the install preview aborts install. Build\nfailures show the plugin id, build index, working directory, command, exit\nstatus or spawn error, and capped stdout/stderr without interpreting tool output.\n\nBuild commands are plain argv commands too, but they do not receive runtime\nplugin context or Herdr socket env. Plugin authors should document required\nsystem tools such as `cargo`, `npm`, `bun`, or `lua`; Herdr reports build\nfailures but does not install missing toolchains.",
-        "prefix": "xamples`. It contains\nseparate e",
-        "suffix": "\n\n## Startup hooks\n\n`[[startup]]",
-        "block_hint": 30
-      },
-      "body": "asdfasdf",
-      "created_at": 1787890264
-    },
-    {
-      "id": 10,
-      "kind": "approve",
-      "anchor": {
-        "quote": "Runtime commands run with the plugin directory as their working directory. Herdr\ninjects `HERDR_SOCKET_PATH`, `HERDR_BIN_PATH`, `HERDR_ENV=1`,\n`HERDR_PLUGIN_ID`, `HERDR_PLUGIN_ROOT`, `HERDR_PLUGIN_CONFIG_DIR`,\n`HERDR_PLUGIN_STATE_DIR`, `HERDR_PLUGIN_CONTEXT_JSON`, and any available\n`HERDR_WORKSPACE_ID`, `HERDR_TAB_ID`, and `HERDR_PANE_ID`. Action commands also\nreceive `HERDR_PLUGIN_ACTION_ID`; startup and event hooks receive\n`HERDR_PLUGIN_EVENT` (`startup` for startup hooks), event hooks additionally\nreceive `HERDR_PLUGIN_EVENT_JSON`, and pane commands receive\n`HERDR_PLUGIN_ENTRYPOINT_ID`.\n\n`HERDR_PLUGIN_ROOT` is the installed or linked plugin directory. Do not store\nuser credentials or durable state there, because GitHub-installed plugin roots\nare managed source checkouts. Put user-editable config such as `.env` files\nunder `HERDR_PLUGIN_CONFIG_DIR`, and put local runtime state under\n`HERDR_PLUGIN_STATE_DIR`. Herdr creates those directories and seeds\n`HERDR_PLUGIN_CONFIG_DIR` from the legacy plugin config locations when present,\nbut it does not validate, sync, or delete their contents. The plugin owns the\nfile format and lifecycle.\n\n`HERDR_PLUGIN_CONTEXT_JSON` can include workspace, tab, focused pane, worktree,\nagent, selected text, clicked URL, and link handler fields when they are\navailable for that invocation. Shell plugins can read the individual env vars\nfor common ids, or parse the context JSON for the full shape.\n\nUse `HERDR_BIN_PATH` when a plugin needs to call Herdr portably from Node,\nPowerShell, Bash, or another runtime. The raw socket transport behind\n`HERDR_SOCKET_PATH` is OS-specific: Unix clients connect to a Unix socket path,\nwhile Windows clients connect to a named pipe. CLI calls through\n`HERDR_BIN_PATH` avoid that transport difference. See the\n[CLI reference](/docs/cli-reference/) for available commands and\n[socket API](/docs/socket-api/) for raw request shapes.\n\n## Panes",
-        "prefix": ".\n\n## Commands and environment\n\n",
-        "suffix": "\n\nManifest pane `placement` defa",
-        "block_hint": 39
-      },
-      "body": "",
-      "created_at": 1787890267
-    },
-    {
-      "id": 11,
-      "kind": "delete",
-      "anchor": {
-        "quote": "ooks\n\n`[[startup]]` commands run once for each enabled plugin after Herdr restores the\nsession and its API socket is ready. They run again when a new server takes over\nduring live handoff, but not when a client attaches, config reloads, or a plugin\nis linked or enabled. Herdr starts them asynchronously and records their\ncompletion in the normal plugin command log. A startup failure does not stop the\nserver.\n\nStartup hooks are one-shot initialization commands rather than supervised\ndaemons. A hook should restore plugin-owned state, call any required Herdr APIs,\nand exit. For example, a plugin can save a declarative Agent view under\n`HERDR_PLUGIN_STATE_DIR`, then read and reapply that view from its startup hook.\n\nStartup hooks receive the normal runtime plugin environment and\n`HERDR_PLUGIN_EVENT=startup`. The install preview lists every startup command so\nusers can review code t",
-        "prefix": "issing toolchains.\n\n## Startup h",
-        "suffix": "hat will run automatically.\n\n## ",
-        "block_hint": 34
-      },
-      "body": "",
-      "created_at": 1787890271
-    },
-    {
-      "id": 12,
-      "kind": "comment",
-      "anchor": {
-        "quote": "nal-cell dimensions, or use strings like `\"80%\"` for a percentage of the\nterminal area. It receives all terminal input, including Escape, and closes\nwhen the command exits or a `popup.close` request is sent. Dimensions smaller\nthan the popup minimum are clamped.\n\nDeclare the placement directly on a plugin pane entrypoint when the pane should\nalways be transient:\n\n```toml\n[[panes]]\nid = \"picker\"\ntitle = \"Picker\"\nplatforms = [\"linux\", \"macos\"]\nplacement = \"popup\"\nwidth = \"80%\"\nheight = 20\ncommand = [\"sh\", \"picker.sh\"]\n```\n\nSplit, tab, zoomed, and overlay plugin panes are normal Herdr panes after they\nopen. Plugins can call standard pane APIs such as `pane.move`, `pane.swap`,\n`pane.resize`, and `pane.zoom` through the socket or CLI; Herdr keeps plugin\npane ownership attached to the underlying pane when it moves across tabs or\nworkspaces. A popup is a singleton session resource rather than a Herdr pane:\nit has no pane ID, does not change plugin focus context, emits no pane lifecycle\nevents, and does not participate in pane, layout, persistence, or agent APIs.\nIts process does not receive `HERDR_PANE_ID`; the underlying tiled pane remains\navailable through `HERDR_PLUGIN_CONTEXT_JSON`.\nOpening a popup returns `ui_busy` while Settings, Copy mode, or another Herdr\nmodal is active, and `plugin.pane.open` returns an `ok` result after launch.\n\nOn Windows, build commands, action commands, and event commands resolve common\n`PATHEXT` shims such as `npm.cmd`, `bun.cmd`, and `pnpm.cmd` when the bare\ncommand is on `PATH`. Pane commands use Herdr's normal Windows pane launcher and\nmust still be valid Windows argv commands.\n\n## Keybindings",
-        "prefix": "pup, use numbers for outer\ntermi",
-        "suffix": "\n\nBind a key to an installed plu",
-        "block_hint": 45
-      },
-      "body": "afqergqegr",
-      "created_at": 1787890302
-    },
-    {
-      "id": 13,
-      "kind": "approve",
-      "anchor": {
-        "quote": "plugin_ac",
-        "prefix": "mand]]\nkey = \"prefix+l\"\ntype = \"",
-        "suffix": "tion\"\ncommand = \"example.layout.",
-        "block_hint": 52
-      },
-      "body": "",
-      "created_at": 1787890306
-    },
-    {
-      "id": 14,
-      "kind": "comment",
-      "anchor": {
-        "quote": "Use `[[link_handlers]]` to route modified clicks on matching terminal URLs to a\nplugin action instead of opening the URL in the browser. The modified-click\nmodifier is Control on every platform, including macOS, because captured\nterminal mouse reports do not expose Command/Super separately from a plain\nclick. `pattern` is a Rust regular expression matched against the clicked URL,\nand `action` must\nname an action declared by the same plugin. Link handler actions receive\n`invocation_source = \"link_click\"`, `clicked_url`, and `link_handler_id` in\n`HERDR_PLUGIN_CONTEXT_JSON`; shell plugins can also read\n`HERDR_PLUGIN_CLICKED_URL` and `HERDR_PLUGIN_LINK_HANDLER_ID`. Handlers are\nchecked in manifest order inside each plugin.",
-        "prefix": " layout\"\n```\n\n## Link handlers\n\n",
-        "suffix": "\n\n## Storage\n\nThere is no Herdr-",
-        "block_hint": 54
-      },
-      "body": "awdffd",
-      "created_at": 1787890328
+      "author": null,
+      "state": "open",
+      "created_at": "2026-08-28T05:05:40Z",
+      "updated_at": "2026-08-28T05:05:40Z",
+      "replies": []
     }
   ]
 }

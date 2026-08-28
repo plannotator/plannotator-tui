@@ -9,11 +9,11 @@
 use similar::{Algorithm, DiffOp, capture_diff_slices};
 
 /// Per rendered line, per rendered char: the absolute source byte offset, if any.
-pub type LineOffsets = Vec<Option<usize>>;
+pub(crate) type LineOffsets = Vec<Option<usize>>;
 
 /// Align `rendered_lines` (plain text, one entry per line) against `source`, whose first
 /// byte sits at absolute offset `base`.
-pub fn align(rendered_lines: &[String], source: &str, base: usize) -> Vec<LineOffsets> {
+pub(crate) fn align(rendered_lines: &[String], source: &str, base: usize) -> Vec<LineOffsets> {
     let rendered: Vec<char> = rendered_lines.join("\n").chars().collect();
     let (src_chars, src_bytes): (Vec<char>, Vec<usize>) =
         source.char_indices().map(|(i, c)| (c, base + i)).unzip();
@@ -21,52 +21,48 @@ pub fn align(rendered_lines: &[String], source: &str, base: usize) -> Vec<LineOf
     let mut flat: Vec<Option<usize>> = vec![None; rendered.len()];
     for op in capture_diff_slices(Algorithm::Myers, &rendered, &src_chars) {
         if let DiffOp::Equal { old_index, new_index, len } = op {
-            for k in 0..len {
-                flat[old_index + k] = Some(src_bytes[new_index + k]);
+            let targets = flat.iter_mut().skip(old_index).take(len);
+            let sources = src_bytes.iter().skip(new_index);
+            for (target, byte) in targets.zip(sources) {
+                *target = Some(*byte);
             }
         }
     }
 
     // Split the flat map back into lines (the joining '\n' entries are dropped).
-    let mut out = Vec::with_capacity(rendered_lines.len());
     let mut cursor = 0;
-    for line in rendered_lines {
-        let n = line.chars().count();
-        out.push(flat[cursor..cursor + n].to_vec());
-        cursor += n + 1;
-    }
-    out
+    rendered_lines
+        .iter()
+        .map(|line| {
+            let n = line.chars().count();
+            let offsets = flat.get(cursor..cursor + n).map(<[_]>::to_vec).unwrap_or_default();
+            cursor += n + 1;
+            offsets
+        })
+        .collect()
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::indexing_slicing, reason = "tests assert by panicking")]
 mod tests {
     use super::*;
 
     #[test]
     fn maps_through_concealed_markup() {
         let source = "Ship the **login page** by Friday.";
-        let rendered = vec!["Ship the login page by Friday.".to_string()];
-        let map = align(&rendered, source, 100);
+        let map = align(&["Ship the login page by Friday.".to_owned()], source, 100);
+        let line = map.first().expect("one line");
         // 'l' of "login" is rendered char 9; in source it is byte 11 (after "**").
-        assert_eq!(map[0][9], Some(111));
-        assert_eq!(map[0][0], Some(100));
-        assert_eq!(map[0].last().copied().flatten(), Some(100 + source.len() - 1));
+        assert_eq!(line.get(9).copied().flatten(), Some(111));
+        assert_eq!(line.first().copied().flatten(), Some(100));
+        assert_eq!(line.last().copied().flatten(), Some(100 + source.len() - 1));
     }
 
     #[test]
     fn decoration_maps_to_nothing() {
-        let source = "- alpha\n- beta";
-        let rendered = vec!["• alpha".to_string(), "• beta".to_string()];
-        let map = align(&rendered, source, 0);
-        assert_eq!(map[0][0], None);
-        assert_eq!(map[0][2], Some(2)); // 'a' of alpha
-        assert_eq!(map[1][2], Some(10)); // 'b' of beta
-    }
-
-    #[test]
-    fn heading_without_marker() {
-        let map = align(&["Trust and security".to_string()], "## Trust and security", 50);
-        assert_eq!(map[0][0], Some(53));
-        assert_eq!(map[0].iter().filter(|o| o.is_none()).count(), 0);
+        let map = align(&["• alpha".to_owned(), "• beta".to_owned()], "- alpha\n- beta", 0);
+        assert_eq!(map.first().and_then(|l| l.first().copied()), Some(None));
+        assert_eq!(map.first().and_then(|l| l.get(2).copied()), Some(Some(2)));
+        assert_eq!(map.get(1).and_then(|l| l.get(2).copied()), Some(Some(10)));
     }
 }

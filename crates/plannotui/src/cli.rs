@@ -1,0 +1,197 @@
+//! Command-line entry points: the interactive viewer and the headless tools.
+//!
+//! This is the only module that prints to stdout.
+
+#![allow(clippy::print_stdout, reason = "the CLI's job is to print")]
+
+use std::io::stdout;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use anyhow::{Context, Result};
+use plannotui_schema::{DocumentSource, Kind};
+use ratatui::crossterm::event::{self, DisableMouseCapture, EnableMouseCapture};
+use ratatui::crossterm::execute;
+
+use crate::app::App;
+use crate::doc::Document;
+use crate::layout::DocLayout;
+
+const USAGE: &str = "usage:
+  plannotui <file.md>
+  plannotui --bench <file.md>
+  plannotui --blocks <file.md>
+  plannotui --annotate <file.md> <quote> <text> [comment|looks_good|delete]
+  plannotui --annotate-block <file.md> <block> <text>
+  plannotui --snapshot <file.md> [cols rows scroll] [select-quote]";
+
+/// Width the document gets when nothing else is known: gutter + rail + gap subtracted.
+fn doc_width(cols: u16) -> usize {
+    usize::from(cols.saturating_sub(2 + 1 + 36).max(20))
+}
+
+fn open_file(path: &PathBuf) -> Result<DocumentSource> {
+    let content = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    Ok(DocumentSource::file(path.clone(), content))
+}
+
+fn parse_kind(s: Option<&str>) -> Kind {
+    match s {
+        Some("looks_good" | "approve") => Kind::LooksGood,
+        Some("delete") => Kind::Delete,
+        _ => Kind::Comment,
+    }
+}
+
+pub(crate) fn run(args: &[String]) -> Result<()> {
+    let arg = |i: usize| args.get(i).map(String::as_str);
+    let path = |i: usize| arg(i).map(PathBuf::from).context(USAGE);
+    match arg(0) {
+        Some("--bench") => bench(&path(1)?),
+        Some("--blocks") => {
+            let app = App::open(open_file(&path(1)?)?, 100)?;
+            for line in app.describe_blocks() {
+                println!("{line}");
+            }
+            Ok(())
+        }
+        Some("--annotate") => {
+            let mut app = App::open(open_file(&path(1)?)?, 100)?;
+            let quote = arg(2).context(USAGE)?;
+            let body = arg(3).context(USAGE)?.to_owned();
+            app.add_quote_annotation(quote, parse_kind(arg(4)), body)
+        }
+        Some("--annotate-block") => {
+            let mut app = App::open(open_file(&path(1)?)?, 100)?;
+            let block: usize = arg(2).and_then(|s| s.parse().ok()).context(USAGE)?;
+            let body = arg(3).context(USAGE)?.to_owned();
+            app.add_block_annotation(block, Kind::Comment, body)
+        }
+        Some("--snapshot") => {
+            let cols: u16 = arg(2).and_then(|s| s.parse().ok()).unwrap_or(140);
+            let rows: u16 = arg(3).and_then(|s| s.parse().ok()).unwrap_or(40);
+            let scroll: i64 = arg(4).and_then(|s| s.parse().ok()).unwrap_or(0);
+            snapshot(&path(1)?, cols, rows, scroll, arg(5))
+        }
+        Some(flag) if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{USAGE}"),
+        Some(_) => interactive(&path(0)?),
+        None => anyhow::bail!(USAGE),
+    }
+}
+
+fn interactive(path: &PathBuf) -> Result<()> {
+    let source = open_file(path)?;
+    let mut terminal = ratatui::init();
+    execute!(stdout(), EnableMouseCapture)?;
+    let result = event_loop(&mut terminal, source);
+    let _ = execute!(stdout(), DisableMouseCapture);
+    ratatui::restore();
+    result
+}
+
+fn event_loop(terminal: &mut ratatui::DefaultTerminal, source: DocumentSource) -> Result<()> {
+    let mut app = App::open(source, doc_width(terminal.size()?.width))?;
+    app.clipboard = true;
+    let mut dirty = true;
+    while !app.quit {
+        if dirty {
+            let started = Instant::now();
+            terminal.draw(|frame| app.draw(frame))?;
+            app.record_frame(started.elapsed().as_secs_f64() * 1000.0);
+            dirty = false;
+        }
+        if event::poll(Duration::from_millis(250))? {
+            app.handle_event(&event::read()?)?;
+            dirty = true;
+            // Coalesce bursts (wheel, drag) into one redraw.
+            while event::poll(Duration::ZERO)? {
+                app.handle_event(&event::read()?)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Headless timing of the expensive paths: parse, per-block render + align, and reflow.
+fn bench(path: &PathBuf) -> Result<()> {
+    let source = open_file(path)?;
+    let bytes = source.content.len();
+    let t = Instant::now();
+    let doc = Document::parse(source.content);
+    let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+    let t = Instant::now();
+    let mut layout = DocLayout::build(&doc, 100);
+    let build_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+    let reflow: Vec<String> = [60usize, 140, 80, 120]
+        .into_iter()
+        .map(|width| {
+            let t = Instant::now();
+            layout.reflow(width);
+            format!("{width}→{:.1}ms", t.elapsed().as_secs_f64() * 1000.0)
+        })
+        .collect();
+
+    let t = Instant::now();
+    let hits = (0..layout.total_rows).step_by(7).filter(|&row| layout.block_at_row(row).is_some()).count();
+    let lookup_us = t.elapsed().as_secs_f64() * 1e6 / (layout.total_rows / 7).max(1) as f64;
+
+    let cells: usize = layout.blocks.iter().flat_map(|b| b.rows.iter()).map(|r| r.cells.len()).sum();
+    let mapped: usize =
+        layout.blocks.iter().flat_map(|b| b.rows.iter()).flat_map(|r| r.cells.iter()).flatten().count();
+
+    println!("{}: {bytes} bytes, {} blocks", path.display(), doc.blocks.len());
+    println!("parse+split          {parse_ms:8.1} ms");
+    println!("render+align+wrap    {build_ms:8.1} ms  ({} rows)", layout.total_rows);
+    println!("reflow               {}", reflow.join("  "));
+    println!("row lookup           {lookup_us:8.3} µs avg ({hits} hits)");
+    println!("cells mapped         {mapped}/{cells} ({:.1}%)", mapped as f64 * 100.0 / cells.max(1) as f64);
+    Ok(())
+}
+
+/// Draw one frame into an in-memory backend and print it as text, followed by a mark map:
+/// `#` comment, `+` looks good, `-` delete, `%` selected.
+fn snapshot(path: &PathBuf, cols: u16, rows: u16, scroll: i64, select: Option<&str>) -> Result<()> {
+    use ratatui::backend::TestBackend;
+    use ratatui::style::{Color, Modifier};
+    let mut terminal = ratatui::Terminal::new(TestBackend::new(cols, rows))?;
+    let mut app = App::open(open_file(path)?, doc_width(cols))?;
+    terminal.draw(|frame| app.draw(frame))?;
+    app.scroll_for_snapshot(scroll);
+    if let Some(quote) = select {
+        app.select_quote_for_snapshot(quote)?;
+    }
+    terminal.draw(|frame| app.draw(frame))?;
+    let buffer = terminal.backend().buffer();
+    let mut marks = Vec::new();
+    for y in 0..buffer.area.height {
+        let mut line = String::new();
+        let mut mark = String::new();
+        for x in 0..buffer.area.width {
+            let Some(cell) = buffer.cell((x, y)) else { continue };
+            line.push_str(cell.symbol());
+            let style = cell.style();
+            mark.push(if style.add_modifier.contains(Modifier::REVERSED) {
+                '%'
+            } else if style.add_modifier.contains(Modifier::CROSSED_OUT) {
+                '-'
+            } else if style.bg == Some(Color::Indexed(22)) {
+                '+'
+            } else if style.bg == Some(Color::Indexed(58)) {
+                '#'
+            } else {
+                ' '
+            });
+        }
+        println!("{}", line.trim_end());
+        marks.push(mark);
+    }
+    if marks.iter().any(|m| !m.trim().is_empty()) {
+        println!("--- marks ---");
+        for m in marks {
+            println!("{}", m.trim_end());
+        }
+    }
+    Ok(())
+}
