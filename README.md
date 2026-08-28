@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/assets/banner.png" alt="Plannotator TUI" width="720"></p>
+<img src="docs/assets/banner.webp" alt="Plannotator TUI" width="720">
 
 Annotate Markdown in the terminal: select text, comment, 👍 looks good, ✗ delete.
 A standalone app, and a Herdr plugin that knows how to open it.
