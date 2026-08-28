@@ -2,7 +2,7 @@
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, reason = "tests assert by panicking")]
 
-use std::fs::{self, File};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -31,7 +31,8 @@ impl FactoryDir {
         let path = dir.join(format!("{id}.jsonl"));
         fs::write(&path, content).expect("log");
         let when = SystemTime::now() - Duration::from_secs(age_secs);
-        File::open(&path).expect("open").set_modified(when).expect("mtime");
+        // Windows needs write access to change a timestamp.
+        fs::OpenOptions::new().write(true).open(&path).expect("open").set_modified(when).expect("mtime");
         path
     }
 }
