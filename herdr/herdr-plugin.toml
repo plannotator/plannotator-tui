@@ -1,0 +1,20 @@
+id = "plannotui"
+name = "plannotui"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Annotate Markdown files in a pane: select text, comment, looks-good, delete."
+platforms = ["macos", "linux"]
+
+# Full-screen by default: an overlay is a real pane zoomed to the tab, and Herdr restores
+# the previous focus and zoom when the process exits. Use --placement split for side-by-side.
+[[panes]]
+id = "doc"
+title = "plannotui"
+placement = "overlay"
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotui\" \"${PLANNOTUI_FILE:-$HERDR_PLUGIN_ROOT/../samples/plugins.md}\""]
+
+[[actions]]
+id = "open"
+title = "plannotui: open"
+contexts = ["workspace"]
+command = ["sh", "-c", "exec \"$HERDR_BIN_PATH\" plugin pane open --plugin plannotui --entrypoint doc --focus"]

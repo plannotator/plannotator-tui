@@ -1,0 +1,11 @@
+[package]
+name = "plannotui-schema"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Annotation and anchor types shared by plannotui and Plannotator Workspaces."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

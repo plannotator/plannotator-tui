@@ -1,0 +1,37 @@
+{
+  "comments": [
+    {
+      "id": 1,
+      "anchor": {
+        "quote": "inherit your environment",
+        "prefix": "time\ncommands run as your user, ",
+        "suffix": ", and can call the full Herdr\nCL",
+        "block_hint": 6
+      },
+      "body": "Worth a warning box, not a clause.",
+      "created_at": 1787889446
+    },
+    {
+      "id": 2,
+      "anchor": {
+        "quote": "min_herdr_version = \"0.7.0\"",
+        "prefix": "me = \"Layout\"\nversion = \"0.1.0\"\n",
+        "suffix": "\ndescription = \"Apply project la",
+        "block_hint": 11
+      },
+      "body": "Should this be 0.8.0 in the docs now?",
+      "created_at": 1787889446
+    },
+    {
+      "id": 3,
+      "anchor": {
+        "quote": "Manifest",
+        "prefix": "ciding whether to\nrun them.\n\n## ",
+        "suffix": "\n\nThe manifest is the contract b",
+        "block_hint": 9
+      },
+      "body": "Rename to 'The manifest file'.",
+      "created_at": 1787889446
+    }
+  ]
+}
