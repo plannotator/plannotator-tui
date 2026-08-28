@@ -1,20 +1,42 @@
 id = "plannotui"
 name = "plannotui"
-version = "0.1.0"
+version = "0.2.0"
 min_herdr_version = "0.8.0"
-description = "Annotate Markdown files in a pane: select text, comment, looks-good, delete."
+description = "Annotate Markdown in a pane: select text, comment, looks-good, delete; send feedback to the agent."
 platforms = ["macos", "linux"]
 
-# Full-screen by default: an overlay is a real pane zoomed to the tab, and Herdr restores
-# the previous focus and zoom when the process exits. Use --placement split for side-by-side.
+# Where plannotui opens is the user's choice, not the manifest's: `[herdr] placement` in
+# ~/.config/plannotui/config.toml (overlay | split | popup), or PLANNOTUI_PLACEMENT. The
+# launcher (`plannotui herdr open`) passes --placement, which overrides the default below.
+# overlay = a real pane zoomed over the whole tab; Herdr restores focus and zoom on exit.
+
+[[build]]
+command = ["cargo", "build", "--release", "--manifest-path", "../Cargo.toml"]
+
 [[panes]]
 id = "doc"
 title = "plannotui"
 placement = "overlay"
 command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotui\" \"${PLANNOTUI_FILE:-$PWD}\""]
 
+# Human entry points. Both run the launcher, which reads Herdr's invocation context: the
+# focused pane's folder (open) or the clicked file:// link (open-link), and the focused
+# pane's agent as the feedback target.
 [[actions]]
 id = "open"
-title = "plannotui: open"
-contexts = ["workspace"]
-command = ["sh", "-c", "exec \"$HERDR_BIN_PATH\" plugin pane open --plugin plannotui --entrypoint doc --focus"]
+title = "Annotate: open here"
+contexts = ["workspace", "pane"]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotui\" herdr open"]
+
+[[actions]]
+id = "open-link"
+title = "Annotate this file"
+contexts = ["pane"]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/../target/release/plannotui\" herdr open"]
+
+# Ctrl-click on a file:// markdown link. Anchored on the scheme so web links never match.
+[[link_handlers]]
+id = "markdown-file"
+title = "Annotate this file"
+pattern = "^file://.*\\.(md|markdown|mdx)$"
+action = "open-link"
