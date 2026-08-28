@@ -1,8 +1,8 @@
-//! Feedback export: annotations as the numbered Markdown a coding agent expects.
+//! Feedback export: annotations as numbered Markdown a coding agent reads without a schema.
 //!
-//! The shape follows Plannotator's `exportAnnotations` so an agent that has read one kind
-//! of feedback reads the other the same way: a title, a count line, then one `## N.` entry
-//! per annotation in document order, each quoting the text and carrying the note.
+//! `# Annotations on <name>`, then one `## Annotation N (line X)` per annotation in document
+//! order: what kind of note it is, the quoted text, and the body as a blockquote. Deleted
+//! text is fenced so quoted markdown cannot escape.
 
 use std::fmt::Write as _;
 use std::ops::Range;
@@ -17,43 +17,33 @@ pub(crate) struct Entry<'a> {
     pub(crate) lines: (usize, usize),
 }
 
-pub(crate) fn feedback(source: &str, subject: &str, entries: &[Entry<'_>]) -> String {
+pub(crate) fn feedback(source: &str, name: &str, entries: &[Entry<'_>]) -> String {
     if entries.is_empty() {
-        return "No changes detected.".to_owned();
+        return "No annotations.".to_owned();
     }
-    let mut out = String::from("# Plan Feedback\n\n");
-    let n = entries.len();
-    let _ = write!(
-        out,
-        "I've reviewed this {subject} and have {n} piece{} of feedback:\n\n",
-        if n > 1 { "s" } else { "" }
-    );
+    let mut out = format!("# Annotations on {name}\n\n");
     for (i, entry) in entries.iter().enumerate() {
         let quoted = source.get(entry.range.clone()).unwrap_or("");
         let line_label = match entry.lines {
             (a, b) if a == b => format!("line {a}"),
             (a, b) => format!("lines {a}\u{2013}{b}"),
         };
-        let _ = write!(out, "## {}. ({line_label}) ", i + 1);
+        let _ = writeln!(out, "## Annotation {} ({line_label})", i + 1);
         let body = entry.annotation.body.trim();
         match entry.annotation.anchor.kind() {
             Kind::Delete => {
-                out.push_str("Remove this\n");
+                out.push_str("Remove this:\n");
                 out.push_str(&fenced(quoted));
-                let _ = writeln!(
-                    out,
-                    "> {}",
-                    if body.is_empty() { "I don't want this in the plan." } else { body }
-                );
+                let _ = writeln!(out, "> {}", if body.is_empty() { "I don't want this." } else { body });
             }
             Kind::LooksGood => {
-                let _ = writeln!(out, "[Looks good] Feedback on: \"{}\"", single_line(quoted));
+                let _ = writeln!(out, "Looks good: \"{}\"", single_line(quoted));
                 if !body.is_empty() {
                     let _ = writeln!(out, "> {}", quote_lines(body));
                 }
             }
             Kind::Comment => {
-                let _ = writeln!(out, "Feedback on: \"{}\"", single_line(quoted));
+                let _ = writeln!(out, "Comment on: \"{}\"", single_line(quoted));
                 let _ = writeln!(out, "> {}", quote_lines(body));
             }
         }
@@ -123,12 +113,12 @@ mod tests {
             Entry { annotation: &comment, lines: line_span(source, &r1), range: r1 },
             Entry { annotation: &delete, lines: line_span(source, &r2), range: r2 },
         ];
-        let out = feedback(source, "plan", &entries);
+        let out = feedback(source, "plan.md", &entries);
         assert_eq!(
             out,
-            "# Plan Feedback\n\nI've reviewed this plan and have 2 pieces of feedback:\n\n\
-             ## 1. (line 3) Feedback on: \"login page\"\n> Which page?\n> Be specific.\n\n\
-             ## 2. (line 5) Remove this\n```\nDrop the `legacy` path.\n```\n> I don't want this in the plan.\n\n"
+            "# Annotations on plan.md\n\n\
+             ## Annotation 1 (line 3)\nComment on: \"login page\"\n> Which page?\n> Be specific.\n\n\
+             ## Annotation 2 (line 5)\nRemove this:\n```\nDrop the `legacy` path.\n```\n> I don't want this.\n\n"
         );
     }
 
