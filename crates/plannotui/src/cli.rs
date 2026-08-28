@@ -5,7 +5,7 @@
 #![allow(clippy::print_stdout, reason = "the CLI's job is to print")]
 
 use std::io::stdout;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -74,7 +74,7 @@ fn parse_kind(s: Option<&str>) -> Kind {
 
 pub(crate) fn run(args: &[String]) -> Result<()> {
     let arg = |i: usize| args.get(i).map(String::as_str);
-    let path = |i: usize| arg(i).map(PathBuf::from).context(USAGE);
+    let path = |i: usize| arg(i).map(|p| crate::workspace_paths::absolute(Path::new(p))).context(USAGE);
     match arg(0) {
         Some("--bench") => bench(&path(1)?),
         Some("--export") => {
