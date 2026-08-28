@@ -269,3 +269,9 @@ machine's live Claude Code and Codex files. Four things the rules did not say:
 covered by synthesized fixture entries. The stdout contract (`--print`: newest reply, exit 0
 always, errors on stderr) is frozen as decision 9 required.
 
+
+Peer-reviewed against Plannotator's source at main by the plannotator-ops session
+(2026-08-28): the attachment-in-chain rule matches Plannotator exactly; the compact-summary
+exclusion, the `<task-notification>` prefix, the explicit Codex subagent skip, and
+multi-rollout grouping are stricter than Plannotator (which has an open bug, #1367, on the
+last one). Keep them; do not regress to match.
