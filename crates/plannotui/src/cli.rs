@@ -50,7 +50,10 @@ fn delivery(interactive: bool) -> Box<dyn Delivery> {
     }
     let env = HerdrEnv::from_env();
     match env.delivery_target() {
-        Some(target) if env.in_herdr => Box::new(HerdrAgent::new(env.bin, target.pane, target.agent)),
+        Some(target) if env.in_herdr => {
+            let agent = target.agent.or_else(|| env.agent_in_pane(&target.pane));
+            Box::new(HerdrAgent::new(env.bin, target.pane, agent))
+        }
         _ => Box::new(Clipboard),
     }
 }

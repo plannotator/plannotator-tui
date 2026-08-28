@@ -84,6 +84,19 @@ impl HerdrEnv {
         }
         self.focused_agent_pane()
     }
+
+    /// Ask Herdr which agent runs in `pane` (`herdr pane get`), for the label when the
+    /// launcher only knew the pane id. One short process at startup; `None` on any failure.
+    pub(crate) fn agent_in_pane(&self, pane: &str) -> Option<String> {
+        let output = std::process::Command::new(&self.bin)
+            .args(["pane", "get", pane])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())?;
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+        json.pointer("/result/pane/agent")?.as_str().map(str::to_owned)
+    }
 }
 
 #[cfg(test)]
