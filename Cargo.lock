@@ -1230,7 +1230,7 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "plannotator-tui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "plannotator-tui-hosts",
@@ -1248,14 +1248,14 @@ dependencies = [
 
 [[package]]
 name = "plannotator-tui-hosts"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "plannotator-tui-schema"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "jsonschema",
  "serde",
