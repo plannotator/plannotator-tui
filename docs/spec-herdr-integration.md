@@ -204,3 +204,92 @@ on it); `agent prompt` into Claude Code with a multi-paragraph feedback body.
 2. Manifest + `open.sh` + keybinding docs: #1, #4, #6.
 3. The skill file: #3.
 4. #5 after the hosts crate exists (phase 4).
+
+## Implementation contract (phase 3)
+
+Verified 2026-08-28 against Herdr 0.8.2 source. Anything below that names a Herdr flag,
+env var, or JSON field was read from `src/cli/plugin.rs`, `src/cli/agent.rs`,
+`src/app/api/plugins/{panes,mod,context}.rs`, `src/api/schema/plugins.rs`, `src/cli.rs`.
+
+### Herdr facts the code relies on
+
+- `herdr plugin pane open --plugin ID --entrypoint ID [--placement overlay|split|popup]
+  [--width N|N%] [--height N|N%] [--target-pane ID] [--direction right|down|...] [--cwd DIR]
+  [--env K=V]... [--focus|--no-focus]`. `--placement` overrides the manifest's placement, so
+  one `doc` entrypoint serves every placement. `--env` cannot set `HERDR_*` keys.
+- The pane process gets `HERDR_ENV=1`, `HERDR_BIN_PATH`, `HERDR_PLUGIN_ID`,
+  `HERDR_PLUGIN_ROOT`, `HERDR_PLUGIN_CONFIG_DIR`, `HERDR_PLUGIN_STATE_DIR`,
+  `HERDR_PLUGIN_CONTEXT_JSON`, plus every `--env`. Actions get the same set.
+- `HERDR_PLUGIN_CONTEXT_JSON` fields (all optional, omitted when null): `workspace_id`,
+  `workspace_cwd`, `tab_id`, `focused_pane_id`, `focused_pane_cwd`, `focused_pane_agent`,
+  `focused_pane_status`, `selected_text`, `invocation_source` (`keybinding`|`api`|`cli`|…),
+  `clicked_url`, `link_handler_id`. The snapshot is taken before the new pane spawns.
+- Keybinding: `[[keys.command]] type = "plugin_action" command = "plannotui.open"`.
+- `herdr agent prompt <pane-id|agent-name> <text>`: stdout JSON + exit 0 on success; stderr
+  `{"id":…,"error":{"code":…,"message":…}}` + exit 1 on failure. Codes we handle:
+  `agent_blocked` (at a dialog), `agent_not_ready`, `agent_not_found`, `empty_agent_prompt`.
+- Ordinary panes (where an agent runs) have `HERDR_ENV=1` and `HERDR_PANE_ID`; do not
+  assume `HERDR_BIN_PATH` there — fall back to `herdr` on `PATH`.
+- `herdr plugin link <dir>` registers a local plugin directory (dev install).
+
+### Environment read by plannotui
+
+```
+PLANNOTUI_FILE            file or folder to open (launcher → pane)
+PLANNOTUI_DELIVER_TO      pane id feedback goes to (launcher → pane)
+PLANNOTUI_DELIVER_AGENT   agent name for the label, e.g. "claude" (launcher → pane)
+PLANNOTUI_PLACEMENT       overlay | split | popup; beats the config file
+PLANNOTUI_CONFIG          path of the config file; beats XDG
+HERDR_*                   as above; HERDR_PANE_ID inside the pane is plannotui's OWN pane
+```
+
+Inside the app the delivery target is: `PLANNOTUI_DELIVER_TO` → context `focused_pane_id`
+when `focused_pane_agent` is set → none (clipboard). `HERDR_PANE_ID` is never a target
+inside the app. The launcher (below) is the only place `HERDR_PANE_ID` means "the caller".
+
+### Config
+
+`$PLANNOTUI_CONFIG` → `$XDG_CONFIG_HOME/plannotui/config.toml` → `~/.config/plannotui/config.toml`.
+Missing file = defaults. Unknown keys are errors that name the key. `plannotui config`
+prints the path and the effective values.
+
+```toml
+[herdr]
+placement = "overlay"        # overlay | split | popup
+split_direction = "right"    # right | down; split only
+popup_width = "90%"          # popup only; cells or percent
+popup_height = "85%"
+```
+
+### The launcher: `plannotui herdr open [PATH] [--placement P] [--deliver-to PANE]`
+
+One command for humans (via the manifest actions) and agents (via the skill). It reads
+the env above, resolves, and execs `herdr plugin pane open`. Resolution, in order:
+
+- file: `PATH` → `clicked_url` if `file://` → `focused_pane_cwd` → `workspace_cwd` → cwd.
+- deliver-to: `--deliver-to` → context `focused_pane_id` when `focused_pane_agent` is set →
+  `HERDR_PANE_ID` (the caller: an agent running the skill from its own pane).
+- split target pane: the deliver-to pane → `focused_pane_id` → `HERDR_PANE_ID`.
+- placement: `--placement` → `PLANNOTUI_PLACEMENT` → config → overlay.
+
+It passes `PLANNOTUI_FILE`, `PLANNOTUI_DELIVER_TO`, `PLANNOTUI_DELIVER_AGENT` explicitly so
+the pane never has to guess. `argv` construction is a pure, tested function.
+
+### Modules and ownership
+
+```
+crates/plannotui/src/config.rs          Config, HerdrConfig, Placement, SplitDirection,
+                                        config_path(), Config::load(), Config::parse()
+crates/plannotui/src/herdr/mod.rs       pub(crate) mod context; pub(crate) mod launch;
+crates/plannotui/src/herdr/context.rs   HerdrContext (serde of the context JSON),
+                                        HerdrEnv::from_env(), Target { pane, agent }
+crates/plannotui/src/herdr/launch.rs    Launch, plan(), argv(), run()
+crates/plannotui/src/delivery.rs        DeliveryError { Blocked, Unavailable, Failed },
+                                        HerdrAgent { bin, pane, agent }, parse_response()
+crates/plannotui/src/store.rs           Record.deliveries, record_delivery(), all_delivered()
+crates/plannotui/src/app/mod.rs         SendState, send(), send_label(), is_agent target
+crates/plannotui/src/app/draw.rs        header Send button + geometry.send_button
+crates/plannotui/src/app/input.rs       button click, q → confirm when unsent
+herdr/herdr-plugin.toml                 doc pane, open / open-link actions, link handler
+skills/plannotui/SKILL.md               the agent instruction (draft; not wired yet)
+```
