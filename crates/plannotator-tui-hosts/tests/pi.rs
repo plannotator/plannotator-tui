@@ -1,4 +1,5 @@
 //! Pi sessions: the active branch, what counts as a message, and finding a session by cwd.
+//! Semantics match Plannotator's `apps/pi-extension/assistant-message.ts`.
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, reason = "tests assert by panicking")]
 
@@ -40,10 +41,18 @@ fn tool_calls_tool_results_and_thinking_are_not_messages() {
 }
 
 #[test]
-fn an_untrusted_chain_falls_back_to_file_order() {
-    let messages = parse_messages(&fixture("pi-dangling.jsonl"), 2);
-    assert_eq!(messages[0].text, "assistant text dangling");
-    assert_eq!(messages.len(), 2, "n caps the total");
+fn an_unreconstructable_chain_yields_nothing_rather_than_the_wrong_messages() {
+    assert!(parse_messages(&fixture("pi-dangling.jsonl"), 25).is_empty());
+}
+
+#[test]
+fn n_caps_the_total_and_numeric_timestamps_become_iso() {
+    let messages = parse_messages(&fixture("pi.jsonl"), 2);
+    assert_eq!(messages.len(), 2);
+    let line = r#"{"type":"message","id":"a1","parentId":null,"timestamp":1787938040000,"message":{"role":"assistant","content":[{"type":"text","text":"x"}]}}"#;
+    assert_eq!(parse_messages(line, 1)[0].at.as_deref(), Some("2026-08-28T17:27:20.000Z"));
+    let string_content = r#"{"type":"message","id":"a2","parentId":null,"timestamp":"t","message":{"role":"assistant","content":"plain string"}}"#;
+    assert!(parse_messages(string_content, 1).is_empty(), "string content is not an array; skipped");
 }
 
 #[test]

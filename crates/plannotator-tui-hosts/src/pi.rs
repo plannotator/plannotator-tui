@@ -79,8 +79,9 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 struct Entry {
     id: Option<String>,
     parent: Option<String>,
-    role: Option<String>,
-    texts: Vec<String>,
+    /// `Some` only for `message` entries whose `content` is an array: the role and the
+    /// `\n`-joined text blocks, as Plannotator's pi extension reads them.
+    message: Option<(String, String)>,
     timestamp: Option<String>,
 }
 
@@ -91,45 +92,87 @@ impl Entry {
         let string = |key: &str| object.get(key).and_then(Value::as_str).map(str::to_owned);
         let message = (object.get("type").and_then(Value::as_str) == Some("message"))
             .then(|| object.get("message").and_then(Value::as_object))
-            .flatten();
-        let texts = message
-            .and_then(|m| m.get("content"))
-            .and_then(Value::as_array)
-            .map(|blocks| {
-                blocks
+            .flatten()
+            .and_then(|m| {
+                let role = m.get("role").and_then(Value::as_str)?.to_owned();
+                let blocks = m.get("content").and_then(Value::as_array)?;
+                let text: Vec<&str> = blocks
                     .iter()
                     .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
                     .filter_map(|b| b.get("text").and_then(Value::as_str))
-                    .map(str::to_owned)
-                    .collect()
-            })
-            .unwrap_or_default();
+                    .collect();
+                Some((role, text.join("\n")))
+            });
         Some(Self {
             id: string("id"),
             parent: string("parentId"),
-            role: message.and_then(|m| m.get("role")).and_then(Value::as_str).map(str::to_owned),
-            texts,
-            timestamp: string("timestamp"),
+            message,
+            timestamp: object.get("timestamp").and_then(iso_timestamp),
         })
     }
 }
 
-/// The newest `n` messages, newest first: assistant text entries and typed user prompts on
-/// the active branch (the `parentId` chain from the newest entry with an id). File order
-/// applies when the chain is untrusted or holds no assistant text.
+/// Timestamps as ISO 8601: strings pass through, numbers are Unix milliseconds.
+fn iso_timestamp(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
+        Value::Number(n) => n.as_f64().filter(|f| f.is_finite() && *f >= 0.0).map(|ms| ms_to_iso(ms as u64)),
+        _ => None,
+    }
+}
+
+fn ms_to_iso(ms: u64) -> String {
+    let secs = ms / 1000;
+    let (year, month, day) = civil_from_days(secs / 86_400);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
+        (secs / 3600) % 24,
+        (secs / 60) % 60,
+        secs % 60,
+        ms % 1000
+    )
+}
+
+/// Howard Hinnant's days-to-civil.
+fn civil_from_days(days: u64) -> (u64, u64, u64) {
+    let z = days + 719_468;
+    let era = z / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (yoe + era * 400 + u64::from(m <= 2), m, d)
+}
+
+/// The newest `n` messages on the active branch, newest first. The branch is the
+/// `parentId` chain from the newest entry with an id to the root — what pi's own
+/// `getBranch()` returns; entries orphaned by a rewind are absent. A chain that cannot be
+/// reconstructed (missing parent, cycle) yields nothing rather than the wrong messages.
 pub fn parse_messages(jsonl: &str, n: usize) -> Vec<Message> {
     let entries: Vec<Entry> = jsonl.lines().filter_map(Entry::parse).collect();
-    let on_branch: Vec<&Entry> = match active_branch(&entries) {
-        Some(active) => {
-            entries.iter().filter(|e| e.id.as_ref().is_some_and(|i| active.contains(i))).collect()
-        }
-        None => entries.iter().collect(),
-    };
-    let mut rendered = render(&on_branch);
-    if !rendered.iter().any(|m| m.role == Role::Assistant) {
-        rendered = render(&entries.iter().collect::<Vec<_>>());
-    }
-    rendered.into_iter().rev().take(n).collect()
+    let Some(active) = active_branch(&entries) else { return Vec::new() };
+    entries
+        .iter()
+        .rev()
+        .filter(|e| e.id.as_ref().is_some_and(|i| active.contains(i)))
+        .filter_map(|e| {
+            let (role, text) = e.message.as_ref()?;
+            let role = match role.as_str() {
+                "assistant" => Role::Assistant,
+                "user" => Role::Human,
+                _ => return None,
+            };
+            (!text.trim().is_empty()).then(|| Message {
+                id: e.id.clone().unwrap_or_default(),
+                role,
+                text: text.clone(),
+                at: e.timestamp.clone(),
+            })
+        })
+        .take(n)
+        .collect()
 }
 
 fn active_branch(entries: &[Entry]) -> Option<std::collections::HashSet<String>> {
@@ -148,24 +191,4 @@ fn active_branch(entries: &[Entry]) -> Option<std::collections::HashSet<String>>
             Some(parent) => current = *by_id.get(parent)?,
         }
     }
-}
-
-fn render(entries: &[&Entry]) -> Vec<Message> {
-    entries
-        .iter()
-        .filter(|e| !e.texts.is_empty())
-        .filter_map(|e| {
-            let role = match e.role.as_deref()? {
-                "assistant" => Role::Assistant,
-                "user" => Role::Human,
-                _ => return None,
-            };
-            Some(Message {
-                id: e.id.clone().unwrap_or_default(),
-                role,
-                text: e.texts.join("\n\n"),
-                at: e.timestamp.clone(),
-            })
-        })
-        .collect()
 }
