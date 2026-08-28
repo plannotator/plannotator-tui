@@ -16,4 +16,5 @@ cargo build --release
 ./target/release/plannotui samples/plugins.md
 ```
 
-See `crates/plannotui/README.md` for keys, headless tools, and measurements.
+See `crates/plannotui/README.md` for keys, headless tools, and measurements;
+`docs/decisions.md` for the design record; `AGENTS.md` for engineering rules.
