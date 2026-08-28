@@ -7,6 +7,8 @@
 
 pub mod claude;
 pub mod codex;
+pub mod copilot;
+pub mod droid;
 
 use std::path::PathBuf;
 
@@ -15,6 +17,10 @@ use std::path::PathBuf;
 pub enum Host {
     ClaudeCode,
     Codex,
+    /// GitHub Copilot CLI: `~/.copilot/session-state/<uuid>/events.jsonl`.
+    Copilot,
+    /// Droid (Factory): `~/.factory/sessions/<slug>/<session>.jsonl`, Claude's shape, file order.
+    Droid,
 }
 
 impl Host {
@@ -23,8 +29,13 @@ impl Host {
         match self {
             Self::ClaudeCode => "claude",
             Self::Codex => "codex",
+            Self::Copilot => "copilot",
+            Self::Droid => "droid",
         }
     }
+
+    /// Every host with a transcript reader, for messages that list them.
+    pub const ALL: [Host; 4] = [Self::ClaudeCode, Self::Codex, Self::Copilot, Self::Droid];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,18 +103,18 @@ pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostErr
         match name.as_str() {
             "claude" | "claude-code" | "claude_code" => return Ok(Host::ClaudeCode),
             "codex" => return Ok(Host::Codex),
+            "copilot" | "copilot-cli" | "copilot_cli" => return Ok(Host::Copilot),
+            "droid" | "factory" => return Ok(Host::Droid),
             _ => {}
         }
     }
     if set("CODEX_THREAD_ID") {
         return Ok(Host::Codex);
     }
-    for (key, name) in [
-        ("COPILOT_CLI", "GitHub Copilot CLI"),
-        ("OPENCODE", "OpenCode"),
-        ("GEMINI_CLI", "Gemini CLI"),
-        ("OMPCODE", "OMP"),
-    ] {
+    if set("COPILOT_CLI") {
+        return Ok(Host::Copilot);
+    }
+    for (key, name) in [("OPENCODE", "OpenCode"), ("GEMINI_CLI", "Gemini CLI"), ("OMPCODE", "OMP")] {
         if set(key) {
             return Err(HostError::Unsupported(name.to_owned()));
         }

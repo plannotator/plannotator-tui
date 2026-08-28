@@ -39,7 +39,21 @@ fn codex_marker_beats_unsupported_markers_which_are_reported_not_hidden() {
 }
 
 #[test]
+fn the_copilot_marker_selects_copilot_and_droid_needs_the_override() {
+    assert_eq!(detect_host(env(&[("COPILOT_CLI", "1")])).expect("host"), Host::Copilot);
+    assert_eq!(
+        detect_host(env(&[("CODEX_THREAD_ID", "t"), ("COPILOT_CLI", "1")])).expect("host"),
+        Host::Codex
+    );
+    assert_eq!(detect_host(env(&[("PLANNOTATOR_TUI_HOST", "droid")])).expect("host"), Host::Droid);
+    assert_eq!(detect_host(env(&[("PLANNOTATOR_TUI_HOST", "copilot-cli")])).expect("host"), Host::Copilot);
+}
+
+#[test]
 fn labels_are_the_short_names_herdr_uses() {
     assert_eq!(Host::ClaudeCode.label(), "claude");
     assert_eq!(Host::Codex.label(), "codex");
+    assert_eq!(Host::Copilot.label(), "copilot");
+    assert_eq!(Host::Droid.label(), "droid");
+    assert_eq!(Host::ALL.len(), 4);
 }
