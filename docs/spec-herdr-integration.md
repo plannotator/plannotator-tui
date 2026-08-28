@@ -11,12 +11,11 @@ clicks and keys** to it, and **delivers feedback** into an agent's pane. plannot
 standalone app; the plugin is a manifest plus a few shell lines. Delivery is the seam from
 decision 11: `HerdrAgent { pane }` = `$HERDR_BIN_PATH agent prompt <pane> <feedback>`.
 
-## Six ways in
+## Five ways in
 
 | # | Who starts it | How the file is chosen | How the target agent is known | Herdr mechanism |
 |---|---|---|---|---|
 | 1 | Human, keybind | The tree: plannotui opens on the pane's cwd in folder mode with the tree focused — that *is* the file dialog | `HERDR_PLUGIN_CONTEXT_JSON.focused_pane_id` (the agent's pane, snapshotted before plannotui's pane spawns) | `[[keys.command]] type="plugin_action"` → action → `plugin pane open --placement overlay` |
-| 2 | Human, keybind over a selection | A path in the selected text, else the selection itself as a transient doc | same as 1 | action with `contexts=["selection"]`, `selected_text` in context |
 | 3 | **Agent**, via a skill | The agent wrote the plan to a file and names it | The agent passes its own `$HERDR_PANE_ID` | agent runs `herdr plugin pane open … --placement split --target-pane $HERDR_PANE_ID --env …` |
 | 4 | Human, Ctrl-click | The clicked `file://…md` link the agent printed (OSC 8) | focused pane at click time | `[[link_handlers]]` → action → pane open |
 | 5 | Human, keybind | The agent's **last message**, extracted from its transcript | focused pane; the agent process pid from `herdr pane process-info` finds the session file directly | action → `plannotui last --deliver-to <pane>` (phase 4 hosts crate) |
@@ -37,14 +36,12 @@ HERDR_PLUGIN_CONTEXT_JSON
   .focused_pane_id      fallback delivery target: the agent's pane when a human triggered it
   .focused_pane_agent   shown in the footer: "send → claude in w1:p2"
   .workspace_cwd        fallback folder for #1
-  .selected_text        #2
   .clicked_url          #4
 HERDR_ENV=1             selects HerdrAgent delivery; absent → clipboard
 HERDR_BIN_PATH          the herdr binary (fallback: `herdr` on PATH)
 ```
 
-`plannotui` resolves: `PLANNOTUI_FILE` → `clicked_url` (as a path) → a path found in
-`selected_text` → `workspace_cwd`. Delivery: `PLANNOTUI_DELIVER_TO` → `focused_pane_id` →
+`plannotui` resolves: `PLANNOTUI_FILE` → `clicked_url` (as a path) → `workspace_cwd`. Delivery: `PLANNOTUI_DELIVER_TO` → `focused_pane_id` →
 clipboard. The footer always names the target before the user presses `E`.
 
 ## Manifest
@@ -59,7 +56,7 @@ platforms = ["macos", "linux"]
 [[build]]
 command = ["bash", "herdr/install.sh"]          # prebuilt binary per platform, checksummed
 
-[[panes]]                                       # #1 #2 #3 #4: a real pane
+[[panes]]                                       # #1 #3 #4: a real pane
 id = "doc"
 title = "plannotui"
 placement = "overlay"
@@ -78,12 +75,6 @@ id = "open"
 title = "Annotate: open here"
 contexts = ["workspace", "pane"]
 command = ["bash", "herdr/open.sh"]             # pane open doc, cwd from context, tree focused
-
-[[actions]]                                     # #2
-id = "annotate-selection"
-title = "Annotate: selection"
-contexts = ["selection"]
-command = ["bash", "herdr/open.sh", "--from-selection"]
 
 [[actions]]                                     # #4 target
 id = "open-link"
@@ -117,11 +108,6 @@ type = "plugin_action"
 command = "plannotui.open"
 
 [[keys.command]]
-key = "prefix+A"
-type = "plugin_action"
-command = "plannotui.annotate-selection"
-
-[[keys.command]]
 key = "prefix+l"
 type = "plugin_action"
 command = "plannotui.last"
@@ -140,6 +126,23 @@ command = "plannotui.last"
 
 The agent never waits on plannotui and never parses its output. Feedback is a normal turn.
 
+## The Send button
+
+Herdr is mouse-first, so sending is a visible control, not only a key. The rail header
+holds one button whose label names the target and the count, and whose existence is
+decided by the same rule as the footer:
+
+```
+target is an agent pane   →  [ Send 3 to claude ▸ ]     click or E
+target is the clipboard   →  [ Copy 3 as feedback ]     click or E
+no annotations yet        →  button shown dimmed, does nothing
+```
+
+After a click the button reads `Sent ▸ claude` for a few seconds, then returns. On
+`agent_blocked` it reads `claude is at a dialog — copied instead` and stays clickable so
+a second click retries. The button and `E` call the same `App::send`; there is no second
+path. Dropped: #2 (selection), it was a worse #4 and a worse #5.
+
 ## Delivery
 
 `HerdrAgent::deliver`: `$HERDR_BIN_PATH agent prompt <pane> <feedback>`. Verified
@@ -155,7 +158,7 @@ mode and sends Enter 300 ms later, so multi-line feedback is safe. Outcomes the 
 
 ## What each placement means for the user
 
-- **overlay** (#1, #2, #4): full-tab, restores the previous focus and zoom on exit. Real
+- **overlay** (#1, #4): full-tab, restores the previous focus and zoom on exit. Real
   pane: can be unzoomed or moved. Default.
 - **split** (#3): beside the agent; both visible; you watch the agent react to the review.
 - **popup** (#6): modal, singleton, swallows Escape and the prefix key, no pane id. Good for
@@ -174,6 +177,6 @@ on it); `agent prompt` into Claude Code with a multi-paragraph feedback body.
 ## Order of work
 
 1. `HerdrAgent` delivery + env resolution in the app (~80 lines, decision 11).
-2. Manifest + `open.sh` + keybinding docs: #1, #2, #4, #6.
+2. Manifest + `open.sh` + keybinding docs: #1, #4, #6.
 3. The skill file: #3.
 4. #5 after the hosts crate exists (phase 4).
