@@ -203,3 +203,45 @@ pub(crate) trait Delivery {
 
 This is decision 6's delivery seam made concrete. Nothing else in the app knows about
 Herdr; `HERDR_ENV=1` only selects the implementation.
+
+## 12. Placement is the user's, and one launcher serves humans and agents (2026-08-28)
+
+Where plannotui opens inside Herdr — full-screen overlay, split beside the agent, or a
+modal popup — is a preference, not a property of the entry point. It lives in plannotui's
+own config (`[herdr] placement`, `~/.config/plannotui/config.toml`), because Herdr has no
+per-user plugin settings and a manifest cannot express "the user prefers". The parser is
+strict: an unknown key is an error that names it, so a typo never silently falls back.
+`PLANNOTUI_PLACEMENT` and `--placement` override for one launch; the agent skill uses
+`split` because watching the agent react is the point of that path.
+
+All entry points run the same command, `plannotui herdr open [PATH]`. A manifest action runs
+it with Herdr's invocation context (the focused pane's folder, or the Ctrl-clicked
+`file://` link, and the focused pane's agent as the feedback target); an agent runs it from
+its own pane, where `HERDR_PANE_ID` is the caller and therefore the target. The launcher
+resolves file, target and placement, then execs `herdr plugin pane open` with explicit
+`PLANNOTUI_FILE` / `PLANNOTUI_DELIVER_TO` / `PLANNOTUI_DELIVER_AGENT`, so the pane never
+has to guess where it came from. Inside the pane `HERDR_PANE_ID` is plannotui's own pane
+and is never a target. `argv` construction is a pure function with exact-string tests.
+
+Verified live (Herdr 0.8.2, disposable named session, a `cat` renamed `claude` standing in
+for the agent): `agent prompt` delivers a multi-line feedback body verbatim; the manifest
+action opens the overlay in folder mode on the agent's cwd; `--placement` on `plugin pane
+open` overrides the manifest, so one `doc` entrypoint serves all three placements.
+
+## 13. Sending is a button, and the record remembers it (2026-08-28)
+
+Herdr is mouse-first, so the send is a visible control in the header, not only `E`. Its
+label is derived from the delivery target and the send state — `Send 3 to claude ▸`,
+`Sent ▸ claude`, `claude at a dialog · copied · click to retry`, or `Copy 3 as feedback`
+outside Herdr — so the user always knows where feedback goes before pressing anything.
+The button and `E` call the same function; there is no second path.
+
+Delivery outcomes are typed (`Blocked`, `Unavailable`, `Failed`) because the app reacts
+differently: a blocked agent means "retry later", so the text is also put on the clipboard
+and nothing is lost; a missing agent means the clipboard is the target now.
+
+`annotations.json` gains `deliveries: [{at, target, annotation_ids}]`. It is what lets the
+button say "Sent" after a restart and, later, lets Workspaces know which comments the agent
+has already seen. It is append-only and absent until the first send, so records written by
+earlier builds load unchanged. A folder-wide send is recorded on the open file only; the
+per-file state is a UI convenience, not an audit log.
