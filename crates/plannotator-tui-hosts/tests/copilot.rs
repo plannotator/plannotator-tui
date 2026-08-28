@@ -113,6 +113,15 @@ fn without_a_lock_match_the_cwd_ladder_applies_in_order() {
 }
 
 #[test]
+fn a_session_directory_without_events_is_not_a_candidate() {
+    let home = CopilotHome::new("no-events");
+    let with_events = home.session("with-events", "/w", &[], 50);
+    let bare = home.session("bare", "/w", &[], 5);
+    fs::remove_file(bare.join("events.jsonl")).expect("strip events");
+    assert_eq!(find_session(&home.root, Path::new("/w"), &[], 1, always_copilot), Some(with_events));
+}
+
+#[test]
 fn cwd_comparison_ignores_case_and_slash_direction() {
     let home = CopilotHome::new("case");
     let win = home.session("win", "C:\\Users\\Me\\Repo", &[], 10);

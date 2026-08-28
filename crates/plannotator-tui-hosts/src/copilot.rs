@@ -92,13 +92,15 @@ struct Session {
     lock_pids: Vec<u32>,
 }
 
-/// Every session directory, newest modification first.
+/// Every session directory that has an `events.jsonl`, newest modification first. Other
+/// clients (`gh copilot`) create session directories with a workspace but no events; those
+/// hold nothing to read and are not candidates.
 fn list_sessions(state_dir: &Path) -> Vec<Session> {
     let Ok(entries) = std::fs::read_dir(state_dir) else { return Vec::new() };
     let mut sessions: Vec<(SystemTime, Session)> = entries
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.is_dir())
+        .filter(|p| p.join("events.jsonl").is_file())
         .filter_map(|dir| {
             let modified = std::fs::metadata(&dir).ok()?.modified().ok()?;
             let lock_pids = lock_pids_in(&dir);
