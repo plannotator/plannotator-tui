@@ -54,10 +54,9 @@ fn the_header_draws_the_send_button_and_records_where_it_is() {
     let rows = draw(&mut app);
     let header = row(&rows, 0);
     assert!(header.contains("Send 1 to claude in w1:p1 ▸"), "header was {header:?}");
-    assert!(header.contains("plannotator-tui"), "the brand still fits: {header:?}");
     let rect = app.geometry.send_button.expect("button rect recorded");
     assert_eq!(rect.y, 0);
-    assert!(rect.right() <= 80);
+    assert_eq!(rect.right(), 80, "the button sits on the right edge");
 }
 
 #[test]

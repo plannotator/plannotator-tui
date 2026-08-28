@@ -351,6 +351,7 @@ impl App {
         }
         let orphans = self.open.store.orphans();
         let mut parts = vec![
+            self.open.source.name.clone(),
             format!("{} blocks", self.open.doc.blocks.len()),
             format!(
                 "{} annotations{}",
