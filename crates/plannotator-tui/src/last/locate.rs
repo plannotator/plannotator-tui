@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use plannotator_tui_hosts::{Host, HostError, Message, Role, claude, codex, detect_host};
+use plannotator_tui_hosts::{Host, HostError, Message, Role, claude, codex, detect_host, pi};
 
 use super::LastOptions;
 
@@ -34,6 +34,12 @@ pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
             let thread = std::env::var("CODEX_THREAD_ID").ok().filter(|t| !t.is_empty());
             codex_thread(&home, thread.as_deref(), pick)?
         }
+        (Host::Pi, Some(path)) => (path.clone(), pi_messages(path, pick)?),
+        (Host::Pi, None) => {
+            let path = find_pi_transcript()?;
+            let messages = pi_messages(&path, pick)?;
+            (path, messages)
+        }
     };
     let messages: Vec<Message> = messages.into_iter().filter(|m| m.role == Role::Assistant).collect();
     if messages.is_empty() {
@@ -51,7 +57,7 @@ fn host_for(options: &LastOptions) -> Result<Host> {
     match detect_host(lookup) {
         Ok(host) => Ok(host),
         Err(HostError::Unsupported(name)) => {
-            bail!("{name} is not supported yet; only Claude Code and Codex are (use --stdin)")
+            bail!("{name} is not supported yet; only Claude Code, Codex and pi are (use --stdin)")
         }
         Err(err) => Err(err.into()),
     }
@@ -76,6 +82,29 @@ fn find_claude_transcript(pid: Option<u32>) -> Result<PathBuf> {
             projects_dir.join(claude::project_slug(&cwd)).display()
         )
     })
+}
+
+/// Pi has no pid registry: the session is the newest one for the agent's cwd, which the
+/// Herdr launcher passes as `PLANNOTATOR_TUI_CWD`; standalone, our own cwd.
+fn find_pi_transcript() -> Result<PathBuf> {
+    let sessions_dir = match std::env::var_os("PI_CODING_AGENT_SESSION_DIR") {
+        Some(dir) => PathBuf::from(dir),
+        None => std::env::var_os("PI_CODING_AGENT_DIR")
+            .map_or_else(|| home().join(".pi").join("agent"), PathBuf::from)
+            .join("sessions"),
+    };
+    let cwd = match std::env::var_os("PLANNOTATOR_TUI_CWD") {
+        Some(dir) => PathBuf::from(dir),
+        None => std::env::current_dir().context("current directory")?,
+    };
+    pi::find_transcript(&sessions_dir, &cwd).ok_or_else(|| {
+        anyhow::anyhow!("no pi session for {} (looked in {})", cwd.display(), sessions_dir.display())
+    })
+}
+
+fn pi_messages(path: &Path, pick: usize) -> Result<Vec<Message>> {
+    let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    Ok(pi::parse_messages(&text, pick))
 }
 
 #[cfg(unix)]

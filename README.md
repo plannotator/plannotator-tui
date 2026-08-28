@@ -51,7 +51,7 @@ placement = "overlay"   # overlay (full tab, default) | split | popup
 ## Review the agent's last message
 
 `plannotator-tui last` finds the transcript of the agent that launched your shell (Claude
-Code or Codex), shows a picker of its recent replies, and opens the one you choose as a
+Code, Codex, or pi), shows a picker of its recent replies, and opens the one you choose as a
 document you can annotate and send back — nothing is written to disk. In Herdr, bind
 `plannotator-tui.last` (`prefix+shift+d` above) and press it in the agent's pane. For
 scripts and hooks, `plannotator-tui last --print` writes the newest reply to stdout and

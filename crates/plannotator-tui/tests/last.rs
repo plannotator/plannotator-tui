@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use plannotator_tui_hosts::{Role, claude, codex};
+use plannotator_tui_hosts::{Role, claude, codex, pi};
 
 fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_plannotator-tui"))
@@ -42,6 +42,25 @@ fn print_reads_a_codex_thread_from_a_sessions_root() {
     let out = bin()
         .args(["last", "--host", "codex", "--session"])
         .arg(&root)
+        .arg("--print")
+        .output()
+        .expect("runs");
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), expected.trim_end());
+}
+
+#[test]
+fn print_writes_the_newest_assistant_message_of_a_pi_session() {
+    let transcript = fixtures().join("pi.jsonl");
+    let text = std::fs::read_to_string(&transcript).expect("fixture");
+    let expected = pi::parse_messages(&text, 25)
+        .into_iter()
+        .find(|m| m.role == Role::Assistant)
+        .expect("fixture has an assistant message")
+        .text;
+    let out = bin()
+        .args(["last", "--host", "pi", "--session"])
+        .arg(&transcript)
         .arg("--print")
         .output()
         .expect("runs");
