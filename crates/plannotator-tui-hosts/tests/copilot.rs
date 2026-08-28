@@ -42,7 +42,7 @@ impl CopilotHome {
 }
 
 /// A handle that can change a directory's mtime. Windows needs write access and
-/// FILE_FLAG_BACKUP_SEMANTICS to open a directory at all.
+/// `FILE_FLAG_BACKUP_SEMANTICS` to open a directory at all.
 #[cfg(windows)]
 fn open_dir_for_mtime(dir: &Path) -> std::io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt as _;
