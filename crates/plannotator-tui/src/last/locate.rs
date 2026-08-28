@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use plannotator_tui_hosts::{Host, HostError, Message, Role, claude, codex, copilot, detect_host, droid};
+use plannotator_tui_hosts::{Host, HostError, Message, Role, claude, codex, copilot, detect_host, droid, pi};
+use plannotator_tui_schema::{DocumentSource, Provenance};
 
 use super::LastOptions;
 
@@ -46,6 +47,12 @@ pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
             let messages = droid_messages(&path, pick)?;
             (path, messages)
         }
+        (Host::Pi, Some(path)) => (path.clone(), pi_messages(path, pick)?),
+        (Host::Pi, None) => {
+            let path = find_pi_transcript()?;
+            let messages = pi_messages(&path, pick)?;
+            (path, messages)
+        }
     };
     let messages: Vec<Message> = messages.into_iter().filter(|m| m.role == Role::Assistant).collect();
     if messages.is_empty() {
@@ -68,6 +75,31 @@ fn host_for(options: &LastOptions) -> Result<Host> {
         }
         Err(err) => Err(err.into()),
     }
+}
+
+/// The agent pane's recent output as a document, when Herdr and a target pane are known.
+/// Lossy (no markdown structure survives a terminal), so only a fallback.
+pub(crate) fn screen_fallback(env: &crate::herdr::context::HerdrEnv) -> Option<DocumentSource> {
+    let target = env.delivery_target()?;
+    if !env.in_herdr {
+        return None;
+    }
+    let output = Command::new(&env.bin)
+        .args(["agent", "read", &target.pane, "--source", "recent-unwrapped", "--format", "text"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let text = String::from_utf8_lossy(&output.stdout).trim_end().to_owned();
+    if text.is_empty() {
+        return None;
+    }
+    let host = env.host.clone().or(target.agent).unwrap_or_else(|| "agent".to_owned());
+    Some(DocumentSource::new(
+        text,
+        format!("{host} · screen"),
+        true,
+        Provenance::AgentMessage { host, session: None, message_id: None },
+    ))
 }
 
 fn home() -> PathBuf {
@@ -125,14 +157,19 @@ fn copilot_messages(dir: &Path, pick: usize) -> Result<Vec<Message>> {
     Ok(copilot::parse_messages(&text, pick))
 }
 
-/// Droid's current log for the cwd (`PLANNOTATOR_TUI_CWD` when the launcher set it).
+/// The agent pane's cwd when the Herdr launcher set it, else our own.
+fn agent_cwd() -> Result<PathBuf> {
+    match std::env::var_os("PLANNOTATOR_TUI_CWD") {
+        Some(dir) => Ok(PathBuf::from(dir)),
+        None => std::env::current_dir().context("current directory"),
+    }
+}
+
+/// Droid's current log for the cwd: no pid registry, so the newest log for the cwd's slug.
 fn find_droid_transcript() -> Result<PathBuf> {
     let factory_dir =
         std::env::var_os("FACTORY_CONFIG_DIR").map_or_else(|| home().join(".factory"), PathBuf::from);
-    let cwd = match std::env::var_os("PLANNOTATOR_TUI_CWD") {
-        Some(dir) => PathBuf::from(dir),
-        None => std::env::current_dir().context("current directory")?,
-    };
+    let cwd = agent_cwd()?;
     droid::find_transcript(&factory_dir, &cwd).ok_or_else(|| {
         anyhow::anyhow!(
             "no Droid session for {} (looked in {})",
@@ -145,6 +182,25 @@ fn find_droid_transcript() -> Result<PathBuf> {
 fn droid_messages(path: &Path, pick: usize) -> Result<Vec<Message>> {
     let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     Ok(droid::parse_messages(&text, pick))
+}
+
+/// Pi has no pid registry either: the newest session for the agent's cwd.
+fn find_pi_transcript() -> Result<PathBuf> {
+    let sessions_dir = match std::env::var_os("PI_CODING_AGENT_SESSION_DIR") {
+        Some(dir) => PathBuf::from(dir),
+        None => std::env::var_os("PI_CODING_AGENT_DIR")
+            .map_or_else(|| home().join(".pi").join("agent"), PathBuf::from)
+            .join("sessions"),
+    };
+    let cwd = agent_cwd()?;
+    pi::find_transcript(&sessions_dir, &cwd).ok_or_else(|| {
+        anyhow::anyhow!("no pi session for {} (looked in {})", cwd.display(), sessions_dir.display())
+    })
+}
+
+fn pi_messages(path: &Path, pick: usize) -> Result<Vec<Message>> {
+    let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    Ok(pi::parse_messages(&text, pick))
 }
 
 #[cfg(unix)]

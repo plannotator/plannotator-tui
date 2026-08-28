@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use plannotator_tui_hosts::{Role, claude, codex, copilot, droid};
+use plannotator_tui_hosts::{Role, claude, codex, copilot, droid, pi};
 
 fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_plannotator-tui"))
@@ -104,4 +104,23 @@ fn stdin_is_printed_back_verbatim() {
     child.stdin.take().expect("stdin").write_all(b"# hi\n\nfrom stdin\n").expect("write");
     let out = child.wait_with_output().expect("runs");
     assert_eq!(String::from_utf8_lossy(&out.stdout), "# hi\n\nfrom stdin\n");
+}
+
+#[test]
+fn print_writes_the_newest_assistant_message_of_a_pi_session() {
+    let transcript = fixtures().join("pi.jsonl");
+    let text = std::fs::read_to_string(&transcript).expect("fixture");
+    let expected = pi::parse_messages(&text, 25)
+        .into_iter()
+        .find(|m| m.role == Role::Assistant)
+        .expect("fixture has an assistant message")
+        .text;
+    let out = bin()
+        .args(["last", "--host", "pi", "--session"])
+        .arg(&transcript)
+        .arg("--print")
+        .output()
+        .expect("runs");
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), expected.trim_end());
 }

@@ -55,5 +55,6 @@ fn labels_are_the_short_names_herdr_uses() {
     assert_eq!(Host::Codex.label(), "codex");
     assert_eq!(Host::Copilot.label(), "copilot");
     assert_eq!(Host::Droid.label(), "droid");
-    assert_eq!(Host::ALL.len(), 4);
+    assert_eq!(Host::Pi.label(), "pi");
+    assert_eq!(Host::ALL.len(), 5);
 }

@@ -166,12 +166,10 @@ const PROCESS_INFO: &str = r#"{"id":"cli:pane:process_info","result":{"process_i
 #[test]
 fn the_agent_pid_is_the_named_agent_process_else_the_group_leader() {
     assert_eq!(agent_pid(PROCESS_INFO), Some((91279, "claude".into())));
-    let leader_only = PROCESS_INFO.replace(r#""name":"claude""#, r#""name":"node""#);
-    assert_eq!(
-        agent_pid(&leader_only),
-        Some((91279, "claude".into())),
-        "unknown name → leader, host default"
-    );
+    let pi = PROCESS_INFO.replace(r#""name":"claude""#, r#""name":"pi""#);
+    assert_eq!(agent_pid(&pi), Some((91279, "pi".into())));
+    let unknown = PROCESS_INFO.replace(r#""name":"claude""#, r#""name":"aider""#);
+    assert_eq!(agent_pid(&unknown), Some((91279, "aider".into())), "unknown agents keep their name");
     assert_eq!(agent_pid("{}"), None);
 }
 
