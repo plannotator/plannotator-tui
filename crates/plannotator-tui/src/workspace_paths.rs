@@ -58,6 +58,6 @@ mod tests {
         #[cfg(unix)]
         assert_eq!(absolute(Path::new("/a/b/../c/./d.md")), PathBuf::from("/a/c/d.md"));
         #[cfg(windows)]
-        assert_eq!(absolute(Path::new(r"C:\\a\\b\\..\\c\\.\\d.md")), PathBuf::from(r"C:\\a\\c\\d.md"));
+        assert_eq!(absolute(Path::new(r"C:\a\b\..\c\.\d.md")), PathBuf::from(r"C:\a\c\d.md"));
     }
 }
