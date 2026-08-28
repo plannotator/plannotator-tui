@@ -48,5 +48,11 @@ cast_possible_wrap = "allow"
 cast_precision_loss = "allow"
 
 [profile.release]
-debug = 1
 lto = "thin"
+# Shipped binaries carry no debug info; profile locally with `--profile profiling`.
+strip = true
+
+[profile.profiling]
+inherits = "release"
+debug = 1
+strip = false
