@@ -1,0 +1,13 @@
+[package]
+name = "plannotator-tui-hosts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Find a coding agent's transcript and read its recent messages (Claude Code, Codex)."
+
+[dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

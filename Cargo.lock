@@ -1246,6 +1246,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "plannotator-tui-hosts"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "plannotator-tui-schema"
 version = "0.1.0"
 dependencies = [
