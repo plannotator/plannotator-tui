@@ -8,6 +8,7 @@ use ratatui::crossterm::event::{
 use tui_input::backend::crossterm::EventHandler;
 
 use super::selection::Selection;
+use super::send::SendState;
 use super::{App, Focus, GUTTER, Mode, Pending, TOOLBAR};
 use crate::delivery::Delivery as _;
 
@@ -16,6 +17,7 @@ impl App {
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => match &self.mode {
                 Mode::Browse => self.browse_key(*key),
+                Mode::ConfirmQuit => self.confirm_quit_key(*key),
                 Mode::Compose | Mode::Edit(_) => self.text_key(*key, event),
             },
             Event::Mouse(mouse) if self.mode == Mode::Browse => self.mouse(*mouse),
@@ -27,14 +29,14 @@ impl App {
         // Global keys first.
         match (key.code, key.modifiers) {
             (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                self.quit = true;
+                self.request_quit();
                 return Ok(());
             }
             (KeyCode::Tab, _) => {
                 self.cycle_focus();
                 return Ok(());
             }
-            (KeyCode::Char('E'), _) => return self.export_feedback(),
+            (KeyCode::Char('E'), _) => return self.send_feedback(),
             (KeyCode::Char('t'), _) => {
                 self.toggle_tree(self.geometry.doc.width + self.geometry.tree.width + GUTTER);
                 return Ok(());
@@ -47,6 +49,25 @@ impl App {
             Focus::Document => self.document_key(key),
             Focus::Rail => self.rail_key(key),
         }
+    }
+
+    /// The quit confirmation: send first, quit anyway, or stay.
+    fn confirm_quit_key(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
+                self.mode = Mode::Browse;
+                self.send_feedback()?;
+                // A refused send keeps the app open so the footer can say why.
+                self.quit = self.send_state == SendState::Sent;
+            }
+            KeyCode::Char('n' | 'N') => {
+                self.mode = Mode::Browse;
+                self.quit = true;
+            }
+            KeyCode::Esc => self.mode = Mode::Browse,
+            _ => {}
+        }
+        Ok(())
     }
 
     fn cycle_focus(&mut self) {
@@ -112,7 +133,7 @@ impl App {
                 if self.pending.is_some() || self.selection.is_some() {
                     self.clear_selection();
                 } else {
-                    self.quit = true;
+                    self.request_quit();
                 }
             }
             (KeyCode::Char('v'), _) => {
@@ -141,6 +162,10 @@ impl App {
             }
             (KeyCode::Char('x'), _) => {
                 let removed = self.open.store.remove_in_block(&self.open.doc, self.selected)?;
+                if removed > 0 {
+                    self.mark_unsent();
+                    self.sync_tree_counts();
+                }
                 self.status = Some(format!("removed {removed} annotation(s) on block"));
             }
             _ => {}
@@ -231,10 +256,11 @@ impl App {
                         if body.is_empty() {
                             self.status = Some("edit cancelled: empty".into());
                         } else if self.open.store.edit_body(&id, body)? {
+                            self.mark_unsent();
                             self.status = Some("annotation updated".into());
                         }
                     }
-                    Mode::Compose | Mode::Browse => {
+                    Mode::Compose | Mode::Browse | Mode::ConfirmQuit => {
                         if !body.is_empty()
                             && let Some(pending) = self.pending.take()
                         {
@@ -252,22 +278,14 @@ impl App {
         Ok(())
     }
 
-    /// Send feedback: the open file's, or every annotated file's when the tree has focus.
-    fn export_feedback(&mut self) -> Result<()> {
-        let (text, what) = if self.focus == Focus::Tree {
-            (self.folder_feedback()?, "folder feedback".to_owned())
-        } else {
-            (self.feedback(), format!("feedback for {} annotation(s)", self.open.store.placed().len()))
-        };
-        self.send(&text, &what);
-        Ok(())
-    }
-
     fn mouse(&mut self, mouse: MouseEvent) -> Result<()> {
         match mouse.kind {
             MouseEventKind::ScrollDown => self.scroll_by(3),
             MouseEventKind::ScrollUp => self.scroll_by(-3),
             MouseEventKind::Down(MouseButton::Left) => {
+                if self.send_button_hit(mouse.column, mouse.row) {
+                    return self.send_feedback();
+                }
                 if let Some(kind) = self.toolbar_hit(mouse.column, mouse.row) {
                     return self.act(kind);
                 }
@@ -312,6 +330,12 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    fn send_button_hit(&self, column: u16, row: u16) -> bool {
+        self.geometry
+            .send_button
+            .is_some_and(|rect| row == rect.y && column >= rect.x && column < rect.right())
     }
 
     fn toolbar_hit(&self, column: u16, row: u16) -> Option<Kind> {

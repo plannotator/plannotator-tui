@@ -66,7 +66,7 @@ impl App {
             Constraint::Length(rail_width),
         ])
         .areas(body);
-        self.geometry = Geometry { tree, doc, toolbar: None, bubbles: Vec::new() };
+        self.geometry = Geometry { tree, doc, toolbar: None, bubbles: Vec::new(), send_button: None };
 
         if self.open.layout.width != usize::from(doc.width) {
             self.open.layout.reflow(usize::from(doc.width));
@@ -87,18 +87,8 @@ impl App {
             Mode::Compose => self.draw_compose(frame, " comment · enter saves · esc cancels "),
             Mode::Edit(_) => self.draw_compose(frame, " edit · enter saves · esc cancels "),
             Mode::Browse if self.pending.is_some() => self.draw_toolbar(frame),
-            Mode::Browse => {}
+            Mode::Browse | Mode::ConfirmQuit => {}
         }
-    }
-
-    fn draw_header(&self, frame: &mut Frame, area: Rect) {
-        let title = Line::from(vec![
-            Span::raw(" ").dim(),
-            Span::styled(self.open.source.name.clone(), Style::new().bold()),
-        ]);
-        let right = Line::from(Span::raw("plannotui ").dim()).right_aligned();
-        frame.render_widget(Paragraph::new(title), area);
-        frame.render_widget(Paragraph::new(right), area);
     }
 
     fn draw_tree(&self, frame: &mut Frame, area: Rect) {
@@ -349,6 +339,16 @@ impl App {
     }
 
     fn draw_footer(&self, frame: &mut Frame, area: Rect) {
+        if self.mode == Mode::ConfirmQuit {
+            // The question owns the footer: the browse help would name keys that are not
+            // live while it is up.
+            let question = format!(
+                " send feedback to {} before quitting? y send · n quit · esc cancel",
+                self.delivery.describe()
+            );
+            frame.render_widget(Paragraph::new(Line::from(Span::raw(question).bold())), area);
+            return;
+        }
         let orphans = self.open.store.orphans();
         let mut parts = vec![
             format!("{} blocks", self.open.doc.blocks.len()),

@@ -26,11 +26,23 @@ pub(crate) struct Store {
     annotations: Vec<Annotation>,
     /// Parallel to `annotations`.
     resolved: Vec<Resolution>,
+    deliveries: Vec<Delivered>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
 struct Record {
     annotations: Vec<Annotation>,
+    /// Every send, newest last. Lets the UI say "sent" across restarts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    deliveries: Vec<Delivered>,
+}
+
+/// One send of the feedback: when, where, and which annotations it covered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Delivered {
+    pub(crate) at: String,
+    pub(crate) target: String,
+    pub(crate) annotation_ids: Vec<String>,
 }
 
 /// A resolved annotation: the record plus where it currently sits in the source.
@@ -66,12 +78,12 @@ impl Location {
     }
 }
 
-fn read_record(path: &Path) -> Result<Option<Vec<Annotation>>> {
+fn read_record(path: &Path) -> Result<Option<Record>> {
     match std::fs::read_to_string(path) {
         Ok(json) => {
             let record: Record =
                 serde_json::from_str(&json).with_context(|| format!("parsing {}", path.display()))?;
-            Ok(Some(record.annotations))
+            Ok(Some(record))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
@@ -81,14 +93,19 @@ fn read_record(path: &Path) -> Result<Option<Vec<Annotation>>> {
 impl Store {
     /// Load the record at `location`; import the legacy sidecar when the record is absent.
     pub(crate) fn load(location: &Location, doc: &Document) -> Result<Self> {
-        let (annotations, imported) = match read_record(&location.record)? {
+        let (record, imported) = match read_record(&location.record)? {
             Some(found) => (found, false),
             None => match &location.legacy_sidecar {
                 Some(sidecar) => (read_record(sidecar)?.unwrap_or_default(), true),
-                None => (Vec::new(), false),
+                None => (Record::default(), false),
             },
         };
-        let mut store = Self { path: Some(location.record.clone()), annotations, resolved: Vec::new() };
+        let mut store = Self {
+            path: Some(location.record.clone()),
+            annotations: record.annotations,
+            resolved: Vec::new(),
+            deliveries: record.deliveries,
+        };
         store.resolve_all(doc);
         if imported && !store.annotations.is_empty() {
             store.save()?; // the import is now the record; the sidecar is left alone
@@ -98,7 +115,7 @@ impl Store {
 
     /// A store that never touches disk, for transient documents.
     pub(crate) fn transient() -> Self {
-        Self { path: None, annotations: Vec::new(), resolved: Vec::new() }
+        Self { path: None, annotations: Vec::new(), resolved: Vec::new(), deliveries: Vec::new() }
     }
 
     /// Count annotations recorded for a file without loading a document.
@@ -107,7 +124,7 @@ impl Store {
             .ok()
             .flatten()
             .or_else(|| location.legacy_sidecar.as_deref().and_then(|p| read_record(p).ok().flatten()))
-            .map_or(0, |a| a.len())
+            .map_or(0, |r| r.annotations.len())
     }
 
     fn save(&self) -> Result<()> {
@@ -115,7 +132,8 @@ impl Store {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         }
-        let json = serde_json::to_string_pretty(&Record { annotations: self.annotations.clone() })?;
+        let record = Record { annotations: self.annotations.clone(), deliveries: self.deliveries.clone() };
+        let json = serde_json::to_string_pretty(&record)?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, json).with_context(|| format!("writing {}", tmp.display()))?;
         std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
@@ -222,6 +240,29 @@ impl Store {
         self.annotations.len()
     }
 
+    /// Remember that everything currently recorded was sent to `target`.
+    pub(crate) fn record_delivery(&mut self, target: &str) -> Result<()> {
+        self.deliveries.push(Delivered {
+            at: timestamp(),
+            target: target.to_owned(),
+            annotation_ids: self.annotations.iter().map(|a| a.id.clone()).collect(),
+        });
+        self.save()
+    }
+
+    /// True when the annotations on record are exactly the set of the last send.
+    pub(crate) fn all_delivered(&self) -> bool {
+        let Some(last) = self.deliveries.last() else { return false };
+        if self.annotations.is_empty() {
+            return false;
+        }
+        let mut sent: Vec<&str> = last.annotation_ids.iter().map(String::as_str).collect();
+        let mut have: Vec<&str> = self.annotations.iter().map(|a| a.id.as_str()).collect();
+        sent.sort_unstable();
+        have.sort_unstable();
+        sent == have
+    }
+
     pub(crate) fn orphans(&self) -> usize {
         self.resolved.iter().filter(|r| **r == Resolution::Orphan).count()
     }
@@ -307,7 +348,12 @@ mod tests {
         std::fs::write(&doc_path, "hello world\n").expect("doc");
         let sidecar = root.join("doc.md.annotations.json");
         let doc = Document::parse("hello world\n".to_owned());
-        let mut seed = Store { path: Some(sidecar.clone()), annotations: Vec::new(), resolved: Vec::new() };
+        let mut seed = Store {
+            path: Some(sidecar.clone()),
+            annotations: Vec::new(),
+            resolved: Vec::new(),
+            deliveries: Vec::new(),
+        };
         seed.add(&doc, 0..5, "hello".into(), Kind::Comment, "hi".into()).expect("seed sidecar");
         let before = std::fs::read_to_string(&sidecar).expect("sidecar");
 
@@ -316,6 +362,41 @@ mod tests {
         assert_eq!(store.len(), 1);
         assert!(location.record.is_file(), "imported into the data dir");
         assert_eq!(std::fs::read_to_string(&sidecar).expect("sidecar"), before, "sidecar untouched");
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn a_record_without_deliveries_still_loads() {
+        let root = temp_root("old-shape");
+        let doc_path = root.join("doc.md");
+        let location = Location::for_file(&root.join("data"), "proj", &doc_path);
+        std::fs::create_dir_all(location.record.parent().expect("parent")).expect("dir");
+        std::fs::write(&location.record, r#"{"annotations":[]}"#).expect("old record");
+        let store = Store::load(&location, &Document::parse("x\n".to_owned())).expect("loads");
+        assert!(!store.all_delivered());
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn all_delivered_tracks_the_last_send_across_reloads() {
+        let root = temp_root("deliver");
+        let doc_path = root.join("doc.md");
+        let location = Location::for_file(&root.join("data"), "proj", &doc_path);
+        let doc = Document::parse("one two three\n".to_owned());
+        let mut store = Store::load(&location, &doc).expect("empty");
+        assert!(!store.all_delivered(), "nothing to send yet");
+        store.add(&doc, 0..3, "one".into(), Kind::Comment, "a".into()).expect("add");
+        assert!(!store.all_delivered());
+        store.record_delivery("claude in w1:p1").expect("record");
+        assert!(store.all_delivered());
+
+        let mut reloaded = Store::load(&location, &doc).expect("reload");
+        assert!(reloaded.all_delivered(), "the send survives a restart");
+        reloaded.add(&doc, 4..7, "two".into(), Kind::LooksGood, String::new()).expect("add");
+        assert!(!reloaded.all_delivered(), "a new annotation is unsent");
+        let newest = reloaded.placed().last().map(|p| p.annotation.id.clone()).expect("two");
+        reloaded.remove(&newest).expect("remove");
+        assert!(reloaded.all_delivered(), "back to exactly the delivered set");
         std::fs::remove_dir_all(&root).expect("cleanup");
     }
 }

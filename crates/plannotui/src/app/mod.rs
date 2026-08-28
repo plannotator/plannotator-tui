@@ -2,8 +2,12 @@
 //! the data they share and the operations that change it.
 
 mod draw;
+mod header;
 mod input;
 mod selection;
+mod send;
+#[cfg(test)]
+mod tests;
 
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -21,6 +25,7 @@ use crate::store::{Location, Store};
 use crate::tree::Tree;
 use crate::workspace_paths;
 use selection::Selection;
+use send::SendState;
 
 /// Width of the marker column left of the document.
 pub(super) const GUTTER: u16 = 2;
@@ -39,6 +44,8 @@ enum Mode {
     Compose,
     /// Editing the body of an existing annotation (by id).
     Edit(String),
+    /// Quit was asked for while feedback is unsent; the footer asks first.
+    ConfirmQuit,
 }
 
 /// Which pane keyboard input goes to.
@@ -58,6 +65,8 @@ struct Geometry {
     toolbar: Option<(Rect, [Range<u16>; 3])>,
     /// Screen rects of the rail bubbles drawn last frame, with their annotation ids.
     bubbles: Vec<(Rect, String)>,
+    /// The header's Send button; `None` when the header was too narrow for it.
+    send_button: Option<Rect>,
 }
 
 /// A finished selection waiting for an action.
@@ -102,6 +111,7 @@ pub(crate) struct App {
     /// `t` toggles; `None` means "automatic by width".
     tree_visible: Option<bool>,
     delivery: Box<dyn Delivery>,
+    send_state: SendState,
     focus: Focus,
     scroll: usize,
     selected: usize,
@@ -139,14 +149,17 @@ impl App {
             _ => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         };
         let project = workspace_paths::project_name(&folder);
+        let open = Open::new(source, width, &data_dir, &project)?;
+        let send_state = if open.store.all_delivered() { SendState::Sent } else { SendState::Ready };
         Ok(Self {
-            open: Open::new(source, width, &data_dir, &project)?,
+            open,
             data_dir,
             project,
             tree: None,
             tree_cursor: 0,
             tree_visible: None,
             delivery,
+            send_state,
             focus: Focus::Document,
             scroll: 0,
             selected: 0,
@@ -175,6 +188,7 @@ impl App {
         // The project is the folder's, not the first file's parent's.
         app.project = workspace_paths::project_name(root);
         app.open = Open::new(read_file(&path)?, width, &app.data_dir, &app.project)?;
+        app.derive_send_state();
         app.refresh_counts(&mut tree);
         app.tree_cursor = tree.position(&path).unwrap_or(0);
         app.tree = Some(tree);
@@ -221,6 +235,7 @@ impl App {
         }
         let width = self.open.layout.width;
         self.open = Open::new(read_file(&path)?, width, &self.data_dir, &self.project)?;
+        self.derive_send_state();
         self.scroll = 0;
         self.selected = 0;
         self.cursor = (0, 0);
@@ -240,6 +255,7 @@ impl App {
     fn annotate(&mut self, range: Range<usize>, kind: Kind, body: String) -> Result<()> {
         let rendered = self.open.layout.rendered_in_range(&self.open.doc.source, &range);
         self.open.store.add(&self.open.doc, range, rendered, kind, body)?;
+        self.mark_unsent();
         self.sync_tree_counts();
         Ok(())
     }
@@ -273,6 +289,7 @@ impl App {
         let id = self.open.store.placed().get(self.rail_cursor).map(|p| p.annotation.id.clone());
         let Some(id) = id else { return Ok(()) };
         if self.open.store.remove(&id)? {
+            self.mark_unsent();
             self.status = Some("annotation removed".into());
             self.rail_cursor = self.rail_cursor.min(self.open.store.placed().len().saturating_sub(1));
             self.sync_tree_counts();
@@ -311,14 +328,6 @@ impl App {
             out.push_str(&format!("## File: {}\n\n{}\n", relative.display(), Self::feedback_for(&open)));
         }
         Ok(if out.is_empty() { "No changes detected.".to_owned() } else { out })
-    }
-
-    /// Send feedback through the configured delivery (clipboard by default).
-    fn send(&mut self, text: &str, what: &str) {
-        self.status = Some(match self.delivery.deliver(text) {
-            Ok(()) => format!("sent {what} → {}", self.delivery.describe()),
-            Err(err) => format!("send failed: {err:#}"),
-        });
     }
 
     fn clear_selection(&mut self) {
