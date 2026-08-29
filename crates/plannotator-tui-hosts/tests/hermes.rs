@@ -68,7 +68,7 @@ fn populate(db: &Path, wal: bool) -> Connection {
 fn newest_active_assistant_reply_comes_first_and_n_is_honoured() {
     let dir = temp_dir("order");
     let db = dir.join("state.db");
-    let _writer = populate(&db, false);
+    let writer = populate(&db, false);
     let messages = hermes::messages_for_session(&db, "s1", 25).expect("messages");
     let texts: Vec<&str> = messages.iter().map(|m| m.text.as_str()).collect();
     assert_eq!(texts, ["newest reply", "middle reply", "oldest reply", "first question"]);
@@ -76,6 +76,8 @@ fn newest_active_assistant_reply_comes_first_and_n_is_honoured() {
     assert_eq!(messages[3].role, Role::Human);
     assert_eq!(messages[0].at.as_deref(), Some("1970-01-01T00:05:00.000Z"));
     assert_eq!(hermes::messages_for_session(&db, "s1", 2).expect("two").len(), 2);
+    // Windows cannot delete a database another handle still holds open.
+    drop(writer);
     std::fs::remove_dir_all(&dir).expect("cleanup");
 }
 
@@ -83,13 +85,14 @@ fn newest_active_assistant_reply_comes_first_and_n_is_honoured() {
 fn unknown_sessions_and_missing_databases_are_distinct_errors() {
     let dir = temp_dir("errors");
     let db = dir.join("state.db");
-    let _writer = populate(&db, false);
+    let writer = populate(&db, false);
     assert!(matches!(hermes::messages_for_session(&db, "s3", 5), Err(HostError::NoMessages(_))));
     assert!(matches!(hermes::messages_for_session(&db, "nope", 5), Err(HostError::NoMessages(_))));
     assert!(matches!(
         hermes::messages_for_session(&dir.join("absent.db"), "s1", 5),
         Err(HostError::NoTranscript(_))
     ));
+    drop(writer);
     std::fs::remove_dir_all(&dir).expect("cleanup");
 }
 
