@@ -32,9 +32,11 @@ Watch it inside Herdr: [demo](https://x.com/plannotator/status/20934195610771542
 ## Install
 
 ```sh
-brew install plannotator/tap/plannotator-tui     # macOS, Linux
-cargo install plannotator-tui                    # anywhere with Rust
+brew trust plannotator/tap && brew install plannotator/tap/plannotator-tui   # macOS, Linux
+cargo install plannotator-tui                                                # anywhere with Rust
 ```
+
+Homebrew 6 asks you to trust a third-party tap once before installing from it.
 
 Prebuilt binaries for macOS, Linux and Windows are on the
 [releases page](https://github.com/plannotator/plannotator-tui/releases).
