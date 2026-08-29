@@ -114,6 +114,7 @@ pub(crate) struct App {
     /// Present in folder mode.
     tree: Option<Tree>,
     tree_cursor: usize,
+    tree_scroll: usize,
     /// `t` toggles; `None` means "automatic by width".
     tree_visible: Option<bool>,
     delivery: Box<dyn Delivery>,
@@ -168,6 +169,7 @@ impl App {
             project,
             tree: None,
             tree_cursor: 0,
+            tree_scroll: 0,
             tree_visible: None,
             delivery,
             send_state,
@@ -235,6 +237,30 @@ impl App {
         if shown && self.focus == Focus::Tree {
             self.focus = Focus::Document;
         }
+    }
+
+    fn set_tree_scroll(&mut self, scroll: usize) {
+        let len = self.tree.as_ref().map_or(0, |tree| tree.rows.len());
+        let viewport = usize::from(self.geometry.tree.height);
+        self.tree_scroll = scroll.min(len.saturating_sub(viewport));
+    }
+
+    fn ensure_tree_cursor_visible(&mut self) {
+        let viewport = usize::from(self.geometry.tree.height);
+        if viewport == 0 {
+            return;
+        }
+        if self.tree_cursor < self.tree_scroll {
+            self.set_tree_scroll(self.tree_cursor);
+        } else if self.tree_cursor >= self.tree_scroll.saturating_add(viewport) {
+            self.set_tree_scroll(self.tree_cursor + 1 - viewport);
+        }
+    }
+
+    fn scroll_tree(&mut self, rows: usize, down: bool) {
+        let scroll =
+            if down { self.tree_scroll.saturating_add(rows) } else { self.tree_scroll.saturating_sub(rows) };
+        self.set_tree_scroll(scroll);
     }
 
     /// Switch to the file under the tree cursor.

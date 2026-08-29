@@ -93,10 +93,11 @@ impl App {
                 self.tree_cursor = (self.tree_cursor + 1).min(len.saturating_sub(1));
             }
             KeyCode::Char('k') | KeyCode::Up => self.tree_cursor = self.tree_cursor.saturating_sub(1),
-            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.open_tree_selection()?,
+            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => return self.open_tree_selection(),
             KeyCode::Esc => self.focus = Focus::Document,
-            _ => {}
+            _ => return Ok(()),
         }
+        self.ensure_tree_cursor_visible();
         Ok(())
     }
 
@@ -286,6 +287,12 @@ impl App {
 
     fn mouse(&mut self, mouse: MouseEvent) -> Result<()> {
         match mouse.kind {
+            MouseEventKind::ScrollDown if self.tree_contains(mouse.row, mouse.column) => {
+                self.scroll_tree(3, true);
+            }
+            MouseEventKind::ScrollUp if self.tree_contains(mouse.row, mouse.column) => {
+                self.scroll_tree(3, false);
+            }
             MouseEventKind::ScrollDown => self.scroll_by(3),
             MouseEventKind::ScrollUp => self.scroll_by(-3),
             MouseEventKind::Down(MouseButton::Left) => {
@@ -352,16 +359,15 @@ impl App {
         spans.iter().zip(TOOLBAR.iter()).find(|(span, _)| span.contains(&column)).map(|(_, item)| item.3)
     }
 
-    fn tree_hit(&self, row: u16, column: u16) -> Option<usize> {
+    fn tree_contains(&self, row: u16, column: u16) -> bool {
         let tree = self.geometry.tree;
-        let inside = tree.width > 0
-            && column >= tree.x
-            && column < tree.right()
-            && row >= tree.y
-            && row < tree.bottom();
-        inside
-            .then(|| usize::from(row - tree.y))
-            .filter(|&i| self.tree.as_ref().is_some_and(|t| i < t.rows.len()))
+        tree.width > 0 && column >= tree.x && column < tree.right() && row >= tree.y && row < tree.bottom()
+    }
+
+    fn tree_hit(&self, row: u16, column: u16) -> Option<usize> {
+        self.tree_contains(row, column)
+            .then(|| self.tree_scroll + usize::from(row - self.geometry.tree.y))
+            .filter(|&index| self.tree.as_ref().is_some_and(|tree| index < tree.rows.len()))
     }
 
     fn bubble_hit(&self, column: u16, row: u16) -> Option<usize> {

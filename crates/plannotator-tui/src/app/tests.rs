@@ -3,6 +3,7 @@
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, reason = "tests assert by panicking")]
 
+use std::fs::{create_dir_all, remove_dir_all, write};
 use std::path::PathBuf;
 
 use plannotator_tui_schema::{DocumentSource, Kind, Provenance};
@@ -135,4 +136,60 @@ fn escaping_the_picker_keeps_the_newest_message() {
     assert_eq!(app.open.source.name, "claude · last message");
     app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('p')))).expect("p");
     assert_eq!(app.mode, Mode::Pick, "p reopens the picker");
+}
+
+fn folder_app() -> (App, PathBuf) {
+    let root = std::env::temp_dir().join(format!("plannotator-tui-tree-scroll-{}", std::process::id()));
+    let _ = remove_dir_all(&root);
+    create_dir_all(&root).expect("mkdir");
+    for index in 0..24 {
+        write(root.join(format!("{index:02}.md")), "# File\n").expect("write");
+    }
+    let mut app = App::open_folder(&root, 60, Box::new(Discard)).expect("opens folder");
+    app.focus = super::Focus::Tree;
+    (app, root)
+}
+
+#[test]
+fn tree_cursor_scrolls_into_view() {
+    let (mut app, root) = folder_app();
+    draw(&mut app);
+    for _ in 0..20 {
+        app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('j')))).expect("j");
+    }
+
+    assert_eq!(app.tree_cursor, 20);
+    assert_eq!(app.tree_scroll, 3);
+    let rows = draw(&mut app);
+    let tree_rows: Vec<&String> = rows.iter().skip(1).take(18).collect();
+    assert!(tree_rows.iter().any(|row| row.contains("20.md")), "{tree_rows:?}");
+    assert!(!tree_rows.iter().any(|row| row.contains("00.md")), "{tree_rows:?}");
+    remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn mouse_scrolling_over_tree_updates_visible_rows_and_click_target() {
+    let (mut app, root) = folder_app();
+    draw(&mut app);
+    let tree = app.geometry.tree;
+    let scroll = Event::Mouse(MouseEvent {
+        kind: MouseEventKind::ScrollDown,
+        column: tree.x,
+        row: tree.y,
+        modifiers: KeyModifiers::NONE,
+    });
+    app.handle_event(&scroll).expect("scroll");
+    assert_eq!(app.tree_scroll, 3);
+    let rows = draw(&mut app);
+    assert!(rows.iter().any(|row| row.contains("03.md")), "{rows:?}");
+
+    let click = Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: tree.x,
+        row: tree.y,
+        modifiers: KeyModifiers::NONE,
+    });
+    app.handle_event(&click).expect("click");
+    assert_eq!(app.open.source.name, "03.md");
+    remove_dir_all(root).expect("cleanup");
 }

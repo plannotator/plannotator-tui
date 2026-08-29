@@ -99,7 +99,8 @@ impl App {
         }
     }
 
-    fn draw_tree(&self, frame: &mut Frame, area: Rect) {
+    fn draw_tree(&mut self, frame: &mut Frame, area: Rect) {
+        self.set_tree_scroll(self.tree_scroll);
         let Some(tree) = &self.tree else { return };
         let focused = self.focus == Focus::Tree;
         let border = if focused { Style::new().fg(Color::Cyan) } else { Style::new().fg(Color::DarkGray) };
@@ -114,6 +115,7 @@ impl App {
             .rows
             .iter()
             .enumerate()
+            .skip(self.tree_scroll)
             .take(usize::from(inner.height))
             .map(|(i, row)| {
                 let indent = "  ".repeat(row.depth);
