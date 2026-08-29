@@ -114,6 +114,8 @@ pub(crate) struct App {
     /// Present in folder mode.
     tree: Option<Tree>,
     tree_cursor: usize,
+    /// First tree row drawn; follows `tree_cursor` so the selected row stays visible.
+    tree_scroll: usize,
     /// `t` toggles; `None` means "automatic by width".
     tree_visible: Option<bool>,
     delivery: Box<dyn Delivery>,
@@ -168,6 +170,7 @@ impl App {
             project,
             tree: None,
             tree_cursor: 0,
+            tree_scroll: 0,
             tree_visible: None,
             delivery,
             send_state,
@@ -439,6 +442,30 @@ impl App {
         let height = usize::from(self.geometry.doc.height.max(1));
         let max = self.open.layout.total_rows.saturating_sub(height);
         self.scroll = (self.scroll as i64 + delta).clamp(0, max as i64) as usize;
+    }
+
+    fn tree_len(&self) -> usize {
+        self.tree.as_ref().map_or(0, |t| t.rows.len())
+    }
+
+    /// Scroll the tree by `delta` rows without moving its cursor (mouse wheel over the tree).
+    fn tree_scroll_by(&mut self, delta: i64) {
+        let height = usize::from(self.geometry.tree.height.max(1));
+        let max = self.tree_len().saturating_sub(height);
+        self.tree_scroll = (self.tree_scroll as i64 + delta).clamp(0, max as i64) as usize;
+    }
+
+    /// Move the tree's window so `tree_cursor` is inside its `height` visible rows.
+    fn keep_tree_cursor_visible(&mut self, height: usize) {
+        if height == 0 {
+            return;
+        }
+        if self.tree_cursor < self.tree_scroll {
+            self.tree_scroll = self.tree_cursor;
+        } else if self.tree_cursor >= self.tree_scroll + height {
+            self.tree_scroll = self.tree_cursor + 1 - height;
+        }
+        self.tree_scroll = self.tree_scroll.min(self.tree_len().saturating_sub(height));
     }
 
     /// Re-read the document from its provenance and re-resolve every annotation.
