@@ -9,7 +9,10 @@ pub mod claude;
 pub mod codex;
 pub mod copilot;
 pub mod droid;
+pub mod hermes;
+pub mod omp;
 pub mod pi;
+pub(crate) mod time;
 
 use std::path::PathBuf;
 
@@ -23,6 +26,10 @@ pub enum Host {
     /// Droid (Factory): `~/.factory/sessions/<slug>/<session>.jsonl`, Claude's shape, file order.
     Droid,
     Pi,
+    /// Oh My Pi: pi's format and layout under `~/.omp/agent/sessions`.
+    Omp,
+    /// Hermes CLI: conversations in `SQLite` (`~/.hermes/state.db`), addressed by session id.
+    Hermes,
 }
 
 impl Host {
@@ -34,11 +41,40 @@ impl Host {
             Self::Copilot => "copilot",
             Self::Droid => "droid",
             Self::Pi => "pi",
+            Self::Omp => "omp",
+            Self::Hermes => "hermes",
         }
     }
 
     /// Every host with a transcript reader, for messages that list them.
-    pub const ALL: [Host; 5] = [Host::ClaudeCode, Host::Codex, Host::Pi, Host::Copilot, Host::Droid];
+    pub const ALL: [Host; 7] =
+        [Host::ClaudeCode, Host::Codex, Host::Pi, Host::Omp, Host::Copilot, Host::Droid, Host::Hermes];
+}
+
+/// Which reader a transcript file wants, from its first lines. For a path handed to us
+/// without a host name (Herdr's `agent_session`, a user's `--session`).
+pub fn sniff(head: &str) -> Option<Host> {
+    // Hand-written or pretty-printed JSON puts a space after the colon; compact writers don't.
+    let compact = head.replace(": ", ":");
+    let lines: Vec<&str> = compact.lines().filter(|l| !l.trim().is_empty()).take(50).collect();
+    let any = |needle: &str| lines.iter().any(|l| l.contains(needle));
+    if any(r#""type":"session""#) && (any(r#""parentId""#) || any(r#""version""#)) {
+        return Some(Host::Pi);
+    }
+    if any(r#""type":"assistant.message""#) || any(r#""type":"session.start""#) {
+        return Some(Host::Copilot);
+    }
+    if any(r#""type":"response_item""#) || any(r#""type":"event_msg""#) || any(r#""type":"session_meta""#) {
+        return Some(Host::Codex);
+    }
+    // Droid: Claude's message shape keyed by `id`/`parentId`, no pi session header.
+    if any(r#""parentId""#) && any(r#""type":"message""#) {
+        return Some(Host::Droid);
+    }
+    if any(r#""parentUuid""#) || any(r#""uuid""#) {
+        return Some(Host::ClaudeCode);
+    }
+    None
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,6 +145,8 @@ pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostErr
             "copilot" | "copilot-cli" | "copilot_cli" => return Ok(Host::Copilot),
             "droid" | "factory" => return Ok(Host::Droid),
             "pi" => return Ok(Host::Pi),
+            "omp" | "oh-my-pi" | "ohmypi" => return Ok(Host::Omp),
+            "hermes" | "hermes-cli" | "hermes_cli" => return Ok(Host::Hermes),
             _ => {}
         }
     }
@@ -118,14 +156,24 @@ pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostErr
     if set("COPILOT_CLI") {
         return Ok(Host::Copilot);
     }
+    let ai_agent = env("AI_AGENT").map(|v| v.trim().to_ascii_lowercase());
+    // Oh My Pi is a pi harness: it reuses pi's `PI_CODING_AGENT` flag, so its own name must
+    // be checked before pi's flag. `OMPCODE` is exported into every shell OMP spawns, which is
+    // why Plannotator checks it last of all the markers.
+    if ai_agent.as_deref() == Some("omp") {
+        return Ok(Host::Omp);
+    }
     // pi exports both: the generic marker names the agent, the specific one is a flag.
-    if env("AI_AGENT").is_some_and(|v| v.trim().eq_ignore_ascii_case("pi")) || set("PI_CODING_AGENT") {
+    if ai_agent.as_deref() == Some("pi") || set("PI_CODING_AGENT") {
         return Ok(Host::Pi);
     }
-    for (key, name) in [("OPENCODE", "OpenCode"), ("GEMINI_CLI", "Gemini CLI"), ("OMPCODE", "OMP")] {
+    for (key, name) in [("OPENCODE", "OpenCode"), ("GEMINI_CLI", "Gemini CLI")] {
         if set(key) {
             return Err(HostError::Unsupported(name.to_owned()));
         }
+    }
+    if set("OMPCODE") {
+        return Ok(Host::Omp);
     }
     Ok(Host::ClaudeCode)
 }

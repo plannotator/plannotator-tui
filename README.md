@@ -78,8 +78,9 @@ directory in this repo is the development manifest; users should install Herdr A
 ## Agent replies
 
 `plannotator-tui last` finds the transcript of the agent that launched your shell and shows a
-picker of its recent replies. Hosts: Claude Code, Codex, pi, GitHub Copilot CLI, Droid.
-`--host`, `--pid`, `--session <transcript>` override detection; `--stdin` reads a document;
+picker of its recent replies. Hosts: Claude Code, Codex, pi, Oh My Pi, GitHub Copilot CLI,
+Droid, Hermes CLI. `--host`, `--pid`, `--session <transcript>` (format sniffed when no host is
+named) and `--session-id <id>` (Hermes) override detection; `--stdin` reads a document;
 `--print` writes the newest reply to stdout and always exits 0 (for hooks and scripts).
 Reply reviews are never written to disk.
 

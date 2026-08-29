@@ -32,10 +32,26 @@ fn the_override_wins_when_it_names_a_known_host_and_is_ignored_otherwise() {
 #[test]
 fn codex_marker_beats_unsupported_markers_which_are_reported_not_hidden() {
     assert_eq!(detect_host(env(&[("CODEX_THREAD_ID", "t"), ("OMPCODE", "1")])).expect("host"), Host::Codex);
-    assert!(
-        matches!(detect_host(env(&[("OMPCODE", "1")])), Err(HostError::Unsupported(name)) if name == "OMP")
-    );
     assert!(matches!(detect_host(env(&[("GEMINI_CLI", "1")])), Err(HostError::Unsupported(_))));
+    assert!(matches!(detect_host(env(&[("OPENCODE", "1")])), Err(HostError::Unsupported(_))));
+}
+
+#[test]
+fn omp_is_selected_by_its_name_first_and_by_ompcode_last() {
+    // OMP reuses pi's flag, so its name must win over pi's marker.
+    assert_eq!(
+        detect_host(env(&[("AI_AGENT", "omp"), ("PI_CODING_AGENT", "true")])).expect("host"),
+        Host::Omp
+    );
+    assert_eq!(detect_host(env(&[("OMPCODE", "1")])).expect("host"), Host::Omp);
+    // ...but OMPCODE alone is checked after every other marker (it leaks into every shell).
+    assert_eq!(detect_host(env(&[("OMPCODE", "1"), ("PI_CODING_AGENT", "true")])).expect("host"), Host::Pi);
+    assert!(matches!(
+        detect_host(env(&[("OMPCODE", "1"), ("GEMINI_CLI", "1")])),
+        Err(HostError::Unsupported(_))
+    ));
+    assert_eq!(detect_host(env(&[("PLANNOTATOR_TUI_HOST", "oh-my-pi")])).expect("host"), Host::Omp);
+    assert_eq!(detect_host(env(&[("PLANNOTATOR_TUI_HOST", "hermes")])).expect("host"), Host::Hermes);
 }
 
 #[test]
@@ -56,5 +72,7 @@ fn labels_are_the_short_names_herdr_uses() {
     assert_eq!(Host::Copilot.label(), "copilot");
     assert_eq!(Host::Droid.label(), "droid");
     assert_eq!(Host::Pi.label(), "pi");
-    assert_eq!(Host::ALL.len(), 5);
+    assert_eq!(Host::Omp.label(), "omp");
+    assert_eq!(Host::Hermes.label(), "hermes");
+    assert_eq!(Host::ALL.len(), 7);
 }

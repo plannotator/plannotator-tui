@@ -33,7 +33,8 @@ const USAGE: &str = "usage:
   plannotator-tui herdr open [file.md | folder] [--placement overlay|split|popup] [--deliver-to <pane>]
   plannotator-tui herdr last [--placement P] [--deliver-to <pane>]
   plannotator-tui herdr pane
-  plannotator-tui last [--host claude|codex] [--pid N] [--session <transcript>] [--stdin] [--print] [--pick N]";
+  plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes] [--pid N] [--session <transcript>]
+                       [--session-id <id>] [--stdin] [--print] [--pick N]";
 
 /// Width the document gets when nothing else is known: gutter + rail + gap subtracted.
 fn doc_width(cols: u16) -> usize {
@@ -216,6 +217,9 @@ fn last_command(args: &[String]) -> Result<()> {
             "--pid" => options.pid = Some(rest.next().context("--pid needs a value")?.parse()?),
             "--session" => {
                 options.session = Some(PathBuf::from(rest.next().context("--session needs a value")?));
+            }
+            "--session-id" => {
+                options.session_id = Some(rest.next().context("--session-id needs a value")?.clone());
             }
             "--stdin" => options.stdin = true,
             "--print" => options.print = true,
