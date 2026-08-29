@@ -49,6 +49,10 @@ pub(crate) struct HerdrEnv {
     pub(crate) message_pid: Option<u32>,
     /// `PLANNOTATOR_TUI_HOST`: which agent's transcript format to read.
     pub(crate) host: Option<String>,
+    /// `PLANNOTATOR_TUI_SESSION`: the agent's transcript path, when Herdr knew it.
+    pub(crate) session: Option<PathBuf>,
+    /// `PLANNOTATOR_TUI_SESSION_ID`: the agent's session id, for hosts without transcript files.
+    pub(crate) session_id: Option<String>,
 }
 
 impl HerdrEnv {
@@ -72,6 +76,8 @@ impl HerdrEnv {
             plugin_id: non_empty("HERDR_PLUGIN_ID"),
             message_pid: non_empty("PLANNOTATOR_TUI_MESSAGE_PID").and_then(|v| v.parse().ok()),
             host: non_empty("PLANNOTATOR_TUI_HOST"),
+            session: non_empty("PLANNOTATOR_TUI_SESSION").map(PathBuf::from),
+            session_id: non_empty("PLANNOTATOR_TUI_SESSION_ID"),
         }
     }
 

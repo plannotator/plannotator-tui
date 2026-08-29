@@ -142,7 +142,7 @@ fn show_config() -> Result<()> {
 
 /// `plannotator-tui herdr open [PATH] [--placement P] [--deliver-to PANE]`.
 fn herdr_command(args: &[String]) -> Result<()> {
-    use crate::herdr::launch::{OpenArgs, plan, plan_last, process_info, run};
+    use crate::herdr::launch::{OpenArgs, agent_get, plan, plan_last, process_info, run};
     let sub = args.first().map(String::as_str);
     if sub == Some("pane") {
         return herdr_pane();
@@ -173,7 +173,8 @@ fn herdr_command(args: &[String]) -> Result<()> {
         let probe = plan(&env, &config, OpenArgs { path: None, ..open.clone() }, &cwd)?;
         let pane = probe.deliver.as_ref().map(|t| t.pane.clone()).or(probe.target_pane);
         let pane = pane.context("no agent pane to read: not focused on one and no --deliver-to")?;
-        plan_last(&env, &config, open, &cwd, &process_info(&env, &pane)?)?
+        let agent = agent_get(&env, &pane);
+        plan_last(&env, &config, open, &cwd, &process_info(&env, &pane)?, agent.as_deref())?
     } else {
         plan(&env, &config, open, &cwd)?
     };
@@ -187,6 +188,7 @@ fn herdr_pane() -> Result<()> {
         crate::last::run(&crate::last::LastOptions {
             host: env.host.clone(),
             pid: Some(pid),
+            session: env.session.clone(),
             pick: 25,
             ..crate::last::LastOptions::default()
         })

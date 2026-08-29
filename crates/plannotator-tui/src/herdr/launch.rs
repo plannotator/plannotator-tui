@@ -36,6 +36,27 @@ pub(crate) struct Launch {
     pub(crate) plugin: String,
     /// Open an agent's last message instead of `file`: (pid, host label).
     pub(crate) message: Option<(u32, String)>,
+    /// The agent's session as Herdr reports it: a transcript path or a host-specific id.
+    pub(crate) session: Option<AgentSession>,
+}
+
+/// `agent_session` from `herdr agent get`: the exact transcript when Herdr knows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AgentSession {
+    Path(String),
+    Id(String),
+}
+
+/// Parse `herdr agent get <pane>` JSON for its `agent_session`, when present.
+pub(crate) fn agent_session(agent_get_json: &str) -> Option<AgentSession> {
+    let json: serde_json::Value = serde_json::from_str(agent_get_json).ok()?;
+    let session = json.pointer("/result/agent/agent_session")?;
+    let value = session.get("value")?.as_str()?.to_owned();
+    match session.get("kind")?.as_str()? {
+        "path" => Some(AgentSession::Path(value)),
+        "id" => Some(AgentSession::Id(value)),
+        _ => None,
+    }
 }
 
 /// The agent process behind a pane, from `herdr pane process-info --pane <id>` JSON: the
@@ -80,6 +101,7 @@ pub(crate) fn plan_last(
     args: OpenArgs,
     cwd: &Path,
     process_info_json: &str,
+    agent_get_json: Option<&str>,
 ) -> Result<Launch> {
     let mut launch = plan(env, config, OpenArgs { path: None, ..args }, cwd)?;
     let pane = launch.deliver.as_ref().map(|t| t.pane.clone()).or_else(|| launch.target_pane.clone());
@@ -91,6 +113,7 @@ pub(crate) fn plan_last(
     };
     launch.file.clone_from(&launch.cwd);
     launch.message = Some(message);
+    launch.session = agent_get_json.and_then(agent_session);
     Ok(launch)
 }
 
@@ -181,6 +204,7 @@ pub(crate) fn plan(env: &HerdrEnv, config: &Config, args: OpenArgs, cwd: &Path) 
         deliver,
         plugin: env.plugin_id.clone().unwrap_or_else(|| "plannotator-tui".to_owned()),
         message: None,
+        session: None,
     })
 }
 
@@ -211,6 +235,15 @@ pub(crate) fn argv(launch: &Launch) -> Vec<String> {
             out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_MESSAGE_PID={pid}")]);
             out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_HOST={host}")]);
             out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_CWD={}", launch.cwd.display())]);
+            match &launch.session {
+                Some(AgentSession::Path(p)) => {
+                    out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_SESSION={p}")]);
+                }
+                Some(AgentSession::Id(id)) => {
+                    out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_SESSION_ID={id}")]);
+                }
+                None => {}
+            }
         }
         None => out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_FILE={}", launch.file.display())]),
     }
@@ -233,6 +266,12 @@ pub(crate) fn process_info(env: &HerdrEnv, pane: &str) -> Result<String> {
         anyhow::bail!("herdr pane process-info {pane}: {}", String::from_utf8_lossy(&output.stderr).trim());
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// `herdr agent get <pane>`, raw JSON; `None` when the pane has no agent Herdr can describe.
+pub(crate) fn agent_get(env: &HerdrEnv, pane: &str) -> Option<String> {
+    let output = Command::new(&env.bin).args(["agent", "get", pane]).output().ok()?;
+    output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Run the launch through `bin`. Herdr's own stdout/stderr pass through.
