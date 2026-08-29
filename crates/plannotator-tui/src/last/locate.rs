@@ -151,15 +151,16 @@ pub(crate) fn screen_fallback(env: &crate::herdr::context::HerdrEnv) -> Option<D
 
 /// Hermes' platform default (`hermes_constants.py`): `%LOCALAPPDATA%\hermes` on Windows,
 /// `~/.hermes` elsewhere.
+#[cfg(windows)]
 fn hermes_home() -> PathBuf {
-    #[cfg(windows)]
-    {
-        let base = std::env::var_os("LOCALAPPDATA")
-            .filter(|v| !v.is_empty())
-            .map_or_else(|| home().join("AppData").join("Local"), PathBuf::from);
-        return base.join("hermes");
-    }
-    #[cfg(not(windows))]
+    std::env::var_os("LOCALAPPDATA")
+        .filter(|v| !v.is_empty())
+        .map_or_else(|| home().join("AppData").join("Local"), PathBuf::from)
+        .join("hermes")
+}
+
+#[cfg(not(windows))]
+fn hermes_home() -> PathBuf {
     home().join(".hermes")
 }
 
