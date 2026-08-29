@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use plannotator_tui_hosts::{Role, claude, codex, copilot, droid, pi};
+use plannotator_tui_hosts::{Role, claude, codex, copilot, droid, omp, pi};
 
 fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_plannotator-tui"))
@@ -123,4 +123,83 @@ fn print_writes_the_newest_assistant_message_of_a_pi_session() {
         .expect("runs");
     assert!(out.status.success());
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), expected.trim_end());
+}
+
+fn newest_pi_reply() -> (PathBuf, String) {
+    let transcript = fixtures().join("pi.jsonl");
+    let text = std::fs::read_to_string(&transcript).expect("fixture");
+    let expected = omp::parse_messages(&text, 25)
+        .into_iter()
+        .find(|m| m.role == Role::Assistant)
+        .expect("fixture has an assistant message")
+        .text;
+    (transcript, expected)
+}
+
+#[test]
+fn omp_reads_pi_format_sessions() {
+    let (transcript, expected) = newest_pi_reply();
+    let out = bin()
+        .args(["last", "--host", "omp", "--session"])
+        .arg(&transcript)
+        .arg("--print")
+        .output()
+        .expect("runs");
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), expected.trim_end());
+}
+
+#[test]
+fn a_session_path_without_a_host_is_sniffed() {
+    let (transcript, expected) = newest_pi_reply();
+    let out = bin()
+        .env_remove("PLANNOTATOR_TUI_HOST")
+        .args(["last", "--session"])
+        .arg(&transcript)
+        .arg("--print")
+        .output()
+        .expect("runs");
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim_end(),
+        expected.trim_end(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn hermes_reads_the_session_named_by_id_from_hermes_home() {
+    let home = std::env::temp_dir().join(format!("plannotator-tui-hermes-home-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).expect("home");
+    let db = rusqlite::Connection::open(home.join("state.db")).expect("db");
+    db.execute_batch(
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT NOT NULL, started_at REAL NOT NULL);
+         CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, role TEXT NOT NULL,
+             content TEXT, timestamp REAL NOT NULL, active INTEGER NOT NULL DEFAULT 1, compacted INTEGER NOT NULL DEFAULT 0);
+         INSERT INTO sessions VALUES ('abc', 'cli', 1.0);
+         INSERT INTO messages (session_id, role, content, timestamp) VALUES ('abc', 'user', 'hi', 1.0);
+         INSERT INTO messages (session_id, role, content, timestamp) VALUES ('abc', 'assistant', 'older', 2.0);
+         INSERT INTO messages (session_id, role, content, timestamp) VALUES ('abc', 'assistant', 'the newest reply', 3.0);",
+    )
+    .expect("rows");
+    drop(db);
+    let out = bin()
+        .env("HERMES_HOME", &home)
+        .args(["last", "--host", "hermes", "--session-id", "abc", "--print"])
+        .output()
+        .expect("runs");
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim_end(),
+        "the newest reply",
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let missing =
+        bin().env("HERMES_HOME", &home).args(["last", "--host", "hermes", "--print"]).output().expect("runs");
+    assert!(missing.status.success(), "exit 0 is the contract");
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("needs a session id"));
+    std::fs::remove_dir_all(&home).expect("cleanup");
 }

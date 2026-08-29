@@ -24,8 +24,10 @@ pub(crate) struct LastOptions {
     pub(crate) host: Option<String>,
     /// The agent process to start the transcript search from.
     pub(crate) pid: Option<u32>,
-    /// An explicit transcript; skips detection.
+    /// An explicit transcript; skips detection. Its format is sniffed when no host is named.
     pub(crate) session: Option<PathBuf>,
+    /// A session id for hosts that keep conversations in a store rather than files (Hermes).
+    pub(crate) session_id: Option<String>,
     /// Read the document from stdin instead of a transcript.
     pub(crate) stdin: bool,
     /// Print the newest message and exit instead of opening the UI.

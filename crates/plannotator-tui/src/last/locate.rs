@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use plannotator_tui_hosts::{Host, HostError, Message, Role, claude, codex, copilot, detect_host, droid, pi};
+use plannotator_tui_hosts::{
+    Host, HostError, Message, Role, claude, codex, copilot, detect_host, droid, hermes, omp, pi, sniff,
+};
 use plannotator_tui_schema::{DocumentSource, Provenance};
 
 use super::LastOptions;
@@ -19,9 +21,15 @@ pub(crate) struct Located {
 }
 
 pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
-    let host = host_for(options)?;
+    let session = options.session.as_deref().map(expand_home);
+    let host = match &session {
+        // A path without a host name: Herdr hands us the exact transcript for agents it
+        // integrates, whatever their format. Its first lines say which reader applies.
+        Some(path) if !host_named(options) => sniff(&head(path)?).map_or_else(|| host_for(options), Ok)?,
+        _ => host_for(options)?,
+    };
     let pick = options.pick.max(1);
-    let (transcript, messages) = match (host, &options.session) {
+    let (transcript, messages) = match (host, &session) {
         (Host::ClaudeCode, Some(path)) => (path.clone(), claude_messages(path, pick)?),
         (Host::ClaudeCode, None) => {
             let path = find_claude_transcript(options.pid)?;
@@ -49,9 +57,25 @@ pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
         }
         (Host::Pi, Some(path)) => (path.clone(), pi_messages(path, pick)?),
         (Host::Pi, None) => {
-            let path = find_pi_transcript()?;
+            let path = find_pi_transcript(".pi/agent", "pi")?;
             let messages = pi_messages(&path, pick)?;
             (path, messages)
+        }
+        (Host::Omp, Some(path)) => (path.clone(), omp_messages(path, pick)?),
+        (Host::Omp, None) => {
+            let path = find_pi_transcript(omp::DEFAULT_AGENT_DIR, "omp")?;
+            let messages = omp_messages(&path, pick)?;
+            (path, messages)
+        }
+        (Host::Hermes, _) => {
+            let Some(id) = options.session_id.as_deref().filter(|s| !s.trim().is_empty()) else {
+                bail!("hermes needs a session id (Herdr provides it; or pass --session-id)");
+            };
+            let db = std::env::var_os("HERMES_HOME")
+                .map_or_else(|| home().join(".hermes"), PathBuf::from)
+                .join(hermes::DB_FILE);
+            let messages = hermes::messages_for_session(&db, id, pick)?;
+            (db, messages)
         }
     };
     let messages: Vec<Message> = messages.into_iter().filter(|m| m.role == Role::Assistant).collect();
@@ -59,6 +83,30 @@ pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
         bail!("transcript {} has no assistant messages yet", transcript.display());
     }
     Ok(Located { host, transcript, messages })
+}
+
+/// Was a host named explicitly, by flag or by the launcher?
+fn host_named(options: &LastOptions) -> bool {
+    options.host.as_deref().is_some_and(|h| !h.trim().is_empty())
+        || std::env::var("PLANNOTATOR_TUI_HOST").is_ok_and(|h| !h.trim().is_empty())
+}
+
+/// The first 64 KiB of a transcript, enough for `sniff`.
+fn head(path: &Path) -> Result<String> {
+    use std::io::Read as _;
+    let mut file = std::fs::File::open(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut bytes = vec![0u8; 64 * 1024];
+    let n = file.read(&mut bytes).with_context(|| format!("reading {}", path.display()))?;
+    bytes.truncate(n);
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// `~/x` as Herdr reports some session paths.
+fn expand_home(path: &Path) -> PathBuf {
+    match path.to_str().and_then(|s| s.strip_prefix("~/")) {
+        Some(rest) => home().join(rest),
+        None => path.to_path_buf(),
+    }
 }
 
 fn host_for(options: &LastOptions) -> Result<Host> {
@@ -184,18 +232,24 @@ fn droid_messages(path: &Path, pick: usize) -> Result<Vec<Message>> {
     Ok(droid::parse_messages(&text, pick))
 }
 
-/// Pi has no pid registry either: the newest session for the agent's cwd.
-fn find_pi_transcript() -> Result<PathBuf> {
+/// Pi and OMP have no pid registry: the newest session for the agent's cwd, under the
+/// agent dir (`default_agent_dir` relative to `$HOME`; OMP reuses pi's override variables).
+fn find_pi_transcript(default_agent_dir: &str, label: &str) -> Result<PathBuf> {
     let sessions_dir = match std::env::var_os("PI_CODING_AGENT_SESSION_DIR") {
         Some(dir) => PathBuf::from(dir),
         None => std::env::var_os("PI_CODING_AGENT_DIR")
-            .map_or_else(|| home().join(".pi").join("agent"), PathBuf::from)
+            .map_or_else(|| home().join(default_agent_dir), PathBuf::from)
             .join("sessions"),
     };
     let cwd = agent_cwd()?;
     pi::find_transcript(&sessions_dir, &cwd).ok_or_else(|| {
-        anyhow::anyhow!("no pi session for {} (looked in {})", cwd.display(), sessions_dir.display())
+        anyhow::anyhow!("no {label} session for {} (looked in {})", cwd.display(), sessions_dir.display())
     })
+}
+
+fn omp_messages(path: &Path, pick: usize) -> Result<Vec<Message>> {
+    let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    Ok(omp::parse_messages(&text, pick))
 }
 
 fn pi_messages(path: &Path, pick: usize) -> Result<Vec<Message>> {

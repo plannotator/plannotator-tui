@@ -305,3 +305,18 @@ no pid registry, so a running pi is matched by cwd (the Herdr launcher passes th
 pane's cwd as `PLANNOTATOR_TUI_CWD`), newest first, skipping sessions that hold no message
 yet. pi exports `PI_CODING_AGENT=true` and `AI_AGENT=pi` into the shells it spawns; both
 select the pi host after the Codex marker.
+
+**Oh My Pi and Hermes CLI** (2026-08-29, plannotator-tui#24, #25). OMP is a pi harness: same
+entry format, same encoded-cwd layout, rooted at `~/.omp/agent/sessions`, and it reuses pi's
+`PI_CODING_AGENT_SESSION_DIR` / `PI_CODING_AGENT_DIR` overrides (`oh-my-pi/packages/coding-agent/src/cli/args.ts`),
+so `omp` is pi's reader over another root. Its `OMPCODE` marker selects it last of all the
+markers, as Plannotator orders them, and `AI_AGENT=omp` first, before pi's own flag which OMP
+also sets. Hermes CLI has no transcript files: conversations are rows in SQLite
+(`~/.hermes/state.db`, `HERMES_HOME` override, WAL mode), addressed by the session id Herdr
+reports. The reader opens the database read-only (`mode=ro`, so the live WAL is visible),
+falls back to `immutable=1` only when the shared-memory index cannot be mapped (a stale read
+beats touching a running agent's store), and issues one query over
+`idx_messages_session_active`, newest first. Both arrive from Herdr through `agent_session`
+(`kind: path | id`) rather than host+pid discovery; a transcript path handed over without a
+host name is recognised by its first lines (`sniff`), so any Herdr-integrated agent that
+writes one of the known formats works without a host table entry.
