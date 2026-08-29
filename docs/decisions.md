@@ -329,3 +329,21 @@ Source-verified 2026-08-29 against `NousResearch/hermes-agent` (`hermes_state_co
 the session id Herdr reports is `sessions.id`; `HERMES_HOME` else `~/.hermes`
 (`%LOCALAPPDATA%\hermes` on Windows). omp exports only `OMPCODE=1` and `CLAUDECODE=1` to
 child shells, no pi marker, so the marker chain reaches `OMPCODE` correctly.
+
+**OpenCode** (2026-08-29). OpenCode 1.x keeps sessions, messages and parts in one SQLite
+database, not transcript files: `$OPENCODE_DB`, else `<xdg data>/opencode/opencode.db` where
+the xdg data dir is `$XDG_DATA_HOME` or `~/.local/share` on every platform (`packages/core/src/global.ts`
+uses `xdg-basedir`, which has no Windows branch; `packages/core/src/database/database.ts`
+names the file). A message's text is its `part` rows of type `text` in creation order;
+parts flagged `synthetic` (context OpenCode injects) or `ignored` are not something the user
+or model wrote and are skipped, as are `reasoning`, `tool` and `step-*` parts, so an
+aborted assistant turn with no text does not take a picker slot. Herdr's OpenCode manifest
+carries no session id, so the reader picks the newest top-level (`parent_id IS NULL`,
+subagent sessions excluded), unarchived (`time_archived IS NULL`) session whose
+`session.directory` equals the agent pane's cwd (`PLANNOTATOR_TUI_CWD`), falling back to the
+newest session started in an ancestor of that cwd, since OpenCode records its launch
+directory and the pane may have moved. `--session-id` addresses a session directly. The
+database is opened read-only exactly as for Hermes (shared opener, `mode=ro` then
+`immutable=1`); one query joins `message` and `part` newest-message-first. `OPENCODE=1` in the
+environment now selects this host instead of reporting it unsupported. Verified live against
+opencode 1.18.23 (`~/.local/share/opencode/opencode.db`, 45 MB, WAL) on 2026-08-29.
