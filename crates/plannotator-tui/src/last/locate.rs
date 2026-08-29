@@ -71,9 +71,8 @@ pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
             let Some(id) = options.session_id.as_deref().filter(|s| !s.trim().is_empty()) else {
                 bail!("hermes needs a session id (Herdr provides it; or pass --session-id)");
             };
-            let db = std::env::var_os("HERMES_HOME")
-                .map_or_else(|| home().join(".hermes"), PathBuf::from)
-                .join(hermes::DB_FILE);
+            let db =
+                std::env::var_os("HERMES_HOME").map_or_else(hermes_home, PathBuf::from).join(hermes::DB_FILE);
             let messages = hermes::messages_for_session(&db, id, pick)?;
             (db, messages)
         }
@@ -148,6 +147,20 @@ pub(crate) fn screen_fallback(env: &crate::herdr::context::HerdrEnv) -> Option<D
         true,
         Provenance::AgentMessage { host, session: None, message_id: None },
     ))
+}
+
+/// Hermes' platform default (`hermes_constants.py`): `%LOCALAPPDATA%\hermes` on Windows,
+/// `~/.hermes` elsewhere.
+fn hermes_home() -> PathBuf {
+    #[cfg(windows)]
+    {
+        let base = std::env::var_os("LOCALAPPDATA")
+            .filter(|v| !v.is_empty())
+            .map_or_else(|| home().join("AppData").join("Local"), PathBuf::from);
+        return base.join("hermes");
+    }
+    #[cfg(not(windows))]
+    home().join(".hermes")
 }
 
 fn home() -> PathBuf {

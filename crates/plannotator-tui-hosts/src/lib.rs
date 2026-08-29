@@ -157,9 +157,9 @@ pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostErr
         return Ok(Host::Copilot);
     }
     let ai_agent = env("AI_AGENT").map(|v| v.trim().to_ascii_lowercase());
-    // Oh My Pi is a pi harness: it reuses pi's `PI_CODING_AGENT` flag, so its own name must
-    // be checked before pi's flag. `OMPCODE` is exported into every shell OMP spawns, which is
-    // why Plannotator checks it last of all the markers.
+    // Oh My Pi exports `OMPCODE=1` (and `CLAUDECODE=1`) into the shells it spawns and no
+    // pi marker (verified in oh-my-pi `packages/utils/src/procmgr.ts`), so it is found by
+    // `OMPCODE` below; `AI_AGENT=omp` is accepted in case a future version adds it.
     if ai_agent.as_deref() == Some("omp") {
         return Ok(Host::Omp);
     }
