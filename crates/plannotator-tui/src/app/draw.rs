@@ -83,6 +83,8 @@ impl App {
 
         self.draw_header(frame, header);
         if show_tree {
+            // A resize may have changed the tree's height; keep the window in range.
+            self.tree_scroll_by(0);
             self.draw_tree(frame, tree);
         }
         self.draw_document(frame, gutter, doc);
@@ -114,6 +116,7 @@ impl App {
             .rows
             .iter()
             .enumerate()
+            .skip(self.tree_scroll)
             .take(usize::from(inner.height))
             .map(|(i, row)| {
                 let indent = "  ".repeat(row.depth);

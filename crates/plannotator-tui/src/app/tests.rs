@@ -136,3 +136,92 @@ fn escaping_the_picker_keeps_the_newest_message() {
     app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('p')))).expect("p");
     assert_eq!(app.mode, Mode::Pick, "p reopens the picker");
 }
+
+/// A folder of `count` Markdown files named `f00.md`, `f01.md`, … in a fresh temp dir.
+fn folder(count: usize) -> PathBuf {
+    let root = std::env::temp_dir().join(format!("plannotator-tui-folder-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("mkdir");
+    for i in 0..count {
+        std::fs::write(root.join(format!("f{i:02}.md")), format!("# File {i}\n")).expect("write");
+    }
+    root
+}
+
+/// One frame at `width` × `height`, as one string per screen row.
+fn draw_sized(app: &mut App, width: u16, height: u16) -> Vec<String> {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+    terminal.draw(|frame| app.draw(frame)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .filter_map(|x| buffer.cell((x, y)))
+                .map(|c| c.symbol().to_owned())
+                .collect()
+        })
+        .collect()
+}
+
+fn open_path(app: &App) -> String {
+    match &app.open.source.provenance {
+        Provenance::File { path } => path.file_name().expect("name").to_string_lossy().into_owned(),
+        _ => String::new(),
+    }
+}
+
+#[test]
+fn the_tree_scrolls_to_keep_the_cursor_visible_and_hit_tests_through_the_offset() {
+    let root = folder(30);
+    let mut app = App::open_folder(&root, 100, Box::new(Discard)).expect("folder opens");
+    // 140 columns shows the tree; 20 rows leaves 18 for the body (header + footer).
+    draw_sized(&mut app, 140, 20);
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Tab))).expect("tab");
+    for _ in 0..25 {
+        app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('j')))).expect("j");
+    }
+    assert_eq!(app.tree_cursor, 25);
+    let rows = draw_sized(&mut app, 140, 20);
+    assert_eq!(app.tree_scroll, 8, "the window slides so row 25 is the last visible row");
+    assert!(row(&rows, 1).contains("f08.md"), "first drawn tree row was {:?}", row(&rows, 1));
+    assert!(row(&rows, 18).contains("f25.md"), "last drawn tree row was {:?}", row(&rows, 18));
+    let tree_pane: Vec<String> = rows[1..=18].iter().map(|r| r.chars().take(28).collect()).collect();
+    assert!(!tree_pane.iter().any(|r| r.contains("f00.md")), "tree pane was {tree_pane:#?}");
+
+    // Clicking the third visible row opens the file at scroll + 2, not row 2.
+    let click = Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 2,
+        row: 3,
+        modifiers: KeyModifiers::NONE,
+    });
+    app.handle_event(&click).expect("click");
+    assert_eq!(app.tree_cursor, 10);
+    assert_eq!(open_path(&app), "f10.md");
+
+    // Moving back up pulls the window with the cursor.
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Tab))).expect("tab");
+    for _ in 0..5 {
+        app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('k')))).expect("k");
+    }
+    draw_sized(&mut app, 140, 20);
+    assert_eq!((app.tree_cursor, app.tree_scroll), (5, 5));
+
+    // The wheel over the tree scrolls the tree, not the document, and leaves the cursor alone.
+    let wheel = Event::Mouse(MouseEvent {
+        kind: MouseEventKind::ScrollDown,
+        column: 2,
+        row: 5,
+        modifiers: KeyModifiers::NONE,
+    });
+    app.handle_event(&wheel).expect("wheel");
+    assert_eq!((app.tree_cursor, app.tree_scroll, app.scroll), (5, 8, 0));
+    // Wheel scrolling is clamped to the last full window of rows.
+    for _ in 0..20 {
+        app.handle_event(&wheel).expect("wheel");
+    }
+    assert_eq!(app.tree_scroll, 12, "30 rows in 18 lines: the window stops at 12");
+    let rows = draw_sized(&mut app, 140, 20);
+    assert!(row(&rows, 18).contains("f29.md"), "last tree row was {:?}", row(&rows, 18));
+    std::fs::remove_dir_all(&root).expect("cleanup");
+}

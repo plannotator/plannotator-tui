@@ -87,7 +87,7 @@ impl App {
     }
 
     fn tree_key(&mut self, key: KeyEvent) -> Result<()> {
-        let len = self.tree.as_ref().map_or(0, |t| t.rows.len());
+        let len = self.tree_len();
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => {
                 self.tree_cursor = (self.tree_cursor + 1).min(len.saturating_sub(1));
@@ -97,6 +97,8 @@ impl App {
             KeyCode::Esc => self.focus = Focus::Document,
             _ => {}
         }
+        // The tree's height is the last frame's; the first frame has not drawn yet, but its cursor is row 0.
+        self.keep_tree_cursor_visible(usize::from(self.geometry.tree.height));
         Ok(())
     }
 
@@ -286,6 +288,8 @@ impl App {
 
     fn mouse(&mut self, mouse: MouseEvent) -> Result<()> {
         match mouse.kind {
+            MouseEventKind::ScrollDown if self.in_tree(mouse.column, mouse.row) => self.tree_scroll_by(3),
+            MouseEventKind::ScrollUp if self.in_tree(mouse.column, mouse.row) => self.tree_scroll_by(-3),
             MouseEventKind::ScrollDown => self.scroll_by(3),
             MouseEventKind::ScrollUp => self.scroll_by(-3),
             MouseEventKind::Down(MouseButton::Left) => {
@@ -352,16 +356,17 @@ impl App {
         spans.iter().zip(TOOLBAR.iter()).find(|(span, _)| span.contains(&column)).map(|(_, item)| item.3)
     }
 
-    fn tree_hit(&self, row: u16, column: u16) -> Option<usize> {
+    /// Whether the screen cell is inside the drawn tree pane.
+    fn in_tree(&self, column: u16, row: u16) -> bool {
         let tree = self.geometry.tree;
-        let inside = tree.width > 0
-            && column >= tree.x
-            && column < tree.right()
-            && row >= tree.y
-            && row < tree.bottom();
-        inside
-            .then(|| usize::from(row - tree.y))
-            .filter(|&i| self.tree.as_ref().is_some_and(|t| i < t.rows.len()))
+        tree.width > 0 && column >= tree.x && column < tree.right() && row >= tree.y && row < tree.bottom()
+    }
+
+    /// The tree row under the screen cell, accounting for the tree's scroll offset.
+    fn tree_hit(&self, row: u16, column: u16) -> Option<usize> {
+        self.in_tree(column, row)
+            .then(|| self.tree_scroll + usize::from(row - self.geometry.tree.y))
+            .filter(|&i| i < self.tree_len())
     }
 
     fn bubble_hit(&self, column: u16, row: u16) -> Option<usize> {
