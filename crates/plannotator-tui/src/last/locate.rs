@@ -6,7 +6,8 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use plannotator_tui_hosts::{
-    Host, HostError, Message, Role, claude, codex, copilot, detect_host, droid, hermes, omp, pi, sniff,
+    Host, HostError, Message, Role, claude, codex, copilot, detect_host, droid, hermes, omp, opencode, pi,
+    sniff,
 };
 use plannotator_tui_schema::{DocumentSource, Provenance};
 
@@ -74,6 +75,15 @@ pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
             let db =
                 std::env::var_os("HERMES_HOME").map_or_else(hermes_home, PathBuf::from).join(hermes::DB_FILE);
             let messages = hermes::messages_for_session(&db, id, pick)?;
+            (db, messages)
+        }
+        (Host::OpenCode, _) => {
+            let db = opencode_db();
+            let id = match options.session_id.as_deref().filter(|s| !s.trim().is_empty()) {
+                Some(id) => id.to_owned(),
+                None => opencode::find_session(&db, &agent_cwd()?)?,
+            };
+            let messages = opencode::messages_for_session(&db, &id, pick)?;
             (db, messages)
         }
     };
@@ -162,6 +172,19 @@ fn hermes_home() -> PathBuf {
 #[cfg(not(windows))]
 fn hermes_home() -> PathBuf {
     home().join(".hermes")
+}
+
+/// `OpenCode`'s database: `$OPENCODE_DB`, else `<xdg data>/opencode/opencode.db` where the
+/// xdg data dir is `$XDG_DATA_HOME` or `~/.local/share` (opencode `packages/core/src/global.ts`
+/// uses `xdg-basedir`, which applies the same rule on every platform).
+fn opencode_db() -> PathBuf {
+    if let Some(db) = std::env::var_os("OPENCODE_DB").filter(|v| !v.is_empty()) {
+        return PathBuf::from(db);
+    }
+    let data = std::env::var_os("XDG_DATA_HOME")
+        .filter(|v| !v.is_empty())
+        .map_or_else(|| home().join(".local").join("share"), PathBuf::from);
+    data.join(opencode::DATA_DIR).join(opencode::DB_FILE)
 }
 
 fn home() -> PathBuf {

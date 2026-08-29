@@ -11,7 +11,9 @@ pub mod copilot;
 pub mod droid;
 pub mod hermes;
 pub mod omp;
+pub mod opencode;
 pub mod pi;
+pub(crate) mod sqlite;
 pub(crate) mod time;
 
 use std::path::PathBuf;
@@ -30,6 +32,9 @@ pub enum Host {
     Omp,
     /// Hermes CLI: conversations in `SQLite` (`~/.hermes/state.db`), addressed by session id.
     Hermes,
+    /// `OpenCode`: sessions, messages and parts in `SQLite` (`<xdg data>/opencode/opencode.db`),
+    /// addressed by session id or found by the directory `OpenCode` was started in.
+    OpenCode,
 }
 
 impl Host {
@@ -43,12 +48,21 @@ impl Host {
             Self::Pi => "pi",
             Self::Omp => "omp",
             Self::Hermes => "hermes",
+            Self::OpenCode => "opencode",
         }
     }
 
     /// Every host with a transcript reader, for messages that list them.
-    pub const ALL: [Host; 7] =
-        [Host::ClaudeCode, Host::Codex, Host::Pi, Host::Omp, Host::Copilot, Host::Droid, Host::Hermes];
+    pub const ALL: [Host; 8] = [
+        Host::ClaudeCode,
+        Host::Codex,
+        Host::Pi,
+        Host::Omp,
+        Host::Copilot,
+        Host::Droid,
+        Host::Hermes,
+        Host::OpenCode,
+    ];
 }
 
 /// Which reader a transcript file wants, from its first lines. For a path handed to us
@@ -147,6 +161,7 @@ pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostErr
             "pi" => return Ok(Host::Pi),
             "omp" | "oh-my-pi" | "ohmypi" => return Ok(Host::Omp),
             "hermes" | "hermes-cli" | "hermes_cli" => return Ok(Host::Hermes),
+            "opencode" | "open-code" | "open_code" => return Ok(Host::OpenCode),
             _ => {}
         }
     }
@@ -167,10 +182,11 @@ pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostErr
     if ai_agent.as_deref() == Some("pi") || set("PI_CODING_AGENT") {
         return Ok(Host::Pi);
     }
-    for (key, name) in [("OPENCODE", "OpenCode"), ("GEMINI_CLI", "Gemini CLI")] {
-        if set(key) {
-            return Err(HostError::Unsupported(name.to_owned()));
-        }
+    if set("OPENCODE") {
+        return Ok(Host::OpenCode);
+    }
+    if set("GEMINI_CLI") {
+        return Err(HostError::Unsupported("Gemini CLI".to_owned()));
     }
     if set("OMPCODE") {
         return Ok(Host::Omp);

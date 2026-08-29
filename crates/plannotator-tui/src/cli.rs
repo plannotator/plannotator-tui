@@ -33,7 +33,7 @@ const USAGE: &str = "usage:
   plannotator-tui herdr open [file.md | folder] [--placement overlay|split|popup] [--deliver-to <pane>]
   plannotator-tui herdr last [--placement P] [--deliver-to <pane>]
   plannotator-tui herdr pane
-  plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes] [--pid N] [--session <transcript>]
+  plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes|opencode] [--pid N] [--session <transcript>]
                        [--session-id <id>] [--stdin] [--print] [--pick N]";
 
 /// Width the document gets when nothing else is known: gutter + rail + gap subtracted.
