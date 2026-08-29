@@ -320,3 +320,12 @@ beats touching a running agent's store), and issues one query over
 (`kind: path | id`) rather than host+pid discovery; a transcript path handed over without a
 host name is recognised by its first lines (`sniff`), so any Herdr-integrated agent that
 writes one of the known formats works without a host table entry.
+
+Source-verified 2026-08-29 against `NousResearch/hermes-agent` (`hermes_state_common.py`,
+`hermes_state.py`, `hermes_state_search.py`, `hermes_constants.py`) and `oh-my-pi`
+(`packages/utils/src/procmgr.ts`): Hermes writes `messages.timestamp` with `time.time()`
+(Unix seconds); `active=0, compacted=0` rows are rewinds the user took back and
+`active=0, compacted=1` rows are compaction archives, so `active = 1` is the right filter;
+the session id Herdr reports is `sessions.id`; `HERMES_HOME` else `~/.hermes`
+(`%LOCALAPPDATA%\hermes` on Windows). omp exports only `OMPCODE=1` and `CLAUDECODE=1` to
+child shells, no pi marker, so the marker chain reaches `OMPCODE` correctly.
