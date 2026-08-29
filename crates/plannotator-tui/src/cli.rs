@@ -189,6 +189,7 @@ fn herdr_pane() -> Result<()> {
             host: env.host.clone(),
             pid: Some(pid),
             session: env.session.clone(),
+            session_id: env.session_id.clone(),
             pick: 25,
             ..crate::last::LastOptions::default()
         })
