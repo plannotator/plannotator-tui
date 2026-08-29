@@ -187,6 +187,7 @@ fn a_last_launch_carries_the_pid_and_host_instead_of_a_file() {
         OpenArgs::default(),
         Path::new("/"),
         PROCESS_INFO,
+        None,
     )
     .expect("plans");
     assert_eq!(launch.message, Some((91279, "claude".into())));
@@ -195,4 +196,48 @@ fn a_last_launch_carries_the_pid_and_host_instead_of_a_file() {
     assert!(args.contains(&"PLANNOTATOR_TUI_MESSAGE_PID=91279".to_owned()));
     assert!(args.contains(&"PLANNOTATOR_TUI_HOST=claude".to_owned()));
     assert!(!args.iter().any(|a| a.starts_with("PLANNOTATOR_TUI_FILE=")));
+}
+
+const AGENT_GET_PATH: &str = r#"{"id":"cli:agent:get","result":{"agent":{"agent":"omp","agent_session":{"agent":"omp","kind":"path","source":"herdr:omp","value":"~/.omp/agent/sessions/--w--/2026-08-29T01-00-00-000Z_0199.jsonl"},"pane_id":"w1:p1"},"type":"agent_info"}}"#;
+const AGENT_GET_ID: &str = r#"{"id":"cli:agent:get","result":{"agent":{"agent":"hermes","agent_session":{"agent":"hermes","kind":"id","source":"herdr:hermes","value":"sess_abc123"},"pane_id":"w1:p1"},"type":"agent_info"}}"#;
+
+#[test]
+fn herdrs_agent_session_is_passed_to_the_pane_as_a_path_or_an_id() {
+    assert_eq!(
+        agent_session(AGENT_GET_PATH),
+        Some(AgentSession::Path("~/.omp/agent/sessions/--w--/2026-08-29T01-00-00-000Z_0199.jsonl".into()))
+    );
+    assert_eq!(agent_session(AGENT_GET_ID), Some(AgentSession::Id("sess_abc123".into())));
+    assert_eq!(agent_session(r#"{"result":{"agent":{"agent":"pi"}}}"#), None);
+
+    let context = HerdrContext {
+        focused_pane_id: Some("w1:p1".into()),
+        focused_pane_agent: Some("omp".into()),
+        focused_pane_cwd: Some("/w".into()),
+        ..HerdrContext::default()
+    };
+    let launch = plan_last(
+        &env(None, Some(context.clone())),
+        &Config::default(),
+        OpenArgs::default(),
+        Path::new("/"),
+        &PROCESS_INFO.replace(r#""name":"claude""#, r#""name":"omp""#),
+        Some(AGENT_GET_PATH),
+    )
+    .expect("plans");
+    let args = argv(&launch);
+    assert!(args.iter().any(|a| a.starts_with("PLANNOTATOR_TUI_SESSION=~/.omp/agent/sessions/")), "{args:?}");
+    assert!(args.contains(&"PLANNOTATOR_TUI_HOST=omp".to_owned()));
+
+    let launch = plan_last(
+        &env(None, Some(context)),
+        &Config::default(),
+        OpenArgs::default(),
+        Path::new("/"),
+        PROCESS_INFO,
+        Some(AGENT_GET_ID),
+    )
+    .expect("plans");
+    let args = argv(&launch);
+    assert!(args.contains(&"PLANNOTATOR_TUI_SESSION_ID=sess_abc123".to_owned()), "{args:?}");
 }
