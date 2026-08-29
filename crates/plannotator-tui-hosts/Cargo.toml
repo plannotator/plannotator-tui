@@ -9,6 +9,7 @@ categories = ["text-processing"]
 description = "Find a coding agent's transcript and read its recent messages (Claude Code, Codex, pi)."
 
 [dependencies]
+rusqlite = { version = "0.31.0", features = ["bundled"] }
 serde_json.workspace = true
 
 [lints]
