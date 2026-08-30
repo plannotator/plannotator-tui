@@ -21,6 +21,12 @@ impl App {
                 Mode::Pick => self.pick_key(*key),
                 Mode::Compose | Mode::Edit(_) => self.text_key(*key),
             },
+            // A paste lands in the comment box verbatim, newlines included; anywhere else
+            // it is ignored rather than replayed as keystrokes.
+            Event::Paste(text) if matches!(self.mode, Mode::Compose | Mode::Edit(_)) => {
+                self.compose.insert_text(text);
+                Ok(())
+            }
             Event::Mouse(mouse) if self.mode == Mode::Browse => self.mouse(*mouse),
             Event::Mouse(mouse) if self.mode == Mode::Pick => self.pick_mouse(*mouse),
             _ => Ok(()),

@@ -80,6 +80,13 @@ impl Compose {
         ComposeAction::Edited
     }
 
+    /// Insert pasted text as typed characters, newlines included.
+    pub(super) fn insert_text(&mut self, text: &str) {
+        for c in text.replace("\r\n", "\n").replace('\r', "\n").chars() {
+            self.insert(c);
+        }
+    }
+
     fn insert(&mut self, c: char) {
         self.chars.insert(self.cursor, c);
         self.cursor += 1;

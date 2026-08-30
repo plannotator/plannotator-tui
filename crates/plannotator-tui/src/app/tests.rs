@@ -287,3 +287,16 @@ fn a_comment_can_span_lines_and_enter_saves_it() {
     let placed = app.open.store.placed();
     assert_eq!(placed.last().expect("annotation").annotation.body, "first line\nsecond\nthird");
 }
+
+#[test]
+fn pasting_into_the_comment_box_keeps_newlines() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 3)).expect("click");
+    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    app.handle_event(&Event::Paste("pasted one\r\npasted two".to_owned())).expect("paste");
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("save");
+    let placed = app.open.store.placed();
+    assert_eq!(placed.last().expect("annotation").annotation.body, "pasted one\npasted two");
+}

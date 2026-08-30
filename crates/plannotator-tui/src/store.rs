@@ -115,6 +115,7 @@ impl Store {
                 None => (Record::default(), false),
             },
         };
+        let needs_path = record.path.is_none();
         let mut store = Self {
             path: Some(location.record.clone()),
             document: location.document.clone(),
@@ -125,6 +126,9 @@ impl Store {
         store.resolve_all(doc);
         if imported && !store.annotations.is_empty() {
             store.save()?; // the import is now the record; the sidecar is left alone
+        } else if needs_path && !store.annotations.is_empty() && store.document.is_some() {
+            // A pre-0.5.0 record: write the document path in so folder sends can find it.
+            store.save()?;
         }
         Ok(store)
     }
