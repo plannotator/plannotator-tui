@@ -10,6 +10,14 @@
 //!   `parent_id`; archived sessions carry `time_archived`;
 //! - a message's text is its `part` rows of type `text`, in id order; parts flagged
 //!   `synthetic` or `ignored` are injected context, not something the user or model wrote.
+//!
+//! `OpenCode` 2 (the `opencode2` binary, `anomalyco/opencode` branch `beta`) shares the data
+//! directory and, on the standard channels, the same `opencode.db`, but writes to new tables:
+//! `session_v2` (same columns this reader needs) and `session_message` (`type` column is the
+//! role, `seq` is the order, `data` holds the payload: `content[].type == "text"` for an
+//! assistant, `text` for a user). Other channels use `opencode-<channel>.db` next to it
+//! (`packages/cli/src/server-process.ts`). A v1 session and a v2 session can therefore both
+//! match one directory; the newest wins, whichever schema and file it lives in.
 
 use std::path::Path;
 
@@ -25,39 +33,113 @@ pub const DATA_DIR: &str = "opencode";
 
 const WHAT: &str = "OpenCode";
 
-/// The newest top-level, unarchived session started in `cwd`. When none was started exactly
-/// there, the newest one started in an ancestor of `cwd` (`OpenCode` records the directory it
-/// was launched from; the pane may have moved since).
-pub fn find_session(db: &Path, cwd: &Path) -> Result<String, HostError> {
+/// Which table family a session lives in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Schema {
+    /// `OpenCode` 1: `session`, `message`, `part`.
+    V1,
+    /// `OpenCode` 2: `session_v2`, `session_message`.
+    V2,
+}
+
+/// A session picked for a directory, with what is needed to compare picks across files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found {
+    pub id: String,
+    pub schema: Schema,
+    /// `time_updated`, Unix milliseconds.
+    pub updated: i64,
+}
+
+/// The newest top-level, unarchived session started in `cwd`, across both schemas. When none
+/// was started exactly there, the newest one started in an ancestor of `cwd` (`OpenCode`
+/// records the directory it was launched from; the pane may have moved since).
+pub fn find_session(db: &Path, cwd: &Path) -> Result<Found, HostError> {
     let connection = open_read_only(db, WHAT)?;
-    let mut statement = connection
-        .prepare(
-            "SELECT id, directory FROM session \
-             WHERE parent_id IS NULL AND time_archived IS NULL \
-             ORDER BY time_updated DESC",
-        )
-        .map_err(|e| sql_error(WHAT, &e))?;
-    let rows = statement
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
-        .map_err(|e| sql_error(WHAT, &e))?;
     let cwd = normalize(&cwd.to_string_lossy());
-    let mut ancestor: Option<String> = None;
-    for row in rows {
-        let (id, directory) = row.map_err(|e| sql_error(WHAT, &e))?;
-        let directory = normalize(&directory);
-        if directory == cwd {
-            return Ok(id);
+    let mut exact: Option<Found> = None;
+    let mut ancestor: Option<Found> = None;
+    for (schema, table) in [(Schema::V2, "session_v2"), (Schema::V1, "session")] {
+        if !has_table(&connection, table)? {
+            continue;
         }
-        if ancestor.is_none() && is_ancestor(&directory, &cwd) {
-            ancestor = Some(id);
+        let mut statement = connection
+            .prepare(&format!(
+                "SELECT id, directory, time_updated FROM {table} \
+                 WHERE parent_id IS NULL AND time_archived IS NULL"
+            ))
+            .map_err(|e| sql_error(WHAT, &e))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?))
+            })
+            .map_err(|e| sql_error(WHAT, &e))?;
+        for row in rows {
+            let (id, directory, updated) = row.map_err(|e| sql_error(WHAT, &e))?;
+            let directory = normalize(&directory);
+            let found = Found { id, schema, updated };
+            if directory == cwd {
+                newer(&mut exact, found);
+            } else if is_ancestor(&directory, &cwd) {
+                newer(&mut ancestor, found);
+            }
         }
     }
-    ancestor
+    exact
+        .or(ancestor)
         .ok_or_else(|| HostError::NoTranscript(format!("no OpenCode session for {cwd} in {}", db.display())))
 }
 
+/// Which schema holds `session_id`, for sessions addressed by id rather than found by cwd.
+pub fn schema_of(db: &Path, session_id: &str) -> Result<Schema, HostError> {
+    let connection = open_read_only(db, WHAT)?;
+    for (schema, table) in [(Schema::V2, "session_v2"), (Schema::V1, "session")] {
+        if !has_table(&connection, table)? {
+            continue;
+        }
+        let count: i64 = connection
+            .query_row(&format!("SELECT count(*) FROM {table} WHERE id = ?1"), params![session_id], |r| {
+                r.get(0)
+            })
+            .map_err(|e| sql_error(WHAT, &e))?;
+        if count > 0 {
+            return Ok(schema);
+        }
+    }
+    Err(HostError::NoMessages(format!("no OpenCode session {session_id} in {}", db.display())))
+}
+
+fn newer(slot: &mut Option<Found>, candidate: Found) {
+    if slot.as_ref().is_none_or(|current| candidate.updated > current.updated) {
+        *slot = Some(candidate);
+    }
+}
+
+fn has_table(connection: &rusqlite::Connection, name: &str) -> Result<bool, HostError> {
+    connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![name],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|n| n > 0)
+        .map_err(|e| sql_error(WHAT, &e))
+}
+
 /// The newest `n` user and assistant messages of `session_id` that carry text, newest first.
-pub fn messages_for_session(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, HostError> {
+pub fn messages_for_session(
+    db: &Path,
+    session_id: &str,
+    schema: Schema,
+    n: usize,
+) -> Result<Vec<Message>, HostError> {
+    match schema {
+        Schema::V1 => messages_v1(db, session_id, n),
+        Schema::V2 => messages_v2(db, session_id, n),
+    }
+}
+
+fn messages_v1(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, HostError> {
     let connection = open_read_only(db, WHAT)?;
     // One indexed pass: every text part of the session, grouped by message, newest message
     // first and parts in creation order within it.
@@ -103,6 +185,71 @@ pub fn messages_for_session(db: &Path, session_id: &str, n: usize) -> Result<Vec
     }
     if messages.len() < n {
         flush(&mut current, &mut messages);
+    }
+    if messages.is_empty() {
+        return Err(HostError::NoMessages(format!(
+            "no messages for OpenCode session {session_id} in {}",
+            db.display()
+        )));
+    }
+    Ok(messages)
+}
+
+/// `OpenCode` 2: one `session_message` row per message; the payload carries the text directly.
+fn messages_v2(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, HostError> {
+    let connection = open_read_only(db, WHAT)?;
+    let mut statement = connection
+        .prepare(
+            "SELECT id, type, data, time_created FROM session_message \
+             WHERE session_id = ?1 AND type IN ('user', 'assistant') \
+             ORDER BY seq DESC",
+        )
+        .map_err(|e| sql_error(WHAT, &e))?;
+    let rows = statement
+        .query_map(params![session_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })
+        .map_err(|e| sql_error(WHAT, &e))?;
+    let mut messages = Vec::new();
+    for row in rows {
+        if messages.len() >= n {
+            break;
+        }
+        let (id, kind, data, created) = row.map_err(|e| sql_error(WHAT, &e))?;
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) else { continue };
+        let (role, text) = match kind.as_str() {
+            "assistant" => {
+                let parts: Vec<&str> = json
+                    .get("content")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("text"))
+                            .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+                            .filter(|t| !t.trim().is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                (Role::Assistant, parts.join("\n\n"))
+            }
+            "user" => (Role::Human, json.get("text").and_then(|t| t.as_str()).unwrap_or_default().to_owned()),
+            _ => continue,
+        };
+        if text.trim().is_empty() {
+            continue;
+        }
+        let at = json
+            .pointer("/time/created")
+            .and_then(serde_json::Value::as_u64)
+            .or_else(|| u64::try_from(created).ok())
+            .map(crate::time::iso_from_unix_ms);
+        messages.push(Message { id, role, text, at });
     }
     if messages.is_empty() {
         return Err(HostError::NoMessages(format!(
