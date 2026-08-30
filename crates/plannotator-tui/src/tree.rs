@@ -37,7 +37,8 @@ fn is_hidden(path: &Path) -> bool {
 impl Tree {
     pub(crate) fn scan(root: &Path) -> Result<Self> {
         let mut rows = Vec::new();
-        walk(root, 0, &mut rows)?;
+        let mut budget = WALK_BUDGET;
+        walk(root, 0, &mut rows, &mut budget)?;
         Ok(Self { root: root.to_path_buf(), rows })
     }
 
@@ -79,8 +80,18 @@ impl Tree {
     }
 }
 
+/// Directories that hold dependencies or build output, never docs worth listing.
+const SKIPPED_DIRS: [&str; 8] =
+    ["node_modules", "target", "vendor", "dist", "build", "out", "__pycache__", "venv"];
+
+/// The walk visits at most this many directory entries; a folder bigger than that is not a
+/// docs folder, and scanning it eagerly would hold a blank pane for minutes.
+const WALK_BUDGET: usize = 50_000;
+
 /// Append `dir`'s markdown files and non-empty subdirectories to `rows`, files first.
-fn walk(dir: &Path, depth: usize, rows: &mut Vec<Row>) -> Result<()> {
+/// Dependency and build directories are skipped, symlinked directories are not followed
+/// (cycles), and the walk stops with an error when `budget` runs out.
+fn walk(dir: &Path, depth: usize, rows: &mut Vec<Row>, budget: &mut usize) -> Result<()> {
     let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
         .with_context(|| format!("reading {}", dir.display()))?
         .filter_map(Result::ok)
@@ -88,19 +99,31 @@ fn walk(dir: &Path, depth: usize, rows: &mut Vec<Row>) -> Result<()> {
         .filter(|p| !is_hidden(p))
         .collect();
     entries.sort();
+    *budget = budget.checked_sub(entries.len()).with_context(|| {
+        format!(
+            "{} holds too many files to scan (over {WALK_BUDGET}); open a docs subfolder instead",
+            dir.display()
+        )
+    })?;
 
     for path in entries.iter().filter(|p| p.is_file() && is_markdown(p)) {
         rows.push(Row { name: file_name(path), path: path.clone(), depth, is_dir: false, annotations: 0 });
     }
-    for path in entries.iter().filter(|p| p.is_dir()) {
+    for path in entries.iter().filter(|p| is_walkable_dir(p)) {
         let mark = rows.len();
         rows.push(Row { name: file_name(path), path: path.clone(), depth, is_dir: true, annotations: 0 });
-        walk(path, depth + 1, rows)?;
+        walk(path, depth + 1, rows, budget)?;
         if rows.len() == mark + 1 {
             rows.pop(); // no markdown beneath: prune the directory row
         }
     }
     Ok(())
+}
+
+/// A real (non-symlinked) directory that is not a dependency or build tree.
+fn is_walkable_dir(path: &Path) -> bool {
+    let by_name = path.file_name().and_then(|n| n.to_str()).is_none_or(|n| !SKIPPED_DIRS.contains(&n));
+    by_name && std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_dir())
 }
 
 fn file_name(path: &Path) -> String {
@@ -124,6 +147,10 @@ mod tests {
         std::fs::write(root.join("notes.txt"), "").expect("write");
         std::fs::write(root.join("docs/deep/plan.md"), "").expect("write");
         std::fs::write(root.join(".hidden/x.md"), "").expect("write");
+        std::fs::create_dir_all(root.join("node_modules/pkg")).expect("mkdir");
+        std::fs::write(root.join("node_modules/pkg/readme.md"), "").expect("write");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&root, root.join("loop")).expect("symlink");
 
         let tree = Tree::scan(&root).expect("scan");
         let shape: Vec<(String, usize, bool)> =
