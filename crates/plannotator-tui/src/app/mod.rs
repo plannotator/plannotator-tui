@@ -1,9 +1,11 @@
 //! Application state. Input handling lives in `input`, drawing in `draw`; this module owns
 //! the data they share and the operations that change it.
 
+mod compose;
 mod draw;
 mod header;
 mod input;
+
 mod pick;
 mod selection;
 mod send;
@@ -17,7 +19,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use plannotator_tui_schema::{DocumentSource, Kind, Provenance};
 use ratatui::layout::Rect;
-use tui_input::Input;
 
 use crate::delivery::Delivery;
 use crate::doc::Document;
@@ -106,6 +107,8 @@ impl Open {
     }
 }
 
+use self::compose::Compose;
+
 pub(crate) struct App {
     open: Open,
     /// Where annotations are stored and how this folder is named there.
@@ -135,7 +138,11 @@ pub(crate) struct App {
     pick_cursor: usize,
     message_host: String,
     message_transcript: String,
-    input: Input,
+    compose: Compose,
+    /// Whether the terminal reports Shift+Enter distinctly (kitty keyboard protocol).
+    pub(super) shift_enter: bool,
+    /// The last primary-button press, for double-click detection.
+    last_click: Option<(std::time::Instant, u16, u16)>,
     geometry: Geometry,
     status: Option<String>,
     frame_ms: f64,
@@ -186,7 +193,9 @@ impl App {
             pick_cursor: 0,
             message_host: String::new(),
             message_transcript: String::new(),
-            input: Input::default(),
+            compose: Compose::default(),
+            shift_enter: false,
+            last_click: None,
             geometry: Geometry::default(),
             status: None,
             frame_ms: 0.0,
@@ -288,7 +297,7 @@ impl App {
         match kind {
             Kind::Comment => {
                 self.mode = Mode::Compose;
-                self.input.reset();
+                self.compose = Compose::default();
             }
             Kind::LooksGood | Kind::Delete => {
                 self.annotate(pending.range, kind, String::new())?;
@@ -303,7 +312,7 @@ impl App {
     fn edit_selected_annotation(&mut self) {
         let placed = self.open.store.placed();
         let Some(target) = placed.get(self.rail_cursor) else { return };
-        self.input = Input::new(target.annotation.body.clone());
+        self.compose = Compose::with_text(&target.annotation.body);
         self.mode = Mode::Edit(target.annotation.id.clone());
     }
 
