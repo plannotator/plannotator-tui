@@ -23,6 +23,8 @@ use crate::doc::Document;
 pub(crate) struct Store {
     /// `None` for transient documents: nothing is ever written.
     path: Option<PathBuf>,
+    /// The document this store's record belongs to (absolute), for the record's `path` field.
+    document: Option<PathBuf>,
     annotations: Vec<Annotation>,
     /// Parallel to `annotations`.
     resolved: Vec<Resolution>,
@@ -31,6 +33,11 @@ pub(crate) struct Store {
 
 #[derive(Default, Serialize, Deserialize)]
 struct Record {
+    /// The absolute document path this record belongs to. Written since 0.5.0 so folder
+    /// sends can enumerate annotated files without walking the tree; absent in older
+    /// records, which are then only found through listed tree rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    path: Option<PathBuf>,
     annotations: Vec<Annotation>,
     /// Every send, newest last. Lets the UI say "sent" across restarts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -63,6 +70,9 @@ impl Placed<'_> {
 pub(crate) struct Location {
     pub(crate) record: PathBuf,
     pub(crate) legacy_sidecar: Option<PathBuf>,
+    /// The document the record is for; written into the record so folder sends can find
+    /// annotated files without walking the tree.
+    pub(crate) document: Option<PathBuf>,
 }
 
 impl Location {
@@ -75,7 +85,11 @@ impl Location {
         let mut name = doc_path.file_name().map(std::ffi::OsStr::to_os_string).unwrap_or_default();
         name.push(".annotations.json");
         let sidecar = doc_path.with_file_name(name);
-        Self { record, legacy_sidecar: sidecar.is_file().then_some(sidecar) }
+        Self {
+            record,
+            legacy_sidecar: sidecar.is_file().then_some(sidecar),
+            document: Some(doc_path.to_path_buf()),
+        }
     }
 }
 
@@ -101,8 +115,10 @@ impl Store {
                 None => (Record::default(), false),
             },
         };
+        let needs_path = record.path.is_none();
         let mut store = Self {
             path: Some(location.record.clone()),
+            document: location.document.clone(),
             annotations: record.annotations,
             resolved: Vec::new(),
             deliveries: record.deliveries,
@@ -110,19 +126,46 @@ impl Store {
         store.resolve_all(doc);
         if imported && !store.annotations.is_empty() {
             store.save()?; // the import is now the record; the sidecar is left alone
+        } else if needs_path && !store.annotations.is_empty() && store.document.is_some() {
+            // A pre-0.5.0 record: write the document path in so folder sends can find it.
+            store.save()?;
         }
         Ok(store)
     }
 
     /// A store that never touches disk, for transient documents.
     pub(crate) fn transient() -> Self {
-        Self { path: None, annotations: Vec::new(), resolved: Vec::new(), deliveries: Vec::new() }
+        Self {
+            path: None,
+            document: None,
+            annotations: Vec::new(),
+            resolved: Vec::new(),
+            deliveries: Vec::new(),
+        }
     }
 
     /// True when nothing about this store ever reaches disk.
     #[cfg(test)]
     pub(crate) fn is_transient(&self) -> bool {
         self.path.is_none()
+    }
+
+    /// Every annotated document recorded for `project`, from the records that carry their
+    /// path (written since 0.5.0). Older records surface through listed tree rows instead.
+    pub(crate) fn annotated_documents(data_dir: &Path, project: &str) -> Vec<PathBuf> {
+        let dir = plannotator_tui_schema::annotations_dir(data_dir, project, "x");
+        let Some(project_dir) = dir.parent() else { return Vec::new() };
+        let Ok(entries) = std::fs::read_dir(project_dir) else { return Vec::new() };
+        let mut found: Vec<PathBuf> = entries
+            .filter_map(Result::ok)
+            .map(|e| e.path().join("annotations.json"))
+            .filter_map(|record| read_record(&record).ok().flatten())
+            .filter(|record| !record.annotations.is_empty())
+            .filter_map(|record| record.path)
+            .collect();
+        found.sort();
+        found.dedup();
+        found
     }
 
     /// Count annotations recorded for a file without loading a document.
@@ -139,7 +182,11 @@ impl Store {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         }
-        let record = Record { annotations: self.annotations.clone(), deliveries: self.deliveries.clone() };
+        let record = Record {
+            path: self.document.clone(),
+            annotations: self.annotations.clone(),
+            deliveries: self.deliveries.clone(),
+        };
         let json = serde_json::to_string_pretty(&record)?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, json).with_context(|| format!("writing {}", tmp.display()))?;
@@ -356,6 +403,7 @@ mod tests {
         let sidecar = root.join("doc.md.annotations.json");
         let doc = Document::parse("hello world\n".to_owned());
         let mut seed = Store {
+            document: None,
             path: Some(sidecar.clone()),
             annotations: Vec::new(),
             resolved: Vec::new(),

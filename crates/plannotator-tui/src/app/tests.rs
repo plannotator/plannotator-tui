@@ -225,3 +225,78 @@ fn the_tree_scrolls_to_keep_the_cursor_visible_and_hit_tests_through_the_offset(
     assert!(row(&rows, 18).contains("f29.md"), "last tree row was {:?}", row(&rows, 18));
     std::fs::remove_dir_all(&root).expect("cleanup");
 }
+
+fn key(code: KeyCode, modifiers: KeyModifiers) -> Event {
+    Event::Key(KeyEvent::new(code, modifiers))
+}
+
+fn click_at(column: u16, row: u16) -> Event {
+    Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+}
+
+#[test]
+fn double_clicking_a_block_offers_the_toolbar_for_the_whole_block() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    // "first thing" is the second block; single click starts a selection, not a toolbar.
+    let (col, row) = (5, 3);
+    app.handle_event(&click_at(col, row)).expect("first click");
+    let rows = draw(&mut app);
+    assert!(!rows.iter().any(|r| r.contains("looks good")), "no toolbar after one click");
+    app.handle_event(&click_at(col, row)).expect("second click");
+    let rows = draw(&mut app);
+    assert!(rows.iter().any(|r| r.contains("looks good")), "toolbar after a double-click: {rows:?}");
+    // The toolbar acts on the whole block: the 'a' key approves it.
+    let placed_before = app.open.store.placed().len();
+    app.handle_event(&key(KeyCode::Char('a'), KeyModifiers::NONE)).expect("approve");
+    assert_eq!(app.open.store.placed().len(), placed_before + 1);
+    let rows = draw(&mut app);
+    assert!(rows.iter().any(|r| r.contains("👍")), "rail shows the approval: {rows:?}");
+}
+
+#[test]
+fn a_comment_can_span_lines_and_enter_saves_it() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    let (col, row) = (5, 3);
+    app.handle_event(&click_at(col, row)).expect("click");
+    app.handle_event(&click_at(col, row)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("open compose");
+    for c in "first line".chars() {
+        app.handle_event(&key(KeyCode::Char(c), KeyModifiers::NONE)).expect("type");
+    }
+    // Shift+Enter and Alt+Enter both insert a newline; Ctrl+J too.
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::SHIFT)).expect("shift+enter");
+    for c in "second".chars() {
+        app.handle_event(&key(KeyCode::Char(c), KeyModifiers::NONE)).expect("type");
+    }
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::ALT)).expect("alt+enter");
+    for c in "third".chars() {
+        app.handle_event(&key(KeyCode::Char(c), KeyModifiers::NONE)).expect("type");
+    }
+    let rows = draw(&mut app);
+    assert!(rows.iter().any(|r| r.contains("first line")), "compose shows line one: {rows:?}");
+    assert!(rows.iter().any(|r| r.contains("second")), "compose shows line two");
+    assert!(rows.iter().any(|r| r.contains("alt+enter new line")), "hint shows the fallback key");
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("save");
+    let placed = app.open.store.placed();
+    assert_eq!(placed.last().expect("annotation").annotation.body, "first line\nsecond\nthird");
+}
+
+#[test]
+fn pasting_into_the_comment_box_keeps_newlines() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 3)).expect("click");
+    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    app.handle_event(&Event::Paste("pasted one\r\npasted two".to_owned())).expect("paste");
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("save");
+    let placed = app.open.store.placed();
+    assert_eq!(placed.last().expect("annotation").annotation.body, "pasted one\npasted two");
+}

@@ -10,7 +10,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use plannotator_tui_schema::{DocumentSource, Kind};
-use ratatui::crossterm::event::{self, DisableMouseCapture, EnableMouseCapture};
+use ratatui::crossterm::event::{
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
 use ratatui::crossterm::execute;
 
 use crate::app::App;
@@ -241,8 +244,26 @@ fn interactive(path: &PathBuf) -> Result<()> {
 pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
     let mut terminal = ratatui::init();
     execute!(stdout(), EnableMouseCapture)?;
+    let _ = execute!(stdout(), EnableBracketedPaste);
+    // Shift+Enter is only distinguishable from Enter where the kitty keyboard protocol
+    // holds end to end (terminal, and any multiplexer in between). Ask for it; the flag
+    // gates the compose box's hint so it never advertises a key that cannot arrive.
+    let shift_enter = ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
+    if shift_enter {
+        let _ = execute!(
+            stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
+    }
     let width = doc_width(terminal.size().map_or(120, |s| s.width));
-    let result = build(width).and_then(|app| event_loop(&mut terminal, app));
+    let result = build(width).and_then(|mut app| {
+        app.shift_enter = shift_enter;
+        event_loop(&mut terminal, app)
+    });
+    if shift_enter {
+        let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
+    }
+    let _ = execute!(stdout(), DisableBracketedPaste);
     let _ = execute!(stdout(), DisableMouseCapture);
     ratatui::restore();
     result

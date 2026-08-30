@@ -93,8 +93,8 @@ impl App {
         }
         self.draw_footer(frame, footer);
         match &self.mode {
-            Mode::Compose => self.draw_compose(frame, " comment · enter saves · esc cancels "),
-            Mode::Edit(_) => self.draw_compose(frame, " edit · enter saves · esc cancels "),
+            Mode::Compose => self.draw_compose(frame, &self.compose_title("comment")),
+            Mode::Edit(_) => self.draw_compose(frame, &self.compose_title("edit")),
             Mode::Browse if self.pending.is_some() => self.draw_toolbar(frame),
             Mode::Pick => self.draw_pick(frame),
             Mode::Browse | Mode::ConfirmQuit => {}
@@ -121,7 +121,8 @@ impl App {
             .map(|(i, row)| {
                 let indent = "  ".repeat(row.depth);
                 let name = if row.is_dir {
-                    format!("{indent}{}/", row.name)
+                    let arrow = if row.expanded { "\u{25be}" } else { "\u{25b8}" };
+                    format!("{indent}{arrow} {}/", row.name)
                 } else {
                     format!("{indent}{}", row.name)
                 };
@@ -256,14 +257,25 @@ impl App {
 
     /// The compose box: at the pending selection when there is one, else over the rail
     /// bubble being edited, else centered.
+    /// The compose box title; the Shift+Enter hint appears only when the terminal
+    /// actually distinguishes it, so the hint is never a lie.
+    fn compose_title(&self, verb: &str) -> String {
+        let newline = if self.shift_enter { "shift+enter new line" } else { "alt+enter new line" };
+        format!(" {verb} \u{b7} enter saves \u{b7} {newline} \u{b7} esc cancels ")
+    }
+
     fn draw_compose(&self, frame: &mut Frame, title: &str) {
+        let wrap_width = usize::from(COMPOSE_WIDTH.saturating_sub(3));
+        let (lines, cursor_row, cursor_col) = self.compose.wrapped(wrap_width);
+        let content_rows = lines.len().clamp(1, 8);
+        let height = content_rows as u16 + 2;
         let rect = self
-            .float_origin(3, COMPOSE_WIDTH)
-            .or_else(|| self.edit_origin(3, COMPOSE_WIDTH))
+            .float_origin(height, COMPOSE_WIDTH)
+            .or_else(|| self.edit_origin(height, COMPOSE_WIDTH))
             .unwrap_or_else(|| {
                 let area = frame.area();
                 let width = COMPOSE_WIDTH.min(area.width);
-                Rect { x: (area.width - width) / 2, y: area.height / 2, width, height: 3 }
+                Rect { x: (area.width - width) / 2, y: area.height / 2, width, height }
             });
         frame.render_widget(Clear, rect);
         let boxed = Block::default()
@@ -273,16 +285,22 @@ impl App {
             .title(Span::styled(title.to_owned(), Style::new().dim()));
         let inner = boxed.inner(rect);
         frame.render_widget(boxed, rect);
-        let width = usize::from(inner.width.saturating_sub(1));
-        let scroll = self.input.visual_scroll(width);
-        let value: String = self.input.value().chars().skip(scroll).collect();
-        let text_area = Rect { x: inner.x + 1, width: inner.width.saturating_sub(1), ..inner };
-        frame.render_widget(Paragraph::new(Line::from(value)), text_area);
-        let cursor_x = inner.x + 1 + self.input.visual_cursor().saturating_sub(scroll) as u16;
-        frame.set_cursor_position((cursor_x.min(inner.right().saturating_sub(1)), inner.y));
+        // Keep the cursor's row visible when the comment is taller than the box.
+        let scroll = cursor_row.saturating_sub(content_rows - 1);
+        for (i, line) in lines.iter().skip(scroll).take(content_rows).enumerate() {
+            let row = Rect {
+                x: inner.x + 1,
+                y: inner.y + i as u16,
+                width: inner.width.saturating_sub(1),
+                height: 1,
+            };
+            frame.render_widget(Paragraph::new(Line::from(line.clone())), row);
+        }
+        let cursor_x = inner.x + 1 + cursor_col as u16;
+        let cursor_y = inner.y + (cursor_row - scroll) as u16;
+        frame.set_cursor_position((cursor_x.min(inner.right().saturating_sub(1)), cursor_y));
     }
 
-    /// Where to put the edit box: over the bubble being edited, if it is on screen.
     fn edit_origin(&self, height: u16, width: u16) -> Option<Rect> {
         let Mode::Edit(id) = &self.mode else { return None };
         let (rect, _) = self.geometry.bubbles.iter().find(|(_, bubble_id)| bubble_id == id)?;

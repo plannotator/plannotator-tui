@@ -5,8 +5,8 @@ use plannotator_tui_schema::Kind;
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use tui_input::backend::crossterm::EventHandler;
 
+use super::compose::ComposeAction;
 use super::selection::Selection;
 use super::send::SendState;
 use super::{App, Focus, GUTTER, Mode, Pending, TOOLBAR};
@@ -19,8 +19,14 @@ impl App {
                 Mode::Browse => self.browse_key(*key),
                 Mode::ConfirmQuit => self.confirm_quit_key(*key),
                 Mode::Pick => self.pick_key(*key),
-                Mode::Compose | Mode::Edit(_) => self.text_key(*key, event),
+                Mode::Compose | Mode::Edit(_) => self.text_key(*key),
             },
+            // A paste lands in the comment box verbatim, newlines included; anywhere else
+            // it is ignored rather than replayed as keystrokes.
+            Event::Paste(text) if matches!(self.mode, Mode::Compose | Mode::Edit(_)) => {
+                self.compose.insert_text(text);
+                Ok(())
+            }
             Event::Mouse(mouse) if self.mode == Mode::Browse => self.mouse(*mouse),
             Event::Mouse(mouse) if self.mode == Mode::Pick => self.pick_mouse(*mouse),
             _ => Ok(()),
@@ -254,11 +260,11 @@ impl App {
         self.cursor.1 = next;
     }
 
-    fn text_key(&mut self, key: KeyEvent, event: &Event) -> Result<()> {
-        match key.code {
-            KeyCode::Esc => self.mode = Mode::Browse,
-            KeyCode::Enter => {
-                let body = self.input.value().trim().to_owned();
+    fn text_key(&mut self, key: KeyEvent) -> Result<()> {
+        match self.compose.handle_key(key) {
+            ComposeAction::Cancel => self.mode = Mode::Browse,
+            ComposeAction::Save => {
+                let body = self.compose.value().trim().to_owned();
                 match std::mem::replace(&mut self.mode, Mode::Browse) {
                     Mode::Edit(id) => {
                         if body.is_empty() {
@@ -279,9 +285,7 @@ impl App {
                     }
                 }
             }
-            _ => {
-                self.input.handle_event(event);
-            }
+            ComposeAction::Edited => {}
         }
         Ok(())
     }
@@ -309,8 +313,27 @@ impl App {
                     self.focus = Focus::Rail;
                     return Ok(());
                 }
+                let now = std::time::Instant::now();
+                let double = self.last_click.take().is_some_and(|(at, col, row)| {
+                    col == mouse.column
+                        && row == mouse.row
+                        && now.duration_since(at) <= std::time::Duration::from_millis(400)
+                });
+                self.last_click = Some((now, mouse.column, mouse.row));
                 let Some(pos) = self.doc_position(mouse.column, mouse.row, false) else { return Ok(()) };
                 self.focus = Focus::Document;
+                if double
+                    && let Some(block) = self.open.layout.block_at_row(pos.0)
+                    && let Some(range) = self.open.doc.blocks.get(block).map(|b| b.range.clone())
+                {
+                    // A double-click selects the whole block and offers the toolbar for it.
+                    self.selected = block;
+                    self.selection = None;
+                    self.cursor = pos;
+                    self.status = None;
+                    self.pending = Some(Pending { range, at: pos });
+                    return Ok(());
+                }
                 if let Some(block) = self.open.layout.block_at_row(pos.0) {
                     self.selected = block;
                 }
