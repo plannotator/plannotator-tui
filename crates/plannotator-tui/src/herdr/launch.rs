@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
+use plannotator_tui_hosts::Host;
 
 use super::context::{HerdrEnv, Target};
 use crate::config::{Config, Placement, SplitDirection};
@@ -59,6 +60,13 @@ pub(crate) fn agent_session(agent_get_json: &str) -> Option<AgentSession> {
     }
 }
 
+/// Parse `herdr agent get <pane>` JSON for a host with a transcript reader.
+fn agent_host(agent_get_json: &str) -> Option<&'static str> {
+    let json: serde_json::Value = serde_json::from_str(agent_get_json).ok()?;
+    let label = json.pointer("/result/agent/agent")?.as_str()?;
+    Host::ALL.into_iter().find(|host| host.label() == label).map(Host::label)
+}
+
 /// The agent process behind a pane, from `herdr pane process-info --pane <id>` JSON: the
 /// foreground process whose name is a known agent, else the group leader. Returns
 /// `(pid, host)` where host is the label `plannotator-tui last --host` accepts.
@@ -109,11 +117,12 @@ pub(crate) fn plan_last(
     let Some(pane) = pane else {
         anyhow::bail!("no agent pane to read: not focused on one and no --deliver-to")
     };
-    let Some(message) = agent_pid(process_info_json) else {
+    let Some((pid, process_host)) = agent_pid(process_info_json) else {
         anyhow::bail!("no agent process found in pane {pane}");
     };
+    let host = agent_get_json.and_then(agent_host).unwrap_or(&process_host).to_owned();
     launch.file.clone_from(&launch.cwd);
-    launch.message = Some(message);
+    launch.message = Some((pid, host));
     launch.session = agent_get_json.and_then(agent_session);
     Ok(launch)
 }
