@@ -78,12 +78,30 @@ pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
             (db, messages)
         }
         (Host::OpenCode, _) => {
-            let db = opencode_db();
-            let id = match options.session_id.as_deref().filter(|s| !s.trim().is_empty()) {
-                Some(id) => id.to_owned(),
-                None => opencode::find_session(&db, &agent_cwd()?)?,
+            let databases = opencode_databases();
+            let named = options.session_id.as_deref().filter(|s| !s.trim().is_empty());
+            let (db, id, schema) = if let Some(id) = named {
+                let (db, schema) = databases
+                    .iter()
+                    .find_map(|db| opencode::schema_of(db, id).ok().map(|schema| (db.clone(), schema)))
+                    .with_context(|| format!("no OpenCode session {id} in {}", describe(&databases)))?;
+                (db, id.to_owned(), schema)
+            } else {
+                let cwd = agent_cwd()?;
+                let mut best: Option<(PathBuf, opencode::Found)> = None;
+                for db in &databases {
+                    if let Ok(found) = opencode::find_session(db, &cwd)
+                        && best.as_ref().is_none_or(|(_, b)| found.updated > b.updated)
+                    {
+                        best = Some((db.clone(), found));
+                    }
+                }
+                let (db, found) = best.with_context(|| {
+                    format!("no OpenCode session for {} in {}", cwd.display(), describe(&databases))
+                })?;
+                (db, found.id, found.schema)
             };
-            let messages = opencode::messages_for_session(&db, &id, pick)?;
+            let messages = opencode::messages_for_session(&db, &id, schema, pick)?;
             (db, messages)
         }
     };
@@ -174,17 +192,40 @@ fn hermes_home() -> PathBuf {
     home().join(".hermes")
 }
 
-/// `OpenCode`'s database: `$OPENCODE_DB`, else `<xdg data>/opencode/opencode.db` where the
-/// xdg data dir is `$XDG_DATA_HOME` or `~/.local/share` (opencode `packages/core/src/global.ts`
-/// uses `xdg-basedir`, which applies the same rule on every platform).
-fn opencode_db() -> PathBuf {
+/// `OpenCode`'s databases: `$OPENCODE_DB` alone when set; else every `opencode*.db` in
+/// `<xdg data>/opencode` (`opencode.db` for the standard channels, `opencode-<channel>.db`
+/// for others), where the xdg data dir is `$XDG_DATA_HOME` or `~/.local/share`
+/// (`packages/util/src/global-roots.ts`, `packages/cli/src/server-process.ts`).
+fn opencode_databases() -> Vec<PathBuf> {
     if let Some(db) = std::env::var_os("OPENCODE_DB").filter(|v| !v.is_empty()) {
-        return PathBuf::from(db);
+        return vec![PathBuf::from(db)];
     }
     let data = std::env::var_os("XDG_DATA_HOME")
         .filter(|v| !v.is_empty())
-        .map_or_else(|| home().join(".local").join("share"), PathBuf::from);
-    data.join(opencode::DATA_DIR).join(opencode::DB_FILE)
+        .map_or_else(|| home().join(".local").join("share"), PathBuf::from)
+        .join(opencode::DATA_DIR);
+    let mut found: Vec<PathBuf> = std::fs::read_dir(&data)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.starts_with("opencode") && n.to_ascii_lowercase().ends_with(".db"))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    found.sort();
+    if found.is_empty() {
+        found.push(data.join(opencode::DB_FILE));
+    }
+    found
+}
+
+fn describe(databases: &[PathBuf]) -> String {
+    databases.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
 }
 
 fn home() -> PathBuf {

@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
+use plannotator_tui_hosts::opencode::{Found, Schema};
 use plannotator_tui_hosts::{HostError, Role, opencode};
 use rusqlite::{Connection, params};
 
@@ -18,6 +19,124 @@ CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEX
 CREATE INDEX message_session_time_created_id_idx ON message (session_id, time_created, id);
 CREATE INDEX part_message_id_id_idx ON part (message_id, id);
 ";
+
+/// The `OpenCode` 2 tables (`packages/core/src/session/sql.ts` on the `beta` branch), the columns
+/// this reader touches.
+const SCHEMA_V2: &str = "
+CREATE TABLE session_v2 (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, workspace_id TEXT, parent_id TEXT,
+    slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT, version TEXT NOT NULL,
+    time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, time_archived INTEGER);
+CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL,
+    time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);
+CREATE UNIQUE INDEX session_message_session_seq_idx ON session_message (session_id, seq);
+";
+
+fn session_v2(
+    c: &Connection,
+    id: &str,
+    dir: &str,
+    parent: Option<&str>,
+    updated: i64,
+    archived: Option<i64>,
+) {
+    c.execute(
+        "INSERT INTO session_v2 (id, project_id, parent_id, slug, directory, version, time_created, time_updated, time_archived) \
+         VALUES (?1, 'p', ?2, ?1, ?3, '0.0.0-beta', ?4, ?4, ?5)",
+        params![id, parent, dir, updated, archived],
+    )
+    .expect("session_v2");
+}
+
+fn message_v2(c: &Connection, id: &str, session: &str, seq: i64, kind: &str, data: &str) {
+    c.execute(
+        "INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)",
+        params![id, session, kind, seq, seq * 10, data],
+    )
+    .expect("session_message");
+}
+
+/// A database `OpenCode` 2 has written to: the v1 tables with an older session for `/work/app`
+/// (as after the v1 migration) plus the v2 tables with a newer session for the same directory.
+fn populate_v2(db: &Path) -> Connection {
+    let c = populate(db);
+    c.execute_batch(SCHEMA_V2).expect("schema v2");
+    session_v2(&c, "ses2_new", "/work/app", None, 5000, None);
+    session_v2(&c, "ses2_child", "/work/app", Some("ses2_new"), 9000, None);
+    session_v2(&c, "ses2_gone", "/work/app", None, 9500, Some(9500));
+    message_v2(
+        &c,
+        "msg2_1",
+        "ses2_new",
+        1,
+        "user",
+        r#"{"text":"reply with exactly OPENCODE2_V2_SESSION_SELECTED","files":[],"agents":[],"skills":[],"time":{"created":50000}}"#,
+    );
+    message_v2(
+        &c,
+        "msg2_2",
+        "ses2_new",
+        2,
+        "synthetic",
+        r#"{"text":"<system-reminder>injected</system-reminder>","time":{"created":50001}}"#,
+    );
+    message_v2(
+        &c,
+        "msg2_3",
+        "ses2_new",
+        3,
+        "assistant",
+        r#"{"agent":"build","model":{"providerID":"x","id":"y"},"content":[{"type":"reasoning","text":"thinking"},{"type":"text","text":"OPENCODE2_V2_SESSION_SELECTED"},{"type":"tool","id":"t","name":"read","state":{"status":"completed","input":{},"content":[]},"time":{"created":50002}},{"type":"text","text":"Done."}],"time":{"created":50002,"completed":50003}}"#,
+    );
+    message_v2(
+        &c,
+        "msg2_4",
+        "ses2_new",
+        4,
+        "assistant",
+        r#"{"agent":"build","model":{"providerID":"x","id":"y"},"content":[{"type":"reasoning","text":"aborted"}],"time":{"created":50004}}"#,
+    );
+    message_v2(&c, "msg2_5", "ses2_new", 5, "agent-switched", r#"{"agent":"plan","time":{"created":50005}}"#);
+    c
+}
+
+#[test]
+fn an_opencode2_session_in_the_same_database_wins_when_it_is_newer() {
+    let dir = temp_dir("v2");
+    let db = dir.join("opencode.db");
+    let writer = populate_v2(&db);
+    let found = opencode::find_session(&db, Path::new("/work/app")).expect("found");
+    assert_eq!(found, Found { id: "ses2_new".to_owned(), schema: Schema::V2, updated: 5000 });
+    // The v1 session is still the answer for a directory only v1 knows.
+    assert_eq!(opencode::find_session(&db, Path::new("/work/other")).expect("v1 only").schema, Schema::V1);
+    assert_eq!(opencode::schema_of(&db, "ses2_new").expect("v2"), Schema::V2);
+    assert_eq!(opencode::schema_of(&db, "ses_main").expect("v1"), Schema::V1);
+    assert!(matches!(opencode::schema_of(&db, "ses_nope"), Err(HostError::NoMessages(_))));
+
+    let messages = opencode::messages_for_session(&db, "ses2_new", Schema::V2, 25).expect("messages");
+    let texts: Vec<&str> = messages.iter().map(|m| m.text.as_str()).collect();
+    assert_eq!(
+        texts,
+        ["OPENCODE2_V2_SESSION_SELECTED\n\nDone.", "reply with exactly OPENCODE2_V2_SESSION_SELECTED"]
+    );
+    assert_eq!(messages[0].role, Role::Assistant);
+    assert_eq!(messages[0].id, "msg2_3");
+    assert_eq!(messages[0].at.as_deref(), Some("1970-01-01T00:00:50.002Z"));
+    assert_eq!(messages[1].role, Role::Human);
+    // n counts messages with text: the reasoning-only turn and the switch rows take no slot.
+    assert_eq!(opencode::messages_for_session(&db, "ses2_new", Schema::V2, 1).expect("one").len(), 1);
+    drop(writer);
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+#[test]
+fn a_database_without_the_v2_tables_still_reads_v1() {
+    let dir = temp_dir("v1only");
+    let db = dir.join("opencode.db");
+    let writer = populate(&db);
+    assert_eq!(opencode::find_session(&db, Path::new("/work/app")).expect("v1").schema, Schema::V1);
+    drop(writer);
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
 
 fn temp_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("plannotator-tui-opencode-{tag}-{}", std::process::id()));
@@ -100,12 +219,12 @@ fn newest_session_for_the_directory_skips_children_and_archived_ones() {
     let dir = temp_dir("find");
     let db = dir.join("opencode.db");
     let writer = populate(&db);
-    assert_eq!(opencode::find_session(&db, Path::new("/work/app")).expect("exact"), "ses_main");
-    assert_eq!(opencode::find_session(&db, Path::new("/work/app/")).expect("trailing slash"), "ses_main");
+    assert_eq!(opencode::find_session(&db, Path::new("/work/app")).expect("exact").id, "ses_main");
+    assert_eq!(opencode::find_session(&db, Path::new("/work/app/")).expect("trailing slash").id, "ses_main");
     // Started in an ancestor: the newest session there, never a sibling project.
-    assert_eq!(opencode::find_session(&db, Path::new("/work/app/src/deep")).expect("nested"), "ses_main");
-    assert_eq!(opencode::find_session(&db, Path::new("/work/tools")).expect("root"), "ses_root");
-    assert_eq!(opencode::find_session(&db, Path::new("/work/other")).expect("other"), "ses_other");
+    assert_eq!(opencode::find_session(&db, Path::new("/work/app/src/deep")).expect("nested").id, "ses_main");
+    assert_eq!(opencode::find_session(&db, Path::new("/work/tools")).expect("root").id, "ses_root");
+    assert_eq!(opencode::find_session(&db, Path::new("/work/other")).expect("other").id, "ses_other");
     match opencode::find_session(&db, Path::new("/elsewhere")) {
         Err(HostError::NoTranscript(msg)) => assert!(msg.contains("/elsewhere"), "{msg}"),
         other => panic!("expected NoTranscript, got {other:?}"),
@@ -119,7 +238,7 @@ fn text_parts_join_in_order_and_injected_or_empty_ones_are_skipped() {
     let dir = temp_dir("read");
     let db = dir.join("opencode.db");
     let writer = populate(&db);
-    let messages = opencode::messages_for_session(&db, "ses_main", 25).expect("messages");
+    let messages = opencode::messages_for_session(&db, "ses_main", Schema::V1, 25).expect("messages");
     let texts: Vec<&str> = messages.iter().map(|m| m.text.as_str()).collect();
     assert_eq!(
         texts,
@@ -135,9 +254,9 @@ fn text_parts_join_in_order_and_injected_or_empty_ones_are_skipped() {
     assert_eq!(messages[0].at.as_deref(), Some("1970-01-01T00:00:00.050Z"));
     assert_eq!(messages[1].role, Role::Human);
     // n counts messages with text; the aborted assistant turn does not consume a slot.
-    let two = opencode::messages_for_session(&db, "ses_main", 2).expect("two");
+    let two = opencode::messages_for_session(&db, "ses_main", Schema::V1, 2).expect("two");
     assert_eq!(two.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["msg_5", "msg_4"]);
-    match opencode::messages_for_session(&db, "ses_empty", 25) {
+    match opencode::messages_for_session(&db, "ses_empty", Schema::V1, 25) {
         Err(HostError::NoMessages(msg)) => assert!(msg.contains("ses_empty"), "{msg}"),
         other => panic!("expected NoMessages, got {other:?}"),
     }

@@ -347,3 +347,19 @@ database is opened read-only exactly as for Hermes (shared opener, `mode=ro` the
 `immutable=1`); one query joins `message` and `part` newest-message-first. `OPENCODE=1` in the
 environment now selects this host instead of reporting it unsupported. Verified live against
 opencode 1.18.23 (`~/.local/share/opencode/opencode.db`, 45 MB, WAL) on 2026-08-29.
+
+**OpenCode 2** (2026-08-30, plannotator-tui#40). The `opencode2` binary (`anomalyco/opencode`,
+branch `beta`, `packages/cli`) keeps the same data directory and, on the standard channels
+(`latest`, `dev`, `beta`, `next`, `prod`), the same `opencode.db`, but writes to new tables:
+`session_v2` (the columns this reader uses are unchanged: `directory`, `parent_id`,
+`time_updated`, `time_archived`) and `session_message` (`type` is the role, `seq` the order,
+`data` the payload; an assistant's text is `content[].type == "text"`, a user's is `text`;
+`synthetic`, `system`, `skill`, `shell`, `compaction` and the `*-switched` rows are not
+rendered). There is no `part` table. Other channels use `opencode-<channel>.db` beside it
+(`packages/cli/src/server-process.ts`). After the v1 migration both table families hold data,
+so the reader now considers every `opencode*.db` in the data dir and both schemas, and picks
+the newest top-level unarchived session for the cwd across all of them; a `--session-id` is
+looked up in whichever table holds it. Verified against the `beta` source
+(`packages/core/src/session/sql.ts`, `packages/schema/src/session-message.ts`,
+`packages/util/src/global-roots.ts`) and a mixed-schema fixture reproducing the report.
+
