@@ -121,7 +121,8 @@ impl App {
             .map(|(i, row)| {
                 let indent = "  ".repeat(row.depth);
                 let name = if row.is_dir {
-                    format!("{indent}{}/", row.name)
+                    let arrow = if row.expanded { "\u{25be}" } else { "\u{25b8}" };
+                    format!("{indent}{arrow} {}/", row.name)
                 } else {
                     format!("{indent}{}", row.name)
                 };

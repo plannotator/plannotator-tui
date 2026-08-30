@@ -205,19 +205,32 @@ impl App {
         })
     }
 
-    /// Folder mode: a tree on the left, the first file open.
+    /// Folder mode: a lazy tree on the left, the shallowest Markdown file open. A folder
+    /// with none near the top opens on a placeholder so the tree is still browsable.
     pub(crate) fn open_folder(root: &Path, width: usize, delivery: Box<dyn Delivery>) -> Result<Self> {
         let mut tree = Tree::scan(root)?;
-        let first =
-            tree.first_file().with_context(|| format!("no markdown files under {}", root.display()))?;
-        let path = first.path.clone();
-        let mut app = Self::open(read_file(&path)?, width, delivery)?;
+        let first = crate::tree::first_file_shallow(root, 2_000);
+        let source = match &first {
+            Some(path) => read_file(path)?,
+            None => DocumentSource::new(
+                format!(
+                    "# {}\n\nNo Markdown file found near the top of this folder.\n\nPick one from the tree on the left: `Tab` focuses it, `Enter` opens a file or expands a folder.\n",
+                    root.display()
+                ),
+                root.display().to_string(),
+                true,
+                Provenance::Stdin,
+            ),
+        };
+        let mut app = Self::open(source, width, delivery)?;
         // The project is the folder's, not the first file's parent's.
         app.project = workspace_paths::project_name(root);
-        app.open = Open::new(read_file(&path)?, width, &app.data_dir, &app.project)?;
+        if let Some(path) = &first {
+            app.open = Open::new(read_file(path)?, width, &app.data_dir, &app.project)?;
+        }
         app.derive_send_state();
         app.refresh_counts(&mut tree);
-        app.tree_cursor = tree.position(&path).unwrap_or(0);
+        app.tree_cursor = first.as_deref().and_then(|p| tree.position(p)).unwrap_or(0);
         app.tree = Some(tree);
         Ok(app)
     }
@@ -249,10 +262,16 @@ impl App {
         }
     }
 
-    /// Switch to the file under the tree cursor.
+    /// Open the file under the tree cursor, or expand/collapse a directory.
     fn open_tree_selection(&mut self) -> Result<()> {
         let Some(row) = self.tree.as_ref().and_then(|t| t.rows.get(self.tree_cursor)) else { return Ok(()) };
         if row.is_dir {
+            if let Some(mut tree) = self.tree.take() {
+                let result = tree.toggle(self.tree_cursor);
+                self.refresh_counts(&mut tree);
+                self.tree = Some(tree);
+                result?;
+            }
             return Ok(());
         }
         let path = row.path.clone();
@@ -353,19 +372,27 @@ impl App {
         let Some(tree) = &self.tree else { return Ok(self.feedback()) };
         let width = self.open.layout.width;
         let mut out = String::new();
-        for row in tree.rows.iter().filter(|r| !r.is_dir && r.annotations > 0) {
-            let open = Open::new(read_file(&row.path)?, width, &self.data_dir, &self.project)?;
-            let relative = row.path.strip_prefix(tree.root()).unwrap_or(&row.path);
+        for path in self.annotated_files() {
+            let open = Open::new(read_file(&path)?, width, &self.data_dir, &self.project)?;
+            let relative = path.strip_prefix(tree.root()).unwrap_or(&path);
             let _ = writeln!(out, "{}", Self::feedback_for(&open, &relative.display().to_string()));
         }
         Ok(if out.is_empty() { "No annotations.".to_owned() } else { out })
     }
 
-    /// Paths of every annotated file in the folder, the open one included.
+    /// Paths of every annotated file in the folder: the project's records (which carry their
+    /// document path since 0.5.0) plus any listed tree row with a count, so nothing depends
+    /// on which directories happen to be expanded.
     fn annotated_files(&self) -> Vec<PathBuf> {
-        self.tree.as_ref().map_or_else(Vec::new, |tree| {
-            tree.rows.iter().filter(|r| !r.is_dir && r.annotations > 0).map(|r| r.path.clone()).collect()
-        })
+        let Some(tree) = &self.tree else { return Vec::new() };
+        let mut found = Store::annotated_documents(&self.data_dir, &self.project);
+        for row in tree.rows.iter().filter(|r| !r.is_dir && r.annotations > 0) {
+            found.push(row.path.clone());
+        }
+        found.sort();
+        found.dedup();
+        found.retain(|p| p.is_file());
+        found
     }
 
     fn is_open(&self, path: &Path) -> bool {
