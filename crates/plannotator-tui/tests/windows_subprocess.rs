@@ -78,6 +78,8 @@ fn clicked_file_and_exact_session_launches_preserve_argv_without_process_info() 
     let plugin_root = root.join("plugin root with spaces ü");
     std::fs::create_dir_all(&plugin_root).expect("plugin root");
     let clicked_url = file_url(&clicked);
+    let clicked_root_from_url = clicked_root.display().to_string().replace('\\', "/");
+    let clicked_from_url = clicked.display().to_string().replace('\\', "/");
 
     let open = bin()
         .env("HERDR_ENV", "1")
@@ -116,9 +118,9 @@ fn clicked_file_and_exact_session_launches_preserve_argv_without_process_info() 
             "overlay",
             "--focus",
             "--cwd",
-            clicked_root.display().to_string(),
+            clicked_root_from_url,
             "--env",
-            format!("PLANNOTATOR_TUI_FILE={}", clicked.display()),
+            format!("PLANNOTATOR_TUI_FILE={clicked_from_url}"),
             "--env",
             "PLANNOTATOR_TUI_DELIVER_TO=w1:p1",
             "--env",
