@@ -1293,7 +1293,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "plannotator-tui"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "plannotator-tui-hosts",
@@ -1311,7 +1311,7 @@ dependencies = [
 
 [[package]]
 name = "plannotator-tui-hosts"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -1319,7 +1319,7 @@ dependencies = [
 
 [[package]]
 name = "plannotator-tui-schema"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "jsonschema",
  "serde",
