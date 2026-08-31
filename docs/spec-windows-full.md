@@ -95,10 +95,10 @@ home, parent-pid availability, and `file://` drive normalization. The other Wind
 found under `crates/plannotator-tui` are test fixtures. Popup, overlay, rendering, mouse, and
 delivery do not have a separate Windows implementation in this repository.
 
-### Herdr's Windows execution contract is sufficient
+### Herdr's action execution is sufficient; pane resolution blocks Windows Full mode
 
-Herdr 0.8.0 and later has the source-level facilities Full mode needs; the relative-command
-resolver is present in the
+Herdr 0.8.0 and later has the action, build, and ConPTY facilities Full mode needs, but not the
+required pane-program resolution. The relative-command resolver used by actions is present in the
 [`v0.8.0` source](https://github.com/ogulcancelik/herdr/blob/v0.8.0/src/plugin_command.rs#L7-L49):
 
 - Plugin build commands and actions are argv arrays. Herdr resolves an explicit relative
@@ -117,15 +117,17 @@ resolver is present in the
   ([`runtime.rs`](https://github.com/ogulcancelik/herdr/blob/7b675f42af35/src/app/api/plugins/runtime.rs#L15-L80),
   [`runtime.rs`](https://github.com/ogulcancelik/herdr/blob/7b675f42af35/src/app/api/plugins/runtime.rs#L103-L179)).
 - A plugin pane passes the program and every argument separately to `portable_pty`, which uses
-  native ConPTY on Windows. There is no shell between the manifest and the process
+  native ConPTY on Windows. Unlike an action, the pane command does not pass through Herdr's
+  plugin-relative program resolver; there is no shell between the manifest and the process
   ([`pane.rs`](https://github.com/ogulcancelik/herdr/blob/7b675f42af35/src/pane.rs#L1814-L1857),
   [`pty/backend.rs`](https://github.com/ogulcancelik/herdr/blob/7b675f42af35/src/pty/backend.rs#L7-L39)).
 - Popup, overlay, and split all use that same argv pane runtime
   ([`popup.rs`](https://github.com/ogulcancelik/herdr/blob/7b675f42af35/src/app/popup.rs#L84-L113),
   [`navigate.rs`](https://github.com/ogulcancelik/herdr/blob/7b675f42af35/src/app/input/navigate.rs#L1081-L1165),
   [`panes.rs`](https://github.com/ogulcancelik/herdr/blob/7b675f42af35/src/app/api/plugins/panes.rs#L82-L171)).
-- The pane cwd is the explicit `--cwd`, else the plugin root. The launch env protects Herdr's
-  own keys, then injects the plugin paths, context, and binary path
+- The pane cwd is the explicit `--cwd`, else the plugin root. A relative pane program therefore
+  resolves from the folder under review when `--cwd` is present, not from the plugin root. The
+  launch env protects Herdr's own keys, then injects the plugin paths, context, and binary path
   ([`panes.rs`](https://github.com/ogulcancelik/herdr/blob/7b675f42af35/src/app/api/plugins/panes.rs#L236-L269),
   [`panes.rs`](https://github.com/ogulcancelik/herdr/blob/7b675f42af35/src/app/api/plugins/panes.rs#L329-L358)).
 - Item-level `platforms` overrides the plugin-level list. An unsupported build is skipped; an
@@ -136,8 +138,11 @@ Herdr's documentation calls Windows plugins “preview” and “best-effort” 
 install, local link, build, actions, events, and panes as present
 ([`windows-beta.mdx`](https://github.com/ogulcancelik/herdr/blob/7b675f42af35/docs/next/website/src/content/docs/windows-beta.mdx#L28-L56)).
 In code, those words are a support qualification, not different invocation semantics. The
-source proves argv, cwd, env, platform filtering, and ConPTY construction. It does not prove
-that this TUI renders or receives every input correctly in a native Windows pane.
+source proves argv, cwd, env, platform filtering, and ConPTY construction. It also proves that
+the current one-manifest design cannot start a relative Windows pane when review supplies
+`--cwd`: the Unix wrapper can anchor on `HERDR_PLUGIN_ROOT`, but Windows has no corresponding
+shell. Full mode remains gated on Windows until Herdr resolves pane executables against the
+plugin root without changing the requested pane cwd.
 
 ### Full mode is currently disabled by packaging
 
@@ -158,38 +163,53 @@ The launcher relies on Bash, executable bits, and `$HERDR_PLUGIN_ROOT`
 The smoke suite is also Bash-only
 ([`smoke.sh`](https://github.com/plannotator/herdr-annotate/blob/ba4903b28fbb/scripts/smoke.sh#L1-L31)).
 
-The development manifest in this repository has the same gate and `sh -c` assumption
-([`herdr/herdr-plugin.toml`](../herdr/herdr-plugin.toml#L1-L48)). It builds the Windows binary
-but has no common staged filename that one direct argv can use on every platform.
+The development manifest stages the Cargo output under a common `.exe` filename on all three
+platforms and keeps Windows action entries. Its `doc` pane remains macOS/Linux-only and uses
+`HERDR_PLUGIN_ROOT` to reach that staged binary from the review cwd
+([`herdr/herdr-plugin.toml`](../herdr/herdr-plugin.toml#L1-L56)).
 
 ## Gap inventory
 
-### G1. The distributed manifest excludes Windows and inserts two Unix shells
+### G1. Pane programs resolve from the review cwd, not the plugin root
 
-**Evidence.** The six gates and commands are the packaging state described above. Herdr panes
-execute the first argv item directly under ConPTY; `sh -c` is not portable.
+**Evidence.** Actions pass through Herdr's plugin-relative command resolver and run with the
+plugin root as cwd. Panes instead pass the first argv item directly to `portable_pty` and set
+the process cwd to the explicit `--cwd` when present. `./bin/plannotator-tui.exe` in a pane
+therefore names `<review-cwd>/bin/plannotator-tui.exe`, not the staged plugin binary. Herdr
+also rejects duplicate pane IDs before platform filtering, so separate Unix and Windows `doc`
+entries are not a manifest-level workaround
+([`manifest.rs`](https://github.com/ogulcancelik/herdr/blob/7b675f42af35/src/app/api/plugins/manifest.rs#L193-L193),
+[`manifest.rs`](https://github.com/ogulcancelik/herdr/blob/7b675f42af35/src/app/api/plugins/manifest.rs#L337-L346)).
 
 **Affected files.** `herdr-annotate/herdr-plugin.toml`,
-`herdr-annotate/scripts/plannotator-tui.sh`.
+`herdr-annotate/scripts/plannotator-tui.sh`, `herdr/herdr-plugin.toml`, and upstream Herdr's
+`src/app/api/plugins/panes.rs` and pane-spec validation.
 
-**Required change.** Give all six Full items effective Windows support. Replace the pane and
-three action commands with direct relative executable argv:
+**Required change.** Keep all six distributed Full gates (`build`, `doc`, `open`, `open-link`,
+`last`, and `markdown-file`) on macOS/Linux. Keep the Unix pane on its shell wrapper so
+`HERDR_PLUGIN_ROOT` supplies an absolute launcher path. Actions may use direct relative argv
+because the action runtime resolves their program against the plugin root:
 
 ```toml
-command = ["./bin/plannotator-tui.exe", "herdr", "pane"]
+command = ["sh", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/scripts/plannotator-tui.sh\" herdr pane"]
 command = ["./bin/plannotator-tui.exe", "herdr", "open"]
 command = ["./bin/plannotator-tui.exe", "herdr", "last"]
 ```
 
 `open-link` intentionally uses the same `herdr open` argv as `open`; the invocation context
-contains the clicked URL. Keep `markdown-file` enabled on all three platforms. Stop routing
-Full commands through `scripts/plannotator-tui.sh`. Delete the script only after confirming no
-released manifest or documented local workflow still references it; otherwise leave it as an
-unreferenced compatibility file for one release.
+contains the clicked URL. The development manifest keeps Windows staging and action entries,
+but limits `doc` to macOS/Linux and uses
+`$HERDR_PLUGIN_ROOT/bin/plannotator-tui.exe` through `sh -c` there.
 
-**Risk.** A direct missing executable produces Herdr's spawn error instead of the launcher's
-custom notification. That degraded message is accepted because a cross-platform script
-wrapper would reintroduce shell selection into the pane command.
+Upstream Herdr must add a pane-program resolution contract that anchors an explicit relative
+program to the plugin root while preserving the requested pane cwd. The fix must also define
+how one cross-platform `doc` entry works; duplicate platform-specific pane IDs are invalid.
+Only after a Herdr release contains that behavior may the distributed Windows build and all six
+Full gates be enabled, with `min_herdr_version` raised to the first fixed release.
+
+**Risk.** The PowerShell fetcher and staged Windows binary have no distributed runtime consumer
+until the upstream dependency lands. Keeping them tested is deliberate prerequisite work, not
+evidence that Windows Full mode can open a pane.
 
 ### G2. There is no Windows installer
 
@@ -200,18 +220,14 @@ bits. Release v0.5.0 already supplies one Windows asset, but the plugin never re
 `herdr-annotate/scripts/fetch-plannotator-tui.sh`, new
 `herdr-annotate/scripts/fetch-plannotator-tui.ps1`, and the plugin CI files specified below.
 
-**Required change.** Add platform-specific `[[build]]` entries. The Windows entry calls
-Windows PowerShell explicitly:
+**Required change.** Implement and test the Windows PowerShell fetcher, but do not expose it as
+a distributed `[[build]]` entry until G1's upstream dependency lands. The current manifest has
+only the Unix build:
 
 ```toml
 [[build]]
 platforms = ["macos", "linux"]
 command = ["bash", "scripts/fetch-plannotator-tui.sh"]
-
-[[build]]
-platforms = ["windows"]
-command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-           "-File", "scripts/fetch-plannotator-tui.ps1"]
 ```
 
 Both installers write `bin/plannotator-tui.exe`; `.exe` is a legal ordinary filename on Unix
@@ -252,24 +268,26 @@ the installed architecture differ from the manifest's prior art.
 finds the ARM64 MSVC toolchain. Running the result requires an ARM64 Windows host and remains
 UNVERIFIED until the live matrix passes.
 
-### G4. The development manifest is Unix-only
+### G4. Development staging and action support exceed pane availability
 
-**Evidence.** `herdr/herdr-plugin.toml` is plugin-level macOS/Linux and invokes the Cargo
-output through `sh -c`. Unix Cargo writes `plannotator-tui`; Windows writes
-`plannotator-tui.exe`. Herdr rejects duplicate pane IDs, so platform-specific duplicate `doc`
-entries are not an alternative.
+**Evidence.** Unix Cargo writes `plannotator-tui`; Windows writes `plannotator-tui.exe`.
+Platform-specific staging can normalize those names, and actions can use the staged relative
+program on all three platforms. G1 prevents the same command from opening a Windows pane.
 
 **Affected files.** `herdr/herdr-plugin.toml`; new `herdr/stage-plannotator-tui.sh` and
 `herdr/stage-plannotator-tui.ps1`, or equivalently named staging scripts.
 
 **Required change.** Make the development manifest top-level platforms all three. Give it
 platform-specific build commands that run Cargo and stage the result as
-`herdr/bin/plannotator-tui.exe`; use direct relative argv for the pane and actions. The staging
-scripts contain no download logic. They copy only the just-built binary and fail on any error.
+`herdr/bin/plannotator-tui.exe`. Keep direct relative argv for actions. Limit the pane to
+macOS/Linux and launch the staged binary through `sh -c` with an absolute
+`HERDR_PLUGIN_ROOT` path. The staging scripts contain no download logic. They copy only the
+just-built binary and fail on any error.
 
-**Risk.** The development manifest can drift from the distributed manifest. Add a structural
-test that asserts both expose `doc`, `open`, `open-link`, `last`, and `markdown-file` on
-Windows with the same subcommand tails.
+**Risk.** The development manifest can drift from the distributed manifest. Add structural
+tests for the intentional split: both use a plugin-root wrapper for the Unix pane and matching
+direct action tails; the distributed manifest keeps all six Full gates on macOS/Linux, while
+the development manifest retains Windows staging and actions but no Windows pane.
 
 ### G5. Exact Herdr session IDs are discarded for file-backed hosts
 
@@ -483,11 +501,12 @@ custom storage roots that Herdr does not transport.
 
 Full mode adopts these Lite decisions:
 
-- one Unix build and one Windows build selected with `platforms`;
+- one Unix build now and a platform-gated Windows build once G1's Herdr dependency lands;
 - `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ...` on Windows;
 - `RuntimeInformation.OSArchitecture`, not environment-string parsing;
 - a common relative `./bin/<name>.exe` program on all three operating systems;
-- direct argv for runtime commands;
+- direct argv for actions; panes retain a plugin-root wrapper until Herdr resolves pane
+  programs independently from their cwd;
 - `Invoke-WebRequest`, exact `SHA256SUMS` asset matching, `Get-FileHash`, a unique temporary
   directory, replacement only after verification, and `finally` cleanup.
 
@@ -541,8 +560,10 @@ Publish in this order:
 1. merge TUI session resolution and Windows pull-request tests;
 2. publish a TUI release with both Windows assets and checksums;
 3. update `herdr-annotate/plannotator-tui.version` to that release;
-4. merge the PowerShell fetcher and manifest changes;
-5. perform the live matrix from an installed GitHub plugin, not a developer checkout.
+4. merge the PowerShell fetcher and the still-macOS/Linux manifest changes;
+5. land and release G1's upstream Herdr pane-resolution dependency;
+6. enable the Windows build and all six Full gates, then perform the live matrix from an
+   installed GitHub plugin, not a developer checkout.
 
 The plugin must never pin a release that lacks either advertised Windows asset.
 
@@ -597,15 +618,16 @@ Add a `windows-latest` pull-request job with these independent checks:
    stamp, and selected target. Repeat with a wrong checksum and assert exit 0, warning text,
    and no modification to the previously installed file or stamp.
 3. **Manifest parse.** Use Python 3.11 `tomllib` to parse `herdr-plugin.toml`. Assert top-level
-   Windows support; exactly one effective Windows Full build; effective Windows support for
-   `doc`, `open`, `open-link`, `last`, and `markdown-file`; exact direct relative `.exe` argv;
-   and no `sh`, `bash`, `.sh`, `-c`, or string interpolation in Full runtime commands.
-4. **Installed manifest.** With the local override pointed at the synthetic executable, use a
-   pinned Herdr 0.8.x Windows binary to link the plugin and list its actions/panes. Assert all
-   Lite actions still exist and all Full actions plus `doc` are available. This proves Herdr's
-   parser and platform filtering rather than only the local TOML assertions.
+   Windows support for Lite; no effective Windows Full build; exact macOS/Linux gates for
+   `build`, `doc`, `open`, `open-link`, `last`, and `markdown-file`; the plugin-root wrapper for
+   `doc`; and exact direct relative `.exe` argv for the actions. Compare those commands with the
+   development manifest while preserving its intentional Windows staging/action entries.
+4. **Installed manifest.** Use a pinned Herdr 0.8.x Windows binary to link the plugin and list
+   its actions/panes. Assert all Lite and Full entries parse, while every Full action plus `doc`
+   retains macOS/Linux platforms and excludes Windows. This proves Herdr preserves the gates
+   rather than only proving that local TOML parsing succeeds.
 5. **Unix regression.** The existing Unix job installs the renamed `.exe` destination and
-   executes `--version`; direct relative manifest argv must still work on macOS/Linux.
+   executes `--version`; the action argv and pane wrapper must name that staged file.
 
 The Bash `scripts/smoke.sh` remains the Unix live suite. Do not translate its global-plugin
 mutation and disposable-session logic into CI without a real Herdr host.
@@ -646,24 +668,28 @@ Sizes are implementation effort, not elapsed release time.
    prove argv and feedback boundaries through real `CreateProcess` calls.
 4. **Windows ARM64 release (M, UNVERIFIED until probed).** Add the release target, solve any
    SQLite cross-compile issue, publish checksums, and run on a native ARM64 host.
-5. **Development manifest parity (S).** Stage Cargo output under the common `.exe` name and
-   replace shell runtime commands with direct argv.
+5. **Development manifest parity (S).** Stage Cargo output under the common `.exe` name, use
+   direct argv for actions, and retain a plugin-root shell wrapper for the macOS/Linux pane.
 6. **Distributed PowerShell installer (M).** Implement the frozen fetch contract and CI tests;
    rename the Unix installed destination.
-7. **Distributed manifest (S).** Add the two builds, enable all six Full entries on Windows,
-   switch to direct argv, and retire the runtime wrapper.
+7. **Distributed manifest (S).** Keep the Unix build and all six Full gates on macOS/Linux,
+   switch actions to direct argv, and retain the runtime wrapper for the pane.
 8. **Plugin structural/install CI (M).** Add local-override, loopback-download, checksum,
    `tomllib`, pinned-Herdr, and Unix regression jobs.
-9. **Native Windows x64 qualification (L, human scheduling).** Run the full live matrix on a
+9. **Upstream Herdr dependencies (S to specify, external to these repos).** Resolve explicit
+   relative pane programs from the plugin root without changing `--cwd`, permit one portable
+   `doc` entry, and correct Pi's Windows path hook from G7. Raise `min_herdr_version` before
+   ungating Full mode.
+10. **Native Windows x64 qualification (L, human scheduling).** Run the full live matrix on a
    dedicated Windows host and record failures without broadening scope.
-10. **Native Windows ARM64 qualification (M, human scheduling).** Run the ARM64 subset only
+11. **Native Windows ARM64 qualification (M, human scheduling).** Run the ARM64 subset only
     after a native asset exists.
-11. **Upstream follow-up (S to specify, external to these repos).** Correct Pi's Windows path
-    hook in Herdr and design transcript-path/custom-root transport for other hosts. Do not
-    silently claim profile support while this is pending.
+12. **Upstream follow-up (S to specify, external to these repos).** Design
+    transcript-path/custom-root transport for other hosts. Do not silently claim profile
+    support while this is pending.
 
-The manifest must not be ungated before steps 1–8 are green. A release may be tagged only
-after step 9 passes for x64. Advertise ARM64 only after step 10 passes.
+The manifest must not be ungated before steps 1–9 are green. A release may be tagged only
+after step 10 passes for x64. Advertise ARM64 only after step 11 passes.
 
 ## Open questions for the maintainer
 
@@ -678,9 +704,9 @@ after step 9 passes for x64. Advertise ARM64 only after step 10 passes.
    failure.
 
 3. **Should runtime commands retain a script solely for a friendlier missing-binary error?**
-   **Recommended: no.** Direct relative `.exe` argv is the only one-manifest command shape
-   proved for actions and ConPTY panes on all platforms. Accept Herdr's spawn error and keep the
-   fetch warning specific.
+   **Recommended: retain it for Unix panes only until G1 lands.** Actions can use direct
+   relative `.exe` argv because Herdr resolves them against the plugin root. Panes resolve from
+   `--cwd`, so the wrapper is required to anchor the executable through `HERDR_PLUGIN_ROOT`.
 
 4. **What storage overrides are part of Windows Full v1?**
    **Recommended: default roots plus overrides inherited by the Herdr process.** Per-pane
@@ -701,10 +727,9 @@ after step 9 passes for x64. Advertise ARM64 only after step 10 passes.
    the live OSC 52 check because delivery failure depends on it.
 
 8. **Should `min_herdr_version` increase above 0.8.0?**
-   **Recommended: keep 0.8.0 unless live testing proves a later fix is required.** The direct
-   relative program resolution, Windows plugin platform, build/action argv, and ConPTY pane
-   runtime are already present in the v0.8.0 source. If qualification uses behavior added
-   later, bump to the first release containing that behavior and cite the commit.
+   **Recommended: keep 0.8.0 while Full remains gated on Windows, then raise it.** Windows Full
+   requires the first Herdr release that resolves pane programs against the plugin root while
+   preserving `--cwd`. Cite that release and commit when the six gates are removed.
 
 9. **Should this work add a Windows process-table implementation?**
    **Recommended: no for Full mode.** Herdr already reports exact identity. Add native process
