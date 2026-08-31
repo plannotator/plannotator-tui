@@ -623,9 +623,9 @@ Add a `windows-latest` pull-request job with these independent checks:
    `doc`; and exact direct relative `.exe` argv for the actions. Compare those commands with the
    development manifest while preserving its intentional Windows staging/action entries.
 4. **Installed manifest.** Use a pinned Herdr 0.8.x Windows binary to link the plugin and list
-   its actions/panes. Assert all Lite actions and panes still exist and every Full action plus
-   `doc` is absent on Windows. This proves Herdr's parser and platform filtering rather than
-   only the local TOML assertions.
+   its actions/panes. Assert all Lite and Full entries parse, while every Full action plus `doc`
+   retains macOS/Linux platforms and excludes Windows. This proves Herdr preserves the gates
+   rather than only proving that local TOML parsing succeeds.
 5. **Unix regression.** The existing Unix job installs the renamed `.exe` destination and
    executes `--version`; the action argv and pane wrapper must name that staged file.
 
