@@ -189,4 +189,31 @@ mod tests {
         );
         assert_eq!(HerdrAgent::new(bin, "w1:p1".into(), None).describe(), "w1:p1");
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_create_process_keeps_feedback_in_one_argument() {
+        let root = std::env::var_os("RUNNER_TEMP")
+            .map_or_else(std::env::temp_dir, PathBuf::from)
+            .join(format!("plannotator delivery proof ü-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("temp root");
+        let fake = root.join("fake herdr.exe");
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/support/fake-herdr.rs");
+        let output = Command::new("rustc")
+            .arg("--edition=2024")
+            .arg(source)
+            .arg("-o")
+            .arg(&fake)
+            .output()
+            .expect("run rustc");
+        assert!(output.status.success(), "rustc failed: {}", String::from_utf8_lossy(&output.stderr));
+        let feedback = "line one\n\"quoted\" 100% & ready | café 中文";
+        HerdrAgent::new(fake, "w1:p1".into(), Some("codex".into())).deliver(feedback).expect("delivered");
+        let log = std::fs::read_to_string(root.join("calls.jsonl")).expect("call log");
+        let call: serde_json::Value = serde_json::from_str(log.trim()).expect("JSON call");
+        assert_eq!(call["argv"], serde_json::json!(["agent", "prompt", "w1:p1", feedback]));
+        assert_eq!(call["argv"].as_array().expect("argv").len(), 4);
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
 }
