@@ -49,7 +49,7 @@ fn calls(fake: &Path) -> Vec<Value> {
         .collect()
 }
 
-fn context(cwd: &Path, clicked_url: Option<String>) -> String {
+fn context(cwd: &Path, clicked_url: Option<&str>) -> String {
     json!({
         "focused_pane_id": "w1:p1",
         "focused_pane_agent": "codex",
@@ -77,13 +77,14 @@ fn clicked_file_and_exact_session_launches_preserve_argv_without_process_info() 
     std::fs::write(&clicked, "# plan\n").expect("clicked file");
     let plugin_root = root.join("plugin root with spaces ü");
     std::fs::create_dir_all(&plugin_root).expect("plugin root");
+    let clicked_url = file_url(&clicked);
 
     let open = bin()
         .env("HERDR_ENV", "1")
         .env("HERDR_BIN_PATH", &fake)
         .env("HERDR_PLUGIN_ID", "annotate")
         .env("HERDR_PLUGIN_ROOT", &plugin_root)
-        .env("HERDR_PLUGIN_CONTEXT_JSON", context(&clicked_root, Some(file_url(&clicked))))
+        .env("HERDR_PLUGIN_CONTEXT_JSON", context(&clicked_root, Some(&clicked_url)))
         .args(["herdr", "open"])
         .output()
         .expect("open launcher");

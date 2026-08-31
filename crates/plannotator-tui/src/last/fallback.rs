@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use plannotator_tui_hosts::{Host, Message, claude, copilot, droid, opencode, pi};
+#[cfg(unix)]
+use plannotator_tui_hosts::copilot;
+use plannotator_tui_hosts::{Host, Message, claude, droid, opencode, pi};
 
 use super::LastOptions;
 use super::exact;
