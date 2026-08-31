@@ -9,7 +9,7 @@ no runtime. Rust + ratatui.
 [![ci](https://img.shields.io/github/actions/workflow/status/plannotator/plannotator-tui/post-merge.yml?branch=main&style=flat-square&label=main)](https://github.com/plannotator/plannotator-tui/actions/workflows/post-merge.yml)
 
 ```text
-                                                                             Copy 2 as feedback
+                                                                    Send 2 to claude in w1:p1 ▸
   Herdr plugins are shareable, executable workflow packages. A
   plugin can be a Bash script, JavaScript app, Lua script, Rust
 ▍ binary, or any other argv command your machine can run. Herdr     ╭ 💬  8d3e8 ────────────────╮
