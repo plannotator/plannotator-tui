@@ -28,7 +28,8 @@ command = [
 id = "doc"
 title = "plannotator-tui"
 placement = "overlay"
-command = ["./bin/plannotator-tui.exe", "herdr", "pane"]
+platforms = ["macos", "linux"]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/plannotator-tui.exe\" herdr pane"]
 
 # Human entry points. Both run the launcher, which reads Herdr's invocation context: the
 # focused pane's folder (open) or the clicked file:// link (open-link), and the focused

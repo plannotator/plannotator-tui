@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Check the Windows Full entrypoint contract across one or more manifests."""
+"""Check the development manifest's staged Full-mode contract."""
 
 from __future__ import annotations
 
-import sys
 import tomllib
 from pathlib import Path
 
 
 PROGRAM = "./bin/plannotator-tui.exe"
-COMMANDS = {
-    ("panes", "doc"): [PROGRAM, "herdr", "pane"],
+PANE_COMMAND = [
+    "sh",
+    "-c",
+    'exec "$HERDR_PLUGIN_ROOT/bin/plannotator-tui.exe" herdr pane',
+]
+ACTION_COMMANDS = {
     ("actions", "open"): [PROGRAM, "herdr", "open"],
     ("actions", "open-link"): [PROGRAM, "herdr", "open"],
     ("actions", "last"): [PROGRAM, "herdr", "last"],
@@ -35,9 +38,13 @@ def fail(path: Path, message: str) -> None:
     raise AssertionError(f"{path}: {message}")
 
 
-def supports_windows(manifest: dict[str, object], entry: dict[str, object]) -> bool:
+def platforms(manifest: dict[str, object], entry: dict[str, object]) -> set[str]:
     platforms = entry.get("platforms", manifest.get("platforms", []))
-    return isinstance(platforms, list) and "windows" in platforms
+    if not isinstance(platforms, list) or not all(
+        isinstance(platform, str) for platform in platforms
+    ):
+        raise AssertionError(f"invalid platforms: {platforms!r}")
+    return set(platforms)
 
 
 def entry(
@@ -52,36 +59,44 @@ def entry(
     matches = [
         item
         for item in entries
-        if isinstance(item, dict)
-        and item.get("id") == entry_id
-        and supports_windows(manifest, item)
+        if isinstance(item, dict) and item.get("id") == entry_id
     ]
     if len(matches) != 1:
-        fail(path, f"expected one Windows {table}.{entry_id}, found {len(matches)}")
+        fail(path, f"expected one {table}.{entry_id}, found {len(matches)}")
     return matches[0]
 
 
-def shape(path: Path) -> dict[str, tuple[str, ...]]:
+def check_entries(path: Path) -> None:
     with path.open("rb") as handle:
         manifest = tomllib.load(handle)
 
     if set(manifest.get("platforms", [])) != {"macos", "linux", "windows"}:
         fail(path, "top-level platforms must be macos, linux, and windows")
 
-    result: dict[str, tuple[str, ...]] = {}
-    for (table, entry_id), expected in COMMANDS.items():
-        command = entry(path, manifest, table, entry_id).get("command")
+    pane = entry(path, manifest, "panes", "doc")
+    if platforms(manifest, pane) != {"macos", "linux"}:
+        fail(path, "panes.doc must be limited to macOS and Linux")
+    if pane.get("command") != PANE_COMMAND:
+        fail(
+            path,
+            f"panes.doc command is {pane.get('command')!r}, expected {PANE_COMMAND!r}",
+        )
+
+    for (table, entry_id), expected in ACTION_COMMANDS.items():
+        item = entry(path, manifest, table, entry_id)
+        if "windows" not in platforms(manifest, item):
+            fail(path, f"{table}.{entry_id} must retain Windows support")
+        command = item.get("command")
         if command != expected:
             fail(path, f"{table}.{entry_id} command is {command!r}, expected {expected!r}")
-        result[entry_id] = tuple(expected[1:])
 
     for entry_id, expected_action in LINK_HANDLERS.items():
-        action = entry(path, manifest, "link_handlers", entry_id).get("action")
+        handler = entry(path, manifest, "link_handlers", entry_id)
+        if "windows" not in platforms(manifest, handler):
+            fail(path, f"link_handlers.{entry_id} must retain Windows support")
+        action = handler.get("action")
         if action != expected_action:
             fail(path, f"link_handlers.{entry_id} action is {action!r}, expected {expected_action!r}")
-        result[entry_id] = (expected_action,)
-
-    return result
 
 
 def check_development_builds(path: Path) -> None:
@@ -93,7 +108,7 @@ def check_development_builds(path: Path) -> None:
     commands = [item.get("command") for item in builds if isinstance(item, dict)]
     if commands != DEVELOPMENT_BUILDS:
         fail(path, f"development build commands are {commands!r}")
-    if not supports_windows(manifest, builds[0]):
+    if "windows" not in platforms(manifest, builds[0]):
         fail(path, "Cargo build does not run on Windows")
     if set(builds[1].get("platforms", [])) != {"macos", "linux"}:
         fail(path, "Unix staging command must run on macOS and Linux only")
@@ -102,15 +117,9 @@ def check_development_builds(path: Path) -> None:
 
 
 def main() -> None:
-    paths = [Path(value) for value in sys.argv[1:]] or [
-        Path(__file__).with_name("herdr-plugin.toml")
-    ]
-    reference = shape(paths[0])
-    check_development_builds(paths[0])
-    for path in paths[1:]:
-        candidate = shape(path)
-        if candidate != reference:
-            fail(path, f"Full entrypoint tails differ: {candidate!r} != {reference!r}")
+    path = Path(__file__).with_name("herdr-plugin.toml")
+    check_entries(path)
+    check_development_builds(path)
 
 
 if __name__ == "__main__":
