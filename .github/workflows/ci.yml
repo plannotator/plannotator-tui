@@ -1,6 +1,5 @@
-# Pull-request gate: fmt + clippy + tests on Ubuntu, and clippy alone on Windows (cfg(windows)
-# code is invisible to clippy elsewhere). Both jobs run in parallel and are cancelled when the
-# PR is updated. Full cross-platform tests and release builds run after merge.
+# Pull-request gate: the full suite on Ubuntu and Windows. Both jobs run in parallel and are
+# cancelled when the PR is updated.
 name: ci
 
 on:
@@ -30,11 +29,15 @@ jobs:
 
   check-windows:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --all-targets
+      - run: cargo build --release -p plannotator-tui
+      - run: '& .\target\release\plannotator-tui.exe --version'
