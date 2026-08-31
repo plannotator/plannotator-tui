@@ -12,6 +12,62 @@ use serde_json::Value;
 
 use crate::{Message, Role};
 
+/// Find `<timestamp>_<id>.jsonl`, preferring the current cwd's bucket, then searching
+/// recursively under the sessions root.
+pub fn find_transcript_by_id(
+    sessions_dir: &Path,
+    cwd: &Path,
+    session_id: &str,
+) -> Result<Option<PathBuf>, crate::HostError> {
+    find_transcript_by_id_in(sessions_dir, &[sessions_dir.join(encoded_dir(cwd))], session_id)
+}
+
+pub(crate) fn find_transcript_by_id_in(
+    sessions_dir: &Path,
+    preferred_dirs: &[PathBuf],
+    session_id: &str,
+) -> Result<Option<PathBuf>, crate::HostError> {
+    let id = crate::validate_session_id(session_id)?;
+    for dir in preferred_dirs {
+        if let Some(path) = matching_session_files(dir, id).into_iter().next() {
+            return Ok(Some(path));
+        }
+    }
+    let mut files = Vec::new();
+    collect_session_files(sessions_dir, id, &mut files);
+    files.sort();
+    Ok(files.into_iter().find(|path| !preferred_dirs.iter().any(|dir| path.parent() == Some(dir.as_path()))))
+}
+
+fn collect_session_files(dir: &Path, id: &str, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_session_files(&path, id, out);
+        } else if session_file_has_id(&path, id) {
+            out.push(path);
+        }
+    }
+}
+
+fn matching_session_files(dir: &Path, id: &str) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map(|entries| {
+            entries.flatten().map(|entry| entry.path()).filter(|path| session_file_has_id(path, id)).collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    files
+}
+
+fn session_file_has_id(path: &Path, id: &str) -> bool {
+    path.is_file()
+        && path.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
+            name.strip_suffix(".jsonl").is_some_and(|stem| stem.ends_with(&format!("_{id}")))
+        })
+}
+
 /// The directory pi writes a cwd's sessions into: two dashes, the cwd without its leading
 /// slash and with every slash, backslash and colon replaced by a dash, two dashes.
 pub fn encoded_dir(cwd: &Path) -> String {

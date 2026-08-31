@@ -7,12 +7,35 @@ use std::process::Command;
 
 use plannotator_tui_hosts::{Role, claude, codex, copilot, droid, omp, pi};
 
+const NAMED_CODEX_ID: &str = "11111111-1111-4111-8111-111111111111";
+const NEWER_CODEX_ID: &str = "22222222-2222-4222-8222-222222222222";
+
 fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_plannotator-tui"))
 }
 
 fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../plannotator-tui-hosts/tests/fixtures")
+}
+
+fn temp_dir(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("plannotator last {tag} ü-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    dir
+}
+
+fn codex_rollout(home: &std::path::Path, day: &str, time: &str, id: &str, text: &str) {
+    let file =
+        home.join("sessions/2026/08").join(day).join(format!("rollout-2026-08-{day}T{time}-{id}.jsonl"));
+    std::fs::create_dir_all(file.parent().expect("parent")).expect("sessions");
+    std::fs::write(
+        file,
+        format!(
+            "{{\"timestamp\":\"2026-08-{day}T{time}Z\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_started\"}}}}\n{{\"timestamp\":\"2026-08-{day}T{time}Z\",\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"id\":\"m-{id}\",\"content\":[{{\"type\":\"output_text\",\"text\":\"{text}\"}}]}}}}\n"
+        ),
+    )
+    .expect("rollout");
 }
 
 #[test]
@@ -47,6 +70,63 @@ fn print_reads_a_codex_thread_from_a_sessions_root() {
         .expect("runs");
     assert!(out.status.success());
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), expected.trim_end());
+}
+
+#[test]
+fn herdr_reported_codex_id_beats_a_newer_unrelated_rollout() {
+    let root = temp_dir("codex id");
+    let home = root.join("codex home");
+    codex_rollout(&home, "30", "10-00-00", NAMED_CODEX_ID, "NAMED SESSION");
+    codex_rollout(&home, "31", "10-00-00", NEWER_CODEX_ID, "NEWER UNRELATED SESSION");
+    let out = bin()
+        .env("CODEX_HOME", &home)
+        .env_remove("CODEX_THREAD_ID")
+        .args(["last", "--host", "codex", "--session-id", NAMED_CODEX_ID, "--print"])
+        .output()
+        .expect("runs");
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "NAMED SESSION");
+    assert!(out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    let miss = bin()
+        .env("CODEX_HOME", &home)
+        .env_remove("CODEX_THREAD_ID")
+        .args(["last", "--host", "codex", "--session-id", "missing", "--print"])
+        .output()
+        .expect("runs");
+    assert!(miss.status.success(), "--print keeps its exit-zero contract");
+    assert!(miss.stdout.is_empty(), "an exact miss must not print the newer session");
+    let stderr = String::from_utf8_lossy(&miss.stderr);
+    assert!(stderr.contains("no Codex session missing"), "{stderr}");
+    assert!(stderr.contains(&home.join("sessions").display().to_string()), "{stderr}");
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn claude_config_override_is_used_for_an_exact_id() {
+    let root = temp_dir("claude override");
+    let config = root.join("Claude Config ü");
+    let cwd = root.join("work tree");
+    let transcript = config.join("projects").join(claude::project_slug(&cwd)).join("claude-exact.jsonl");
+    std::fs::create_dir_all(transcript.parent().expect("parent")).expect("project");
+    std::fs::copy(fixtures().join("claude-code.jsonl"), &transcript).expect("fixture copy");
+    let text = std::fs::read_to_string(&transcript).expect("fixture");
+    let expected = claude::parse_messages(&text, 25)
+        .into_iter()
+        .find(|message| message.role == Role::Assistant)
+        .expect("assistant")
+        .text;
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    let out = bin()
+        .current_dir(&cwd)
+        .env("CLAUDE_CONFIG_DIR", &config)
+        .env("PLANNOTATOR_TUI_CWD", &cwd)
+        .args(["last", "--host", "claude", "--session-id", "claude-exact", "--print"])
+        .output()
+        .expect("runs");
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), expected.trim_end());
+    std::fs::remove_dir_all(root).expect("cleanup");
 }
 
 #[test]

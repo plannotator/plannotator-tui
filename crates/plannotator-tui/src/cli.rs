@@ -145,7 +145,7 @@ fn show_config() -> Result<()> {
 
 /// `plannotator-tui herdr open [PATH] [--placement P] [--deliver-to PANE]`.
 fn herdr_command(args: &[String]) -> Result<()> {
-    use crate::herdr::launch::{OpenArgs, agent_get, plan, plan_last, process_info, run};
+    use crate::herdr::launch::{OpenArgs, agent_get, agent_identity, plan, plan_last, process_info, run};
     let sub = args.first().map(String::as_str);
     if sub == Some("pane") {
         return herdr_pane();
@@ -177,7 +177,11 @@ fn herdr_command(args: &[String]) -> Result<()> {
         let pane = probe.deliver.as_ref().map(|t| t.pane.clone()).or(probe.target_pane);
         let pane = pane.context("no agent pane to read: not focused on one and no --deliver-to")?;
         let agent = agent_get(&env, &pane);
-        plan_last(&env, &config, open, &cwd, &process_info(&env, &pane)?, agent.as_deref())?
+        let process = match agent.as_deref().and_then(agent_identity) {
+            Some(_) => None,
+            None => Some(process_info(&env, &pane)?),
+        };
+        plan_last(&env, &config, open, &cwd, process.as_deref(), agent.as_deref())?
     } else {
         plan(&env, &config, open, &cwd)?
     };
@@ -187,10 +191,10 @@ fn herdr_command(args: &[String]) -> Result<()> {
 /// The pane entrypoint: Herdr runs this in the opened pane; the environment says what to show.
 fn herdr_pane() -> Result<()> {
     let env = HerdrEnv::from_env();
-    let result = if let Some(pid) = env.message_pid {
+    let result = if env.has_message_source() {
         crate::last::run(&crate::last::LastOptions {
             host: env.host.clone(),
-            pid: Some(pid),
+            pid: env.message_pid,
             session: env.session.clone(),
             session_id: env.session_id.clone(),
             pick: 25,

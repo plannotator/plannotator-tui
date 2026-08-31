@@ -97,6 +97,11 @@ impl HerdrEnv {
         self.focused_agent_pane()
     }
 
+    /// Whether the pane entrypoint opens an agent message rather than a file.
+    pub(crate) fn has_message_source(&self) -> bool {
+        self.session.is_some() || self.session_id.is_some() || self.message_pid.is_some()
+    }
+
     /// Ask Herdr which agent runs in `pane` (`herdr pane get`), for the label when the
     /// launcher only knew the pane id. One short process at startup; `None` on any failure.
     pub(crate) fn agent_in_pane(&self, pane: &str) -> Option<String> {
@@ -173,5 +178,17 @@ mod tests {
         let env = env(&[("HERDR_ENV", "1"), ("HERDR_PANE_ID", "w1:p3")]);
         assert_eq!(env.pane_id.as_deref(), Some("w1:p3"));
         assert_eq!(env.delivery_target(), None);
+    }
+
+    #[test]
+    fn any_exact_session_or_pid_selects_the_message_entrypoint() {
+        for vars in [
+            vec![("PLANNOTATOR_TUI_SESSION", "C:\\sessions\\one.jsonl")],
+            vec![("PLANNOTATOR_TUI_SESSION_ID", "session-one")],
+            vec![("PLANNOTATOR_TUI_MESSAGE_PID", "42")],
+        ] {
+            assert!(env(&vars).has_message_source());
+        }
+        assert!(!env(&[]).has_message_source());
     }
 }

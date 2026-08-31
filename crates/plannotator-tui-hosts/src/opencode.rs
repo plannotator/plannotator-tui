@@ -92,6 +92,7 @@ pub fn find_session(db: &Path, cwd: &Path) -> Result<Found, HostError> {
 
 /// Which schema holds `session_id`, for sessions addressed by id rather than found by cwd.
 pub fn schema_of(db: &Path, session_id: &str) -> Result<Schema, HostError> {
+    crate::validate_session_id(session_id)?;
     let connection = open_read_only(db, WHAT)?;
     for (schema, table) in [(Schema::V2, "session_v2"), (Schema::V1, "session")] {
         if !has_table(&connection, table)? {
@@ -133,6 +134,7 @@ pub fn messages_for_session(
     schema: Schema,
     n: usize,
 ) -> Result<Vec<Message>, HostError> {
+    crate::validate_session_id(session_id)?;
     match schema {
         Schema::V1 => messages_v1(db, session_id, n),
         Schema::V2 => messages_v2(db, session_id, n),

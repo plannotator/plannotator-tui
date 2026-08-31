@@ -186,11 +186,11 @@ fn a_last_launch_carries_the_pid_and_host_instead_of_a_file() {
         &Config::default(),
         OpenArgs::default(),
         Path::new("/"),
-        PROCESS_INFO,
+        Some(PROCESS_INFO),
         None,
     )
     .expect("plans");
-    assert_eq!(launch.message, Some((91279, "claude".into())));
+    assert_eq!(launch.message, Some(AgentMessage { host: "claude".into(), pid: Some(91279) }));
     assert_eq!(launch.deliver.as_ref().map(|t| t.pane.as_str()), Some("w1:p1"));
     let args = argv(&launch);
     assert!(args.contains(&"PLANNOTATOR_TUI_MESSAGE_PID=91279".to_owned()));
@@ -203,10 +203,7 @@ const AGENT_GET_ID: &str = r#"{"id":"cli:agent:get","result":{"agent":{"agent":"
 const AGENT_GET_PI: &str = r#"{"id":"cli:agent:get","result":{"agent":{"agent":"pi","agent_session":{"agent":"pi","kind":"path","source":"herdr:pi","value":"~/.pi/agent/sessions/--w--/session.jsonl"},"pane_id":"w1:p1"},"type":"agent_info"}}"#;
 
 #[test]
-fn herdrs_agent_label_wins_when_an_agent_runs_through_node() {
-    let process_info = PROCESS_INFO
-        .replace(r#""argv0":"claude""#, r#""argv0":"pi""#)
-        .replace(r#""name":"claude""#, r#""name":"node""#);
+fn herdrs_exact_agent_identity_needs_no_process_info() {
     let context = HerdrContext {
         focused_pane_id: Some("w1:p1".into()),
         focused_pane_agent: Some("pi".into()),
@@ -218,12 +215,13 @@ fn herdrs_agent_label_wins_when_an_agent_runs_through_node() {
         &Config::default(),
         OpenArgs::default(),
         Path::new("/"),
-        &process_info,
+        None,
         Some(AGENT_GET_PI),
     )
     .expect("plans");
 
-    assert_eq!(launch.message, Some((91279, "pi".into())));
+    assert_eq!(launch.message, Some(AgentMessage { host: "pi".into(), pid: None }));
+    assert!(!argv(&launch).iter().any(|arg| arg.starts_with("PLANNOTATOR_TUI_MESSAGE_PID=")));
     assert!(argv(&launch).contains(&"PLANNOTATOR_TUI_HOST=pi".to_owned()));
 }
 
@@ -247,7 +245,7 @@ fn herdrs_agent_session_is_passed_to_the_pane_as_a_path_or_an_id() {
         &Config::default(),
         OpenArgs::default(),
         Path::new("/"),
-        &PROCESS_INFO.replace(r#""name":"claude""#, r#""name":"omp""#),
+        None,
         Some(AGENT_GET_PATH),
     )
     .expect("plans");
@@ -260,7 +258,7 @@ fn herdrs_agent_session_is_passed_to_the_pane_as_a_path_or_an_id() {
         &Config::default(),
         OpenArgs::default(),
         Path::new("/"),
-        PROCESS_INFO,
+        None,
         Some(AGENT_GET_ID),
     )
     .expect("plans");

@@ -22,6 +22,12 @@ pub fn find_transcripts(codex_home: &Path, thread_id: Option<&str>) -> Vec<PathB
     rollouts.into_iter().filter(|p| thread_of(p).as_deref() == Some(thread.as_str())).collect()
 }
 
+/// The transcript files for one validated exact thread id, oldest first.
+pub fn find_transcripts_by_id(codex_home: &Path, session_id: &str) -> Result<Vec<PathBuf>, crate::HostError> {
+    let id = crate::validate_session_id(session_id)?;
+    Ok(find_transcripts(codex_home, Some(id)))
+}
+
 fn all_rollouts(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else { return out };
