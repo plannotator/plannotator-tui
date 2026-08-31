@@ -144,7 +144,12 @@ pub(crate) fn parse_response(success: bool, _stdout: &str, stderr: &str) -> Resu
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "tests assert by panicking")]
+#[allow(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    reason = "tests assert by panicking"
+)]
 mod tests {
     use super::*;
 
