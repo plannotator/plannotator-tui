@@ -26,6 +26,11 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - run: python3 herdr/test-manifest.py
+      - run: cargo build --release -p plannotator-tui
+      - run: bash herdr/stage-plannotator-tui.sh
+      - run: cmp target/release/plannotator-tui herdr/bin/plannotator-tui.exe
+      - run: ./herdr/bin/plannotator-tui.exe --version
 
   check-windows:
     runs-on: windows-latest
@@ -41,3 +46,10 @@ jobs:
       - run: cargo test --workspace --all-targets
       - run: cargo build --release -p plannotator-tui
       - run: '& .\target\release\plannotator-tui.exe --version'
+      - run: python herdr/test-manifest.py
+      - run: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File herdr/stage-plannotator-tui.ps1
+      - run: |
+          $source = (Get-FileHash .\target\release\plannotator-tui.exe).Hash
+          $staged = (Get-FileHash .\herdr\bin\plannotator-tui.exe).Hash
+          if ($source -ne $staged) { throw "staged binary differs from Cargo output" }
+      - run: '& .\herdr\bin\plannotator-tui.exe --version'
