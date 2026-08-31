@@ -21,6 +21,7 @@ const WHAT: &str = "Hermes";
 /// live WAL; when the shared-memory index cannot be opened, the read falls back to
 /// `immutable=1`, which reads the main file only and may lag an active writer.
 pub fn messages_for_session(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, HostError> {
+    crate::validate_session_id(session_id)?;
     let connection = open_read_only(db, WHAT)?;
     let mut statement = connection
         .prepare(

@@ -31,6 +31,14 @@ CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, typ
 CREATE UNIQUE INDEX session_message_session_seq_idx ON session_message (session_id, seq);
 ";
 
+/// Current `OpenCode` writes this table alongside the legacy message/part tables while the
+/// session row remains in `session`.
+const CURRENT_SESSION_MESSAGE: &str = "
+CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL,
+    seq INTEGER NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL,
+    data TEXT NOT NULL);
+";
+
 fn session_v2(
     c: &Connection,
     id: &str,
@@ -134,6 +142,25 @@ fn a_database_without_the_v2_tables_still_reads_v1() {
     let db = dir.join("opencode.db");
     let writer = populate(&db);
     assert_eq!(opencode::find_session(&db, Path::new("/work/app")).expect("v1").schema, Schema::V1);
+    drop(writer);
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+#[test]
+fn current_schema_keeps_exact_ids_on_the_session_message_compatibility_path() {
+    let dir = temp_dir("current");
+    let db = dir.join("opencode.db");
+    let writer = populate(&db);
+    writer.execute_batch(CURRENT_SESSION_MESSAGE).expect("current session_message table");
+    writer
+        .execute(
+            "INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES ('current-only', 'ses_main', 'assistant', 1, 60, 60, '{\"content\":[{\"type\":\"text\",\"text\":\"duplicate current row\"}]}')",
+            [],
+        )
+        .expect("current row");
+    assert_eq!(opencode::schema_of(&db, "ses_main").expect("schema"), Schema::V1);
+    let messages = opencode::messages_for_session(&db, "ses_main", Schema::V1, 1).expect("messages");
+    assert_eq!(messages[0].text, "newest reply");
     drop(writer);
     std::fs::remove_dir_all(&dir).expect("cleanup");
 }

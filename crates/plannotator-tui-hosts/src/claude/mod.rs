@@ -12,6 +12,30 @@ use crate::SessionMeta;
 pub use ladder::find_transcript;
 pub use messages::{parse_messages, parse_messages_file_order};
 
+/// Find `<projects>/*/<id>.jsonl`, preferring the current cwd's project bucket.
+pub fn find_transcript_by_id(
+    projects_dir: &Path,
+    cwd: &Path,
+    session_id: &str,
+) -> Result<Option<PathBuf>, crate::HostError> {
+    let id = crate::validate_session_id(session_id)?;
+    let preferred = ladder::project_dir(projects_dir, cwd);
+    if let Some(path) = preferred.as_ref().map(|dir| dir.join(format!("{id}.jsonl")))
+        && path.is_file()
+    {
+        return Ok(Some(path));
+    }
+    let mut project_dirs: Vec<PathBuf> = std::fs::read_dir(projects_dir)
+        .map(|entries| entries.flatten().map(|entry| entry.path()).filter(|path| path.is_dir()).collect())
+        .unwrap_or_default();
+    project_dirs.sort();
+    Ok(project_dirs
+        .into_iter()
+        .filter(|dir| preferred.as_ref() != Some(dir))
+        .map(|dir| dir.join(format!("{id}.jsonl")))
+        .find(|path| path.is_file()))
+}
+
 /// Parse one `sessions/<pid>.json`. Fields beyond the four we use are ignored.
 pub fn parse_session_meta(json: &str) -> Option<SessionMeta> {
     let value: serde_json::Value = serde_json::from_str(json).ok()?;

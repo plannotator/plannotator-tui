@@ -76,7 +76,7 @@ fn transcript_for_session(
 }
 
 /// The project dir for `cwd`, exact name first, then case-insensitively (Windows lowercases).
-fn project_dir(projects_dir: &Path, cwd: &Path) -> Option<PathBuf> {
+pub(super) fn project_dir(projects_dir: &Path, cwd: &Path) -> Option<PathBuf> {
     let slug = project_slug(cwd);
     let exact = projects_dir.join(&slug);
     if exact.is_dir() {

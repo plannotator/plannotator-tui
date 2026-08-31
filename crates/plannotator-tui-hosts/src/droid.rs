@@ -13,6 +13,31 @@ use std::time::SystemTime;
 use crate::Message;
 use crate::claude::{parse_messages_file_order, project_slug};
 
+/// Find `$FACTORY_CONFIG_DIR/sessions/*/<id>.jsonl`, preferring the current cwd's slug.
+pub fn find_transcript_by_id(
+    factory_dir: &Path,
+    cwd: &Path,
+    session_id: &str,
+) -> Result<Option<PathBuf>, crate::HostError> {
+    let id = crate::validate_session_id(session_id)?;
+    let sessions_dir = factory_dir.join("sessions");
+    let preferred = slug_dir(&sessions_dir, cwd);
+    if let Some(path) = preferred.as_ref().map(|dir| dir.join(format!("{id}.jsonl")))
+        && path.is_file()
+    {
+        return Ok(Some(path));
+    }
+    let mut slug_dirs: Vec<PathBuf> = std::fs::read_dir(&sessions_dir)
+        .map(|entries| entries.flatten().map(|entry| entry.path()).filter(|path| path.is_dir()).collect())
+        .unwrap_or_default();
+    slug_dirs.sort();
+    Ok(slug_dirs
+        .into_iter()
+        .filter(|dir| preferred.as_ref() != Some(dir))
+        .map(|dir| dir.join(format!("{id}.jsonl")))
+        .find(|path| path.is_file()))
+}
+
 /// The current session log for `cwd`, per the rule above. `None` when no slug directory
 /// on the way up holds a transcript.
 pub fn find_transcript(factory_dir: &Path, cwd: &Path) -> Option<PathBuf> {

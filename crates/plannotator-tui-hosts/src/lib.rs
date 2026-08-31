@@ -124,17 +124,29 @@ pub enum HostError {
     NoMessages(String),
     /// A host was recognised from the environment but is not supported yet.
     Unsupported(String),
+    /// An exact session id is not one safe path component.
+    InvalidSessionId(String),
     Io(std::io::Error),
 }
 
 impl std::fmt::Display for HostError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NoTranscript(msg) | Self::NoMessages(msg) => f.write_str(msg),
+            Self::NoTranscript(msg) | Self::NoMessages(msg) | Self::InvalidSessionId(msg) => f.write_str(msg),
             Self::Unsupported(host) => write!(f, "{host} is not supported yet"),
             Self::Io(err) => write!(f, "{err}"),
         }
     }
+}
+
+/// Reject an exact session id before a resolver touches the filesystem or a database.
+pub fn validate_session_id(id: &str) -> Result<&str, HostError> {
+    if id.trim().is_empty() || id.contains(['/', '\\', '\0']) || id.contains("..") {
+        return Err(HostError::InvalidSessionId(format!(
+            "invalid session id {id:?}: expected one non-empty path component"
+        )));
+    }
+    Ok(id)
 }
 
 impl std::error::Error for HostError {}

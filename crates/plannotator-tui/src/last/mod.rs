@@ -1,11 +1,15 @@
 //! `plannotator-tui last`: annotate an agent's most recent message (docs/spec-last-message.md).
 //!
-//! `locate` is the one impure step (home directory, process table, transcript files); the
-//! rest is the ordinary app over a transient document that is never written to disk.
+//! The modules here isolate home-directory, process-table, and transcript access from the
+//! ordinary app over a transient document that is never written to disk.
 
 #![allow(clippy::print_stdout, clippy::print_stderr, reason = "`--print` is a stdout contract")]
 
+mod exact;
+mod fallback;
 mod locate;
+mod readers;
+mod roots;
 
 use std::io::Read as _;
 use std::path::PathBuf;
@@ -26,7 +30,7 @@ pub(crate) struct LastOptions {
     pub(crate) pid: Option<u32>,
     /// An explicit transcript; skips detection. Its format is sniffed when no host is named.
     pub(crate) session: Option<PathBuf>,
-    /// A session id for hosts that keep conversations in a store rather than files (Hermes).
+    /// An exact host-specific session id; takes precedence over pid and cwd discovery.
     pub(crate) session_id: Option<String>,
     /// Read the document from stdin instead of a transcript.
     pub(crate) stdin: bool,

@@ -15,6 +15,16 @@ use crate::{Message, Role};
 
 const MAX_ANCESTOR_HOPS: usize = 8;
 
+/// Find `$COPILOT_HOME/session-state/<id>` when it contains an events transcript.
+pub fn find_session_by_id(
+    copilot_home: &Path,
+    session_id: &str,
+) -> Result<Option<PathBuf>, crate::HostError> {
+    let id = crate::validate_session_id(session_id)?;
+    let dir = copilot_home.join("session-state").join(id);
+    Ok(dir.join("events.jsonl").is_file().then_some(dir))
+}
+
 /// The session directory for the Copilot process we were launched from.
 ///
 /// 1. Walk `start_pid` and up to eight ancestors; the first pid that owns an

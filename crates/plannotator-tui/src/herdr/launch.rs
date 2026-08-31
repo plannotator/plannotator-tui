@@ -35,10 +35,16 @@ pub(crate) struct Launch {
     pub(crate) deliver: Option<Target>,
     /// The plugin id to open under: whatever plugin ships this binary.
     pub(crate) plugin: String,
-    /// Open an agent's last message instead of `file`: (pid, host label).
-    pub(crate) message: Option<(u32, String)>,
+    /// Open an agent's last message instead of `file`.
+    pub(crate) message: Option<AgentMessage>,
     /// The agent's session as Herdr reports it: a transcript path or a host-specific id.
     pub(crate) session: Option<AgentSession>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AgentMessage {
+    pub(crate) host: String,
+    pub(crate) pid: Option<u32>,
 }
 
 /// `agent_session` from `herdr agent get`: the exact transcript when Herdr knows it.
@@ -52,10 +58,13 @@ pub(crate) enum AgentSession {
 pub(crate) fn agent_session(agent_get_json: &str) -> Option<AgentSession> {
     let json: serde_json::Value = serde_json::from_str(agent_get_json).ok()?;
     let session = json.pointer("/result/agent/agent_session")?;
-    let value = session.get("value")?.as_str()?.to_owned();
+    let value = session.get("value")?.as_str()?;
+    if value.trim().is_empty() {
+        return None;
+    }
     match session.get("kind")?.as_str()? {
-        "path" => Some(AgentSession::Path(value)),
-        "id" => Some(AgentSession::Id(value)),
+        "path" => Some(AgentSession::Path(value.to_owned())),
+        "id" => Some(AgentSession::Id(value.to_owned())),
         _ => None,
     }
 }
@@ -65,6 +74,11 @@ fn agent_host(agent_get_json: &str) -> Option<&'static str> {
     let json: serde_json::Value = serde_json::from_str(agent_get_json).ok()?;
     let label = json.pointer("/result/agent/agent")?.as_str()?;
     Host::ALL.into_iter().find(|host| host.label() == label).map(Host::label)
+}
+
+/// A supported host plus the exact session reference Herdr reported.
+pub(crate) fn agent_identity(agent_get_json: &str) -> Option<(String, AgentSession)> {
+    Some((agent_host(agent_get_json)?.to_owned(), agent_session(agent_get_json)?))
 }
 
 /// The agent process behind a pane, from `herdr pane process-info --pane <id>` JSON: the
@@ -102,14 +116,14 @@ fn known_host(name: &str) -> Option<&'static str> {
     }
 }
 
-/// Resolve a `last` launch: the target pane as for `open`, the folder from the context, and
-/// the agent process from the pane's process info (fetched by the caller).
+/// Resolve a `last` launch. An exact Herdr session needs no process metadata; otherwise the
+/// caller supplies the pane's process info as the fallback.
 pub(crate) fn plan_last(
     env: &HerdrEnv,
     config: &Config,
     args: OpenArgs,
     cwd: &Path,
-    process_info_json: &str,
+    process_info_json: Option<&str>,
     agent_get_json: Option<&str>,
 ) -> Result<Launch> {
     let mut launch = plan(env, config, OpenArgs { path: None, ..args }, cwd)?;
@@ -117,13 +131,19 @@ pub(crate) fn plan_last(
     let Some(pane) = pane else {
         anyhow::bail!("no agent pane to read: not focused on one and no --deliver-to")
     };
-    let Some((pid, process_host)) = agent_pid(process_info_json) else {
+    launch.file.clone_from(&launch.cwd);
+    if let Some((host, session)) = agent_get_json.and_then(agent_identity) {
+        launch.message = Some(AgentMessage { host, pid: None });
+        launch.session = Some(session);
+        return Ok(launch);
+    }
+    let process_info = process_info_json
+        .with_context(|| format!("no exact agent session or process info for pane {pane}"))?;
+    let Some((pid, process_host)) = agent_pid(process_info) else {
         anyhow::bail!("no agent process found in pane {pane}");
     };
     let host = agent_get_json.and_then(agent_host).unwrap_or(&process_host).to_owned();
-    launch.file.clone_from(&launch.cwd);
-    launch.message = Some((pid, host));
-    launch.session = agent_get_json.and_then(agent_session);
+    launch.message = Some(AgentMessage { host, pid: Some(pid) });
     Ok(launch)
 }
 
@@ -241,9 +261,11 @@ pub(crate) fn argv(launch: &Launch) -> Vec<String> {
     out.push("--focus".to_owned());
     out.extend(["--cwd".to_owned(), launch.cwd.display().to_string()]);
     match &launch.message {
-        Some((pid, host)) => {
-            out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_MESSAGE_PID={pid}")]);
-            out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_HOST={host}")]);
+        Some(message) => {
+            if let Some(pid) = message.pid {
+                out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_MESSAGE_PID={pid}")]);
+            }
+            out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_HOST={}", message.host)]);
             out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_CWD={}", launch.cwd.display())]);
             match &launch.session {
                 Some(AgentSession::Path(p)) => {
