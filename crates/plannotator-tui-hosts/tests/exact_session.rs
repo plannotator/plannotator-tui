@@ -22,6 +22,13 @@ fn touch(path: &Path) {
     std::fs::write(path, "{}\n").expect("file");
 }
 
+fn assert_same_file(actual: Option<PathBuf>, expected: &Path) {
+    assert_eq!(
+        actual.expect("exact file").canonicalize().expect("actual canonical path"),
+        expected.canonicalize().expect("expected canonical path")
+    );
+}
+
 #[cfg(windows)]
 fn lookup_spelling(path: &Path) -> PathBuf {
     let mut text = path.to_string_lossy().replace('/', "\\");
@@ -51,9 +58,9 @@ fn exact_file_host_ids_prefer_the_current_windows_path_bucket() {
     touch(&claude_current);
     touch(&claude_other);
     touch(&claude_projects.join("newest-unrelated").join(format!("{OTHER_ID}.jsonl")));
-    assert_eq!(
+    assert_same_file(
         claude::find_transcript_by_id(&claude_projects, &lookup_cwd, ID).expect("claude"),
-        Some(claude_current)
+        &claude_current,
     );
     assert_eq!(claude::find_transcript_by_id(&claude_projects, &lookup_cwd, "missing").expect("miss"), None);
 
@@ -80,7 +87,7 @@ fn exact_file_host_ids_prefer_the_current_windows_path_bucket() {
     touch(&droid_current);
     touch(&droid_other);
     touch(&factory.join("sessions/newest-unrelated").join(format!("{OTHER_ID}.jsonl")));
-    assert_eq!(droid::find_transcript_by_id(&factory, &lookup_cwd, ID).expect("droid"), Some(droid_current));
+    assert_same_file(droid::find_transcript_by_id(&factory, &lookup_cwd, ID).expect("droid"), &droid_current);
     assert_eq!(droid::find_transcript_by_id(&factory, &lookup_cwd, "missing").expect("miss"), None);
 
     let pi_sessions = root.join("pi sessions");
@@ -90,7 +97,7 @@ fn exact_file_host_ids_prefer_the_current_windows_path_bucket() {
     touch(&pi_current);
     touch(&pi_other);
     touch(&pi_sessions.join("--newest--").join(format!("2026-09-01T10-00-00-000Z_{OTHER_ID}.jsonl")));
-    assert_eq!(pi::find_transcript_by_id(&pi_sessions, &lookup_cwd, ID).expect("pi"), Some(pi_current));
+    assert_same_file(pi::find_transcript_by_id(&pi_sessions, &lookup_cwd, ID).expect("pi"), &pi_current);
     assert_eq!(pi::find_transcript_by_id(&pi_sessions, &lookup_cwd, "missing").expect("miss"), None);
 
     let omp_sessions = root.join("omp sessions");
@@ -99,7 +106,7 @@ fn exact_file_host_ids_prefer_the_current_windows_path_bucket() {
     touch(&omp_current);
     touch(&omp_other);
     touch(&omp_sessions.join("--newest--").join(format!("2026-09-01T10-00-00-000Z_{OTHER_ID}.jsonl")));
-    assert_eq!(
+    assert_same_file(
         omp::find_transcript_by_id(
             &omp_sessions,
             &lookup_cwd,
@@ -108,7 +115,7 @@ fn exact_file_host_ids_prefer_the_current_windows_path_bucket() {
             ID,
         )
         .expect("omp"),
-        Some(omp_current)
+        &omp_current,
     );
     assert_eq!(
         omp::find_transcript_by_id(
