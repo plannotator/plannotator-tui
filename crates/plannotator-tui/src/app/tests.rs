@@ -138,6 +138,34 @@ fn escaping_the_picker_keeps_the_newest_message() {
     assert_eq!(app.mode, Mode::Pick, "p reopens the picker");
 }
 
+#[test]
+fn moving_the_picker_cursor_previews_that_message() {
+    let mut app = App::open_message("claude", "/tmp/transcript.jsonl", candidates(), 60, Box::new(Discard))
+        .expect("opens");
+    assert_eq!(app.open.doc.source, "# Third\n\nnewest message\n", "the newest opens behind the picker");
+
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('j')))).expect("j");
+
+    assert_eq!(app.mode, Mode::Pick, "previewing does not leave the picker");
+    assert_eq!(app.open.doc.source, "# Second\n\nmiddle message\n", "the document follows the cursor");
+}
+
+#[test]
+fn previewing_away_and_back_keeps_annotations() {
+    let mut app = App::open_message("claude", "/tmp/transcript.jsonl", candidates(), 60, Box::new(Discard))
+        .expect("opens");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Esc))).expect("esc");
+    app.add_block_annotation(0, Kind::Comment, "keep me".to_owned()).expect("annotate");
+    assert_eq!(app.open.store.placed().len(), 1);
+
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('p')))).expect("p");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('j')))).expect("j");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('k')))).expect("k");
+
+    assert_eq!(app.open.doc.source, "# Third\n\nnewest message\n", "back where we started");
+    assert_eq!(app.open.store.placed().len(), 1, "a reply review only holds annotations in memory");
+}
+
 /// A folder of `count` Markdown files named `f00.md`, `f01.md`, … in a fresh temp dir.
 fn folder(count: usize) -> PathBuf {
     let root = std::env::temp_dir().join(format!("plannotator-tui-folder-{}", std::process::id()));

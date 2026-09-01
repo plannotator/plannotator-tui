@@ -12,6 +12,7 @@ mod send;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -139,6 +140,13 @@ pub(crate) struct App {
     /// Minutes east of UTC used to draw message times. Pinned in tests so the picker
     /// renders the same on any machine.
     clock_offset: i32,
+    /// The candidate currently on screen, and the one Esc goes back to.
+    pick_open: usize,
+    pick_return: usize,
+    /// Documents already built for candidates. Previewing swaps `open`, and a reply
+    /// review's annotations live only in memory, so the one being left is kept here
+    /// rather than dropped.
+    pick_cache: HashMap<usize, Open>,
     message_host: String,
     message_transcript: String,
     compose: Compose,
@@ -195,6 +203,9 @@ impl App {
             candidates: Vec::new(),
             pick_cursor: 0,
             clock_offset: pick::local_offset_minutes(),
+            pick_open: 0,
+            pick_return: 0,
+            pick_cache: HashMap::new(),
             message_host: String::new(),
             message_transcript: String::new(),
             compose: Compose::default(),
