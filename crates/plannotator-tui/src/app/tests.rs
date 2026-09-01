@@ -109,6 +109,7 @@ fn candidates() -> Vec<plannotator_tui_hosts::Message> {
 fn the_picker_lists_newest_first_and_opens_the_chosen_message() {
     let mut app = App::open_message("claude", "/tmp/transcript.jsonl", candidates(), 60, Box::new(Discard))
         .expect("opens");
+    app.clock_offset = 0;
     assert_eq!(app.mode, Mode::Pick, "more than one candidate asks which");
     let rows = draw(&mut app);
     let listed: Vec<&str> = rows.iter().map(String::as_str).filter(|r| r.contains("12:")).collect();
