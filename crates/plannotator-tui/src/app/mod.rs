@@ -136,6 +136,9 @@ pub(crate) struct App {
     /// `last`: the agent's recent messages, newest first, and the picker's cursor.
     candidates: Vec<plannotator_tui_hosts::Message>,
     pick_cursor: usize,
+    /// Minutes east of UTC used to draw message times. Pinned in tests so the picker
+    /// renders the same on any machine.
+    clock_offset: i32,
     message_host: String,
     message_transcript: String,
     compose: Compose,
@@ -191,6 +194,7 @@ impl App {
             mode: Mode::Browse,
             candidates: Vec::new(),
             pick_cursor: 0,
+            clock_offset: pick::local_offset_minutes(),
             message_host: String::new(),
             message_transcript: String::new(),
             compose: Compose::default(),

@@ -1,6 +1,9 @@
 //! The message picker: which of the agent's recent messages to review. Newest first, the
 //! newest already open behind it.
 
+use std::process::Command;
+use std::sync::OnceLock;
+
 use anyhow::Result;
 use plannotator_tui_hosts::Message;
 use ratatui::Frame;
@@ -110,7 +113,8 @@ impl App {
             .map(|(index, message)| {
                 let row = Rect { x: inner.x, y: inner.y + index as u16, width: inner.width, height: 1 };
                 pick_rows.push((row, index));
-                let text = fit(&pick_label(message), usize::from(inner.width).saturating_sub(1));
+                let text =
+                    fit(&pick_label(message, self.clock_offset), usize::from(inner.width).saturating_sub(1));
                 let style = if index == self.pick_cursor { Style::new().reversed() } else { Style::new() };
                 Line::from(Span::styled(format!(" {text}"), style))
             })
@@ -120,17 +124,58 @@ impl App {
     }
 }
 
-/// `HH:MM  first line of the message`.
-fn pick_label(message: &Message) -> String {
-    let time = message.at.as_deref().and_then(clock).unwrap_or_else(|| "     ".to_owned());
+/// `HH:MM  first line of the message`, the clock in the viewer's timezone.
+fn pick_label(message: &Message, offset_minutes: i32) -> String {
+    let time =
+        message.at.as_deref().and_then(|at| clock(at, offset_minutes)).unwrap_or_else(|| "     ".to_owned());
     let first = message.text.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
     format!("{time}  {first}")
 }
 
-/// `HH:MM` out of an RFC 3339 timestamp; anything else is left blank.
-fn clock(at: &str) -> Option<String> {
+/// `HH:MM` out of an RFC 3339 timestamp, moved to `offset_minutes` east of UTC.
+///
+/// Only a `Z` stamp is moved. One that already carries an offset is local to whoever
+/// wrote it and is shown as written. No date arithmetic is needed: crossing midnight
+/// changes the date, not the clock face.
+fn clock(at: &str, offset_minutes: i32) -> Option<String> {
     let time = at.get(11..16)?;
-    (time.len() == 5 && time.as_bytes().get(2) == Some(&b':')).then(|| time.to_owned())
+    let (hours, minutes) = time.split_once(':')?;
+    let hours: i32 = hours.parse().ok()?;
+    let minutes: i32 = minutes.parse().ok()?;
+    if !at.ends_with(['Z', 'z']) {
+        return Some(time.to_owned());
+    }
+    let total = (hours * 60 + minutes + offset_minutes).rem_euclid(24 * 60);
+    Some(format!("{:02}:{:02}", total / 60, total % 60))
+}
+
+/// Minutes east of UTC for this machine, resolved once.
+///
+/// `std` has no local-time API and this crate carries no date dependency, so the offset
+/// comes from `date +%z` - the same shell-out `last::locate` already uses. Anything
+/// unexpected leaves the clock in UTC, which is what it showed before.
+pub(super) fn local_offset_minutes() -> i32 {
+    static OFFSET: OnceLock<i32> = OnceLock::new();
+    *OFFSET.get_or_init(|| {
+        if !cfg!(unix) {
+            return 0;
+        }
+        let Ok(output) = Command::new("date").arg("+%z").output() else { return 0 };
+        let Ok(text) = String::from_utf8(output.stdout) else { return 0 };
+        parse_utc_offset(text.trim()).unwrap_or(0)
+    })
+}
+
+/// `+0530` or `-0800` as minutes east of UTC.
+fn parse_utc_offset(zone: &str) -> Option<i32> {
+    let sign = match zone.as_bytes().first()? {
+        b'+' => 1,
+        b'-' => -1,
+        _ => return None,
+    };
+    let hours: i32 = zone.get(1..3)?.parse().ok()?;
+    let minutes: i32 = zone.get(3..5)?.parse().ok()?;
+    Some(sign * (hours * 60 + minutes))
 }
 
 fn fit(text: &str, width: usize) -> String {
@@ -146,4 +191,29 @@ fn fit(text: &str, width: usize) -> String {
     }
     out.push('…');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{clock, parse_utc_offset};
+
+    #[test]
+    fn a_utc_stamp_is_shown_on_the_local_clock() {
+        assert_eq!(clock("2026-08-31T19:53:52.563Z", 330).as_deref(), Some("01:23"));
+        assert_eq!(clock("2026-08-31T19:53:52.563Z", 0).as_deref(), Some("19:53"));
+        assert_eq!(clock("2026-08-31T02:10:00.000Z", -480).as_deref(), Some("18:10"));
+    }
+
+    #[test]
+    fn a_stamp_that_already_carries_an_offset_is_shown_as_written() {
+        assert_eq!(clock("2026-08-31T19:53:52+05:30", 330).as_deref(), Some("19:53"));
+    }
+
+    #[test]
+    fn a_zone_string_reads_as_minutes_east_of_utc() {
+        assert_eq!(parse_utc_offset("+0530"), Some(330));
+        assert_eq!(parse_utc_offset("-0800"), Some(-480));
+        assert_eq!(parse_utc_offset("+0000"), Some(0));
+        assert_eq!(parse_utc_offset("nonsense"), None);
+    }
 }
