@@ -1,6 +1,7 @@
 //! plannotator-tui: annotate Markdown in the terminal.
 
 mod app;
+mod archive;
 mod base64;
 mod cli;
 mod config;

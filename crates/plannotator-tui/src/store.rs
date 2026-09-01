@@ -331,7 +331,7 @@ fn timestamp() -> String {
 }
 
 /// Howard Hinnant's days-to-civil, for a dependency-free UTC date.
-fn civil_from_days(days: u64) -> (u64, u64, u64) {
+pub(crate) fn civil_from_days(days: u64) -> (u64, u64, u64) {
     let z = days + 719_468;
     let era = z / 146_097;
     let doe = z - era * 146_097;
