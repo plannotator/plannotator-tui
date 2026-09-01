@@ -4,6 +4,8 @@ use anyhow::Result;
 
 use super::{App, Mode};
 use crate::delivery::{Clipboard, Delivery as _, DeliveryError};
+use crate::store::Store;
+use plannotator_tui_schema::{Kind, Provenance};
 
 /// What the Send button says. Re-derived from the store on load and file switch.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +27,7 @@ impl App {
         match self.delivery.deliver(&text) {
             Ok(()) => {
                 self.record_delivery(&target)?;
+                self.archive_submission(&text);
                 self.send_state = SendState::Sent;
                 self.status = Some(format!("sent {count} annotation(s) → {target}"));
             }
@@ -49,6 +52,72 @@ impl App {
         if self.clipboard {
             let _ = Clipboard.deliver(text);
         }
+    }
+
+    /// Record the submission in the shared feedback archive (contract: Plannotator's
+    /// `feedback-archive.ts` v1). Never fails the send; the annotation store is the
+    /// recovery copy when archiving cannot write.
+    fn archive_submission(&self, feedback: &str) {
+        use crate::archive::{self, Submission, Target};
+        if !archive::enabled(|key| std::env::var(key).ok(), &self.data_dir) {
+            return;
+        }
+        let (surface, target, annotations) = if let Some(tree) = &self.tree {
+            // A folder session submits one body of feedback for the whole session;
+            // the per-document records are not part of it (contract semantics).
+            ("annotate-folder", Target::file(tree.root()), Vec::new())
+        } else {
+            let annotations = Self::annotation_records(&self.open.store);
+            match &self.open.source.provenance {
+                Provenance::File { path } => ("annotate", Target::file(path), annotations),
+                Provenance::AgentMessage { host, session, .. } => (
+                    "annotate-last",
+                    Target::agent(
+                        archive::origin_label(host),
+                        session.clone(),
+                        (!self.message_transcript.is_empty()).then(|| self.message_transcript.clone()),
+                    ),
+                    annotations,
+                ),
+                _ => ("annotate", Target::default(), annotations),
+            }
+        };
+        let origin = self.delivery.agent_host().map(|host| archive::origin_label(host).to_owned());
+        archive::append(&Submission {
+            data_dir: &self.data_dir,
+            project: &self.project,
+            surface,
+            origin,
+            target,
+            feedback,
+            annotations,
+            count: self.send_count(),
+            now_ms: None,
+        });
+    }
+
+    fn annotation_records(store: &Store) -> Vec<crate::archive::AnnotationRecord> {
+        store
+            .placed()
+            .iter()
+            .map(|placed| {
+                let a = placed.annotation;
+                crate::archive::AnnotationRecord {
+                    id: Some(a.id.clone()),
+                    kind: Some(
+                        match a.anchor.kind() {
+                            Kind::Comment => "comment",
+                            Kind::LooksGood => "looks-good",
+                            Kind::Delete => "delete",
+                        }
+                        .to_owned(),
+                    ),
+                    text: (!a.body.is_empty()).then(|| a.body.clone()),
+                    original_text: (!a.anchor.original_text.is_empty())
+                        .then(|| a.anchor.original_text.clone()),
+                }
+            })
+            .collect()
     }
 
     /// Annotations the next send covers: the whole folder's, or the open file's.

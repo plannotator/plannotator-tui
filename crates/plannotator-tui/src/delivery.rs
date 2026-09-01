@@ -42,6 +42,10 @@ pub(crate) trait Delivery {
     fn is_agent(&self) -> bool {
         false
     }
+    /// The receiving agent's host label (`claude`, `codex`, ...), when the target is one.
+    fn agent_host(&self) -> Option<&str> {
+        None
+    }
     fn deliver(&self, feedback: &str) -> Result<(), DeliveryError>;
 }
 
@@ -92,6 +96,10 @@ impl HerdrAgent {
 }
 
 impl Delivery for HerdrAgent {
+    fn agent_host(&self) -> Option<&str> {
+        self.agent.as_deref()
+    }
+
     fn describe(&self) -> String {
         match &self.agent {
             Some(agent) => format!("{agent} in {}", self.pane),
