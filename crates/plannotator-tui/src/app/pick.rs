@@ -40,17 +40,40 @@ impl App {
         Ok(app)
     }
 
-    /// Swap the open document for candidate `index`.
-    fn open_candidate(&mut self, index: usize) -> Result<()> {
-        let Some(message) = self.candidates.get(index) else { return Ok(()) };
-        let source = message_source(&self.message_host, &self.message_transcript, message);
-        self.open = Open::new(source, self.open.layout.width, &self.data_dir, &self.project)?;
+    /// Show candidate `index` behind the picker, staying in the picker.
+    ///
+    /// The document being left is kept rather than dropped. A reply review's
+    /// annotations live only in memory, so moving away from one and back again must
+    /// not lose them.
+    fn show_candidate(&mut self, index: usize) -> Result<()> {
+        if index == self.pick_open {
+            return Ok(());
+        }
+        let next = if let Some(open) = self.pick_cache.remove(&index) {
+            open
+        } else {
+            let Some(message) = self.candidates.get(index) else { return Ok(()) };
+            let source = message_source(&self.message_host, &self.message_transcript, message);
+            Open::new(source, self.open.layout.width, &self.data_dir, &self.project)?
+        };
+        let leaving = std::mem::replace(&mut self.open, next);
+        self.pick_cache.insert(self.pick_open, leaving);
+        self.pick_open = index;
         self.scroll = 0;
         self.selected = 0;
         self.cursor = (0, 0);
         self.rail_cursor = 0;
         self.clear_selection();
         self.derive_send_state();
+        Ok(())
+    }
+
+    /// Swap the open document for candidate `index` and leave the picker.
+    fn open_candidate(&mut self, index: usize) -> Result<()> {
+        if self.candidates.get(index).is_none() {
+            return Ok(());
+        }
+        self.show_candidate(index)?;
         self.mode = Mode::Browse;
         self.status = Some(format!("message {} of {}", index + 1, self.candidates.len()));
         Ok(())
@@ -58,6 +81,8 @@ impl App {
 
     pub(super) fn reopen_picker(&mut self) {
         if self.candidates.len() > 1 {
+            self.pick_return = self.pick_open;
+            self.pick_cursor = self.pick_open;
             self.mode = Mode::Pick;
         }
     }
@@ -65,10 +90,20 @@ impl App {
     pub(super) fn pick_key(&mut self, key: KeyEvent) -> Result<()> {
         let last = self.candidates.len().saturating_sub(1);
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down => self.pick_cursor = (self.pick_cursor + 1).min(last),
-            KeyCode::Char('k') | KeyCode::Up => self.pick_cursor = self.pick_cursor.saturating_sub(1),
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.pick_cursor = (self.pick_cursor + 1).min(last);
+                return self.show_candidate(self.pick_cursor);
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.pick_cursor = self.pick_cursor.saturating_sub(1);
+                return self.show_candidate(self.pick_cursor);
+            }
             KeyCode::Enter => return self.open_candidate(self.pick_cursor),
-            KeyCode::Esc => self.mode = Mode::Browse,
+            KeyCode::Esc => {
+                self.show_candidate(self.pick_return)?;
+                self.pick_cursor = self.pick_return;
+                self.mode = Mode::Browse;
+            }
             KeyCode::Char('q') => self.quit = true,
             _ => {}
         }
@@ -101,7 +136,10 @@ impl App {
             .border_type(BorderType::Rounded)
             .border_style(Style::new().fg(Color::Cyan))
             .title(Span::styled(" which message? ", Style::new().dim()))
-            .title_bottom(Span::styled(" ↑↓ choose · enter open · esc newest · q quit ", Style::new().dim()));
+            .title_bottom(Span::styled(
+                " ↑↓ preview · enter open · esc cancel · q quit ",
+                Style::new().dim(),
+            ));
         let inner = boxed.inner(rect);
         frame.render_widget(boxed, rect);
         let mut pick_rows = Vec::new();
