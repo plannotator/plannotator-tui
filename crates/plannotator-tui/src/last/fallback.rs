@@ -28,6 +28,11 @@ pub(super) fn read(
             Ok((path, messages))
         }
         Host::Codex => {
+            #[cfg(target_os = "linux")]
+            if let Some(pid) = options.pid {
+                let path = find_codex_transcript(pid)?;
+                return readers::explicit(host, &path, None, pick);
+            }
             let thread = std::env::var("CODEX_THREAD_ID").ok().filter(|thread| !thread.is_empty());
             readers::codex_thread(&roots.codex_home, thread.as_deref(), pick)
         }
@@ -52,6 +57,37 @@ pub(super) fn read(
         Host::Hermes => bail!("hermes needs a session id (Herdr provides it; or pass --session-id)"),
         Host::OpenCode => opencode_for_cwd(cwd, roots, pick),
     }
+}
+
+/// A selected Linux process is a stronger hint than an inherited thread id or the newest
+/// rollout. Missing or ambiguous descriptors must not silently select another session.
+#[cfg(target_os = "linux")]
+fn find_codex_transcript(pid: u32) -> Result<PathBuf> {
+    let directory = PathBuf::from(format!("/proc/{pid}/fd"));
+    let entries = std::fs::read_dir(&directory)
+        .with_context(|| format!("reading Codex process {pid} descriptors in {}", directory.display()))?;
+    let mut transcripts = std::collections::BTreeSet::new();
+    for entry in entries {
+        let entry = entry.with_context(|| format!("reading {}", directory.display()))?;
+        // Descriptors can close between readdir and readlink.
+        let Ok(path) = std::fs::read_link(entry.path()) else { continue };
+        if path.extension().is_some_and(|extension| extension == "jsonl")
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("rollout-"))
+            && path.is_file()
+        {
+            transcripts.insert(path);
+        }
+    }
+    if transcripts.len() != 1 {
+        bail!(
+            "Codex process {pid} has {} open transcripts; pass --session or --session-id to select one",
+            transcripts.len()
+        );
+    }
+    transcripts.into_iter().next().with_context(|| format!("no transcript for Codex process {pid}"))
 }
 
 fn find_claude_transcript(pid: Option<u32>, cwd: &Path, roots: &Roots) -> Result<PathBuf> {

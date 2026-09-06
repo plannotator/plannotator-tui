@@ -87,6 +87,10 @@ reads a document;
 `--print` writes the newest reply to stdout and always exits 0 (for hooks and scripts).
 Reply reviews are never written to disk.
 
+On Linux, an explicit Codex `--pid` selects the rollout opened by that process. If it
+cannot be identified uniquely, `last` reports the failure instead of choosing an unrelated
+session. `--session` and `--session-id` keep precedence over PID discovery.
+
 ## Where annotations live
 
 ```
