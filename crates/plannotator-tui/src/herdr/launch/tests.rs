@@ -78,6 +78,40 @@ fn agent_skill_delivers_to_and_splits_beside_the_calling_pane() {
 }
 
 #[test]
+fn mirror_defaults_to_a_split_next_to_the_remote_invoking_pane() {
+    let context = HerdrContext {
+        focused_pane_id: Some("w2:p4".into()),
+        focused_pane_agent: Some("codex".into()),
+        invocation_source: Some("mirror".into()),
+        ..HerdrContext::default()
+    };
+    let env = env(None, Some(context));
+    let launch = plan(&env, &Config::default(), OpenArgs::default(), Path::new("/"))
+        .expect("plans a mirrored document");
+    assert_eq!(launch.placement, Placement::Split);
+    assert!(argv(&launch).windows(2).any(|pair| pair == ["--target-pane", "w2:p4"]));
+    let agent = r#"{"result":{"agent":{"agent":"codex","agent_session":{"kind":"path","value":"/sessions/exact.jsonl"}}}}"#;
+    let last = plan_last(&env, &Config::default(), OpenArgs::default(), Path::new("/"), None, Some(agent))
+        .expect("plans the same pane's reply");
+    assert_eq!(last.placement, Placement::Split);
+    assert_eq!(last.target_pane.as_deref(), Some("w2:p4"));
+    assert_eq!(last.session, Some(AgentSession::Path("/sessions/exact.jsonl".into())));
+}
+
+#[test]
+fn explicit_placement_still_wins_over_the_mirror_default() {
+    let mut env =
+        env(None, Some(HerdrContext { invocation_source: Some("mirror".into()), ..HerdrContext::default() }));
+    env.placement = Some("popup".into());
+    let launch =
+        plan(&env, &Config::default(), OpenArgs::default(), Path::new("/")).expect("environment placement");
+    assert_eq!(launch.placement, Placement::Popup);
+    let args = OpenArgs { placement: Some(Placement::Overlay), ..OpenArgs::default() };
+    let launch = plan(&env, &Config::default(), args, Path::new("/")).expect("explicit argument placement");
+    assert_eq!(launch.placement, Placement::Overlay);
+}
+
+#[test]
 fn ctrl_click_opens_the_linked_file() {
     let root = temp_folder("click");
     // `file:///abs/path` on Unix; `file:///C:/abs/path` on Windows.

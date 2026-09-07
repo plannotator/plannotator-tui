@@ -194,6 +194,15 @@ pub(crate) fn plan(env: &HerdrEnv, config: &Config, args: OpenArgs, cwd: &Path) 
     let placement = match (args.placement, env.placement.as_deref()) {
         (Some(p), _) => p,
         (None, Some(text)) => text.parse().context("PLANNOTATOR_TUI_PLACEMENT")?,
+        // Mirror imports ordinary panes, not the remote client's overlays. Herdr
+        // 0.8.2 also places overlays in its globally active tab, which may differ
+        // from the invoking mirror. A targeted split reaches the intended tab.
+        (None, None)
+            if config.herdr.placement == Placement::Overlay
+                && context.and_then(|c| c.invocation_source.as_deref()) == Some("mirror") =>
+        {
+            Placement::Split
+        }
         (None, None) => config.herdr.placement,
     };
 

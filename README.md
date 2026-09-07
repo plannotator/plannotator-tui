@@ -77,6 +77,11 @@ placement = "overlay"   # overlay (full tab, default) | split | popup
 `plannotator-tui config` prints the file's path and the values in effect. The `herdr/`
 directory in this repo is the development manifest; users should install Herdr Annotate.
 
+Actions forwarded by Herdr Mirror default to a split beside the invoking remote
+pane. Mirror does not preserve overlay presentation, and Herdr 0.8.2 opens an
+overlay in its server's active tab, which can differ from the tab you are viewing.
+An explicit `--placement` or `PLANNOTATOR_TUI_PLACEMENT` still takes precedence.
+
 ## Agent replies
 
 `plannotator-tui last` finds the transcript of the agent that launched your shell and shows a

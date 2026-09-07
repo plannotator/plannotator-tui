@@ -84,7 +84,7 @@ impl HerdrEnv {
     /// The focused pane from the context, only when Herdr saw an agent in it.
     pub(crate) fn focused_agent_pane(&self) -> Option<Target> {
         let context = self.context.as_ref()?;
-        let agent = context.focused_pane_agent.clone()?;
+        let agent = context.focused_pane_agent.clone().filter(|agent| !agent.trim().is_empty())?;
         Some(Target { pane: context.focused_pane_id.clone()?, agent: Some(agent) })
     }
 
@@ -171,6 +171,9 @@ mod tests {
         let shell =
             env(&[("HERDR_ENV", "1"), ("HERDR_PLUGIN_CONTEXT_JSON", r#"{"focused_pane_id":"w1:p2"}"#)]);
         assert_eq!(shell.delivery_target(), None);
+        let mirror_shell =
+            env(&[("HERDR_PLUGIN_CONTEXT_JSON", r#"{"focused_pane_id":"w1:p2","focused_pane_agent":""}"#)]);
+        assert_eq!(mirror_shell.delivery_target(), None);
     }
 
     #[test]
