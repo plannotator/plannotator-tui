@@ -91,6 +91,13 @@ On Linux, an explicit Codex `--pid` selects the rollout opened by that process. 
 cannot be identified uniquely, `last` reports the failure instead of choosing an unrelated
 session. `--session` and `--session-id` keep precedence over PID discovery.
 
+Inside Herdr, the exact-session path needs the session id Herdr reports for the pane. Herdr's
+Claude Code integration registers on `SessionStart`, so a session reports its id only when it
+started after `herdr integration install claude`; a session that was already running when the
+integration was installed reports none. Without an id, `last` shows the newest transcript for
+the folder, which is a guess when several sessions share one directory, and says so in the
+status line.
+
 ## Where annotations live
 
 ```

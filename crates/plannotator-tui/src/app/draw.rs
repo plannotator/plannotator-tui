@@ -379,7 +379,10 @@ impl App {
             return;
         }
         let orphans = self.open.store.orphans();
-        let mut parts = vec![
+        // The status leads: it is the transient half of the line, and the name and counters
+        // it pushes right are on screen for the whole session anyway.
+        let mut parts: Vec<String> = self.status.iter().cloned().collect();
+        parts.extend([
             self.open.source.name.clone(),
             format!(
                 "{} annotations{}",
@@ -393,10 +396,7 @@ impl App {
                 }
                 None => format!("block {}/{}", self.selected + 1, self.open.doc.blocks.len()),
             },
-        ];
-        if let Some(status) = &self.status {
-            parts.push(status.clone());
-        }
+        ]);
         if frame.area().width < RAIL_MIN_TOTAL_WIDTH {
             parts.push("rail hidden: widen to ≥80 cols".into());
         }

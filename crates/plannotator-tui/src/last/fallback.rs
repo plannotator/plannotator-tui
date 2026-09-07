@@ -14,42 +14,58 @@ use super::exact;
 use super::readers;
 use super::roots::Roots;
 
+/// How a transcript was chosen, so the UI can say when nothing identified it exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Discovery {
+    /// An explicit path, an exact session id, a thread id, or the file the agent process
+    /// itself has open: this transcript is the session, not a guess.
+    Exact,
+    /// The newest transcript filed under the agent's working directory. Sessions that share
+    /// one directory are indistinguishable here.
+    Folder,
+    /// The newest session the host recorded, not scoped to a directory.
+    Session,
+}
+
 pub(super) fn read(
     host: Host,
     options: &LastOptions,
     cwd: &Path,
     roots: &Roots,
     pick: usize,
-) -> Result<(PathBuf, Vec<Message>)> {
+) -> Result<(PathBuf, Vec<Message>, Discovery)> {
     match host {
         Host::ClaudeCode => {
             let path = find_claude_transcript(options.pid, cwd, roots)?;
             let messages = readers::claude_messages(&path, pick)?;
-            Ok((path, messages))
+            Ok((path, messages, Discovery::Folder))
         }
         Host::Codex => {
             #[cfg(target_os = "linux")]
             if let Some(pid) = options.pid {
                 let path = find_codex_transcript(pid)?;
-                return readers::explicit(host, &path, None, pick);
+                let (path, messages) = readers::explicit(host, &path, None, pick)?;
+                return Ok((path, messages, Discovery::Exact));
             }
             let thread = std::env::var("CODEX_THREAD_ID").ok().filter(|thread| !thread.is_empty());
-            readers::codex_thread(&roots.codex_home, thread.as_deref(), pick)
+            let discovery = if thread.is_some() { Discovery::Exact } else { Discovery::Session };
+            let (path, messages) = readers::codex_thread(&roots.codex_home, thread.as_deref(), pick)?;
+            Ok((path, messages, discovery))
         }
         Host::Copilot => {
             let path = find_copilot_session(options.pid, cwd, roots)?;
             let messages = readers::copilot_messages(&path, pick)?;
-            Ok((path, messages))
+            Ok((path, messages, Discovery::Folder))
         }
         Host::Droid => {
             let path = find_droid_transcript(cwd, roots)?;
             let messages = readers::droid_messages(&path, pick)?;
-            Ok((path, messages))
+            Ok((path, messages, Discovery::Folder))
         }
         Host::Pi => {
             let path = find_pi_transcript(cwd, roots, ".pi/agent", "pi")?;
             let messages = readers::pi_messages(&path, pick)?;
-            Ok((path, messages))
+            Ok((path, messages, Discovery::Folder))
         }
         Host::Omp => bail!(
             "OMP session discovery without an exact path or id is unsupported; pass --session or --session-id"
@@ -173,7 +189,7 @@ fn process_table() -> Vec<(u32, u32)> {
         .unwrap_or_default()
 }
 
-fn opencode_for_cwd(cwd: &Path, roots: &Roots, pick: usize) -> Result<(PathBuf, Vec<Message>)> {
+fn opencode_for_cwd(cwd: &Path, roots: &Roots, pick: usize) -> Result<(PathBuf, Vec<Message>, Discovery)> {
     let databases = roots.opencode_databases();
     let mut best: Option<(PathBuf, opencode::Found)> = None;
     for database in &databases {
@@ -187,5 +203,5 @@ fn opencode_for_cwd(cwd: &Path, roots: &Roots, pick: usize) -> Result<(PathBuf, 
         format!("no OpenCode session for {} in {}", cwd.display(), exact::describe(&databases))
     })?;
     let messages = opencode::messages_for_session(&database, &found.id, found.schema, pick)?;
-    Ok((database, messages))
+    Ok((database, messages, Discovery::Folder))
 }

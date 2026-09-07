@@ -18,6 +18,7 @@ use anyhow::{Context, Result};
 use plannotator_tui_hosts::Message;
 use plannotator_tui_schema::{DocumentSource, Provenance};
 
+use self::fallback::Discovery;
 use crate::app::App;
 use crate::cli;
 
@@ -80,7 +81,28 @@ pub(crate) fn run(options: &LastOptions) -> Result<()> {
     let label = located.host.label();
     let transcript = located.transcript.display().to_string();
     let messages = located.messages;
-    cli::run_ui(|width| App::open_message(label, &transcript, messages, width, cli::delivery(true)))
+    let note = discovery_note(located.discovery, crate::herdr::context::HerdrEnv::from_env().in_herdr);
+    cli::run_ui(|width| {
+        let mut app = App::open_message(label, &transcript, messages, width, cli::delivery(true))?;
+        if let Some(note) = note {
+            app.set_status(note);
+        }
+        Ok(app)
+    })
+}
+
+/// What to say about a transcript nobody identified exactly, and `None` when one did.
+///
+/// Inside Herdr the missing session id is the fact worth reporting: Herdr reports one only
+/// for sessions that started after its integration was installed, so a session older than
+/// the integration lands here even though the integration is present.
+fn discovery_note(discovery: Discovery, in_herdr: bool) -> Option<String> {
+    let shown = match discovery {
+        Discovery::Exact => return None,
+        Discovery::Folder => "showing the newest transcript for this folder",
+        Discovery::Session => "showing the newest session",
+    };
+    Some(if in_herdr { format!("no session id from Herdr, {shown}") } else { shown.to_owned() })
 }
 
 /// A message as a document: transient, provenance names the host, transcript and message.
@@ -95,4 +117,32 @@ pub(crate) fn message_source(host: &str, transcript: &str, message: &Message) ->
             message_id: Some(message.id.clone()),
         },
     )
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "tests assert by panicking")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_exactly_identified_transcript_is_never_annotated() {
+        assert_eq!(discovery_note(Discovery::Exact, true), None);
+        assert_eq!(discovery_note(Discovery::Exact, false), None);
+    }
+
+    #[test]
+    fn inside_herdr_a_guessed_transcript_names_the_missing_session_id() {
+        let note = discovery_note(Discovery::Folder, true).expect("a guess is reported");
+        assert_eq!(note, "no session id from Herdr, showing the newest transcript for this folder");
+        let note = discovery_note(Discovery::Session, true).expect("a guess is reported");
+        assert_eq!(note, "no session id from Herdr, showing the newest session");
+    }
+
+    #[test]
+    fn outside_herdr_a_guessed_transcript_says_what_was_shown_without_naming_herdr() {
+        let note = discovery_note(Discovery::Folder, false).expect("a guess is reported");
+        assert_eq!(note, "showing the newest transcript for this folder");
+        assert!(!note.contains("Herdr"));
+        assert_eq!(discovery_note(Discovery::Session, false).as_deref(), Some("showing the newest session"));
+    }
 }

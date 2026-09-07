@@ -127,6 +127,17 @@ fn the_picker_lists_newest_first_and_opens_the_chosen_message() {
 }
 
 #[test]
+fn a_status_leads_the_footer_so_a_narrow_pane_cannot_truncate_it_away() {
+    let mut app = App::open_message("claude", "/tmp/transcript.jsonl", candidates(), 60, Box::new(Discard))
+        .expect("opens");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Esc))).expect("esc");
+    app.set_status("no session id from Herdr, showing the newest transcript for this folder".to_owned());
+    let rows = draw(&mut app);
+    let footer = row(&rows, rows.len() - 1);
+    assert!(footer.trim_start().starts_with("no session id from Herdr"), "footer was {footer:?}");
+}
+
+#[test]
 fn escaping_the_picker_keeps_the_newest_message() {
     let mut app = App::open_message("claude", "/tmp/transcript.jsonl", candidates(), 60, Box::new(Discard))
         .expect("opens");

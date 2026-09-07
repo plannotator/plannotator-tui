@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail};
 use plannotator_tui_hosts::{Host, HostError, Message, Role, detect_host, sniff};
 use plannotator_tui_schema::{DocumentSource, Provenance};
 
+use super::fallback::Discovery;
 use super::roots::Roots;
 use super::{LastOptions, exact, fallback, readers};
 
@@ -16,6 +17,8 @@ pub(crate) struct Located {
     pub(crate) transcript: PathBuf,
     /// Assistant messages, newest first, at most `options.pick`.
     pub(crate) messages: Vec<Message>,
+    /// How the transcript was chosen; the UI says so when nothing identified it exactly.
+    pub(crate) discovery: Discovery,
 }
 
 pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
@@ -28,14 +31,16 @@ pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
     };
     let pick = options.pick.max(1);
     let roots = Roots::from_env();
-    let (transcript, messages) = if let Some(path) = session {
-        readers::explicit(host, &path, options.session_id.as_deref(), pick)?
+    let (transcript, messages, discovery) = if let Some(path) = session {
+        let (transcript, messages) = readers::explicit(host, &path, options.session_id.as_deref(), pick)?;
+        (transcript, messages, Discovery::Exact)
     } else if let Some(id) = options.session_id.as_deref() {
         // Validation precedes cwd lookup and every resolver filesystem access.
         let id = plannotator_tui_hosts::validate_session_id(id)?;
         let cwd = agent_cwd()?;
         let exact = exact::resolve(host, id, &cwd, &roots)?;
-        readers::exact(host, id, exact, pick)?
+        let (transcript, messages) = readers::exact(host, id, exact, pick)?;
+        (transcript, messages, Discovery::Exact)
     } else {
         let cwd = agent_cwd()?;
         fallback::read(host, options, &cwd, &roots, pick)?
@@ -45,7 +50,7 @@ pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
     if messages.is_empty() {
         bail!("transcript {} has no assistant messages yet", transcript.display());
     }
-    Ok(Located { host, transcript, messages })
+    Ok(Located { host, transcript, messages, discovery })
 }
 
 /// Was a host named explicitly, by flag or by the launcher?
@@ -119,4 +124,49 @@ pub(crate) fn screen_fallback(env: &crate::herdr::context::HerdrEnv) -> Option<D
         true,
         Provenance::AgentMessage { host, session: None, message_id: None },
     ))
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "tests assert by panicking")]
+mod tests {
+    use super::*;
+
+    /// One user turn and one assistant turn, the shape `claude::parse_messages` reads.
+    fn transcript(dir: &Path) -> PathBuf {
+        let path = dir.join("session.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                r#"{"parentUuid":null,"isSidechain":false,"type":"user","#,
+                r#""message":{"role":"user","content":"prompt"},"uuid":"u1","#,
+                r#""timestamp":"2026-08-28T10:00:00.000Z"}"#,
+                "\n",
+                r#"{"parentUuid":"u1","isSidechain":false,"type":"assistant","#,
+                r#""message":{"role":"assistant","content":[{"type":"text","text":"reply"}]},"#,
+                r#""uuid":"s1","timestamp":"2026-08-28T10:01:00.000Z"}"#,
+                "\n",
+            ),
+        )
+        .expect("transcript");
+        path
+    }
+
+    #[test]
+    fn a_transcript_named_on_the_command_line_is_never_reported_as_a_guess() {
+        let dir = std::env::temp_dir().join(format!("plannotator locate ü-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let options = LastOptions {
+            host: Some("claude".to_owned()),
+            session: Some(transcript(&dir)),
+            pick: 25,
+            ..LastOptions::default()
+        };
+
+        let located = locate(&options).expect("the named transcript is read");
+
+        assert_eq!(located.discovery, Discovery::Exact);
+        assert_eq!(located.messages.first().map(|m| m.text.as_str()), Some("reply"));
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
 }
