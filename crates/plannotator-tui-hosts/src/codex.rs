@@ -51,8 +51,10 @@ fn thread_of(path: &Path) -> Option<String> {
     (parts.len() == 6).then(|| parts.iter().take(5).rev().copied().collect::<Vec<_>>().join("-"))
 }
 
-/// Subagent rollouts (reviews, guardians) record `source.subagent` in their session meta.
-fn is_subagent(path: &Path) -> bool {
+/// Does `path` hold a subagent rollout? Subagent rollouts (reviews, guardians) record
+/// `source.subagent` in the session meta on their first line. Unreadable or malformed
+/// files are not subagents.
+pub fn is_subagent(path: &Path) -> bool {
     let Ok(text) = std::fs::read_to_string(path) else { return false };
     text.lines()
         .next()

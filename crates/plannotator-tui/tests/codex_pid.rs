@@ -9,6 +9,7 @@ use std::process::{Child, Command, Stdio};
 
 const SELECTED_ID: &str = "11111111-1111-4111-8111-111111111111";
 const OTHER_ID: &str = "22222222-2222-4222-8222-222222222222";
+const SUBAGENT_ID: &str = "33333333-3333-4333-8333-333333333333";
 
 #[derive(Debug)]
 struct Fixture {
@@ -28,16 +29,39 @@ impl Fixture {
     }
 
     fn rollout(directory: &Path, day: &str, id: &str, text: &str) -> PathBuf {
+        Self::write_rollout(directory, day, id, &[Self::assistant_message(id, text)])
+    }
+
+    /// A rollout Codex wrote for one of its subagents (a review, a guardian): the session
+    /// meta on the first line names `source.subagent`.
+    fn subagent_rollout(&self) -> PathBuf {
+        let meta = serde_json::json!({
+            "type": "session_meta",
+            "payload": {"id": SUBAGENT_ID, "source": {"subagent": "review"}}
+        });
+        let message = Self::assistant_message(SUBAGENT_ID, "SUBAGENT PANE");
+        Self::write_rollout(&self.directory, "03", SUBAGENT_ID, &[meta, message])
+    }
+
+    fn write_rollout(directory: &Path, day: &str, id: &str, lines: &[serde_json::Value]) -> PathBuf {
         let path =
             directory.join(format!("sessions/2026/09/{day}/rollout-2026-09-{day}T01-00-00-{id}.jsonl"));
         std::fs::create_dir_all(path.parent().expect("parent")).expect("session directory");
-        let message = serde_json::json!({
+        let mut text = String::new();
+        for line in lines {
+            text.push_str(&line.to_string());
+            text.push('\n');
+        }
+        std::fs::write(&path, text).expect("transcript");
+        path
+    }
+
+    fn assistant_message(id: &str, text: &str) -> serde_json::Value {
+        serde_json::json!({
             "type": "response_item",
             "payload": {"type": "message", "role": "assistant", "id": id,
                         "content": [{"type": "output_text", "text": text}]}
-        });
-        std::fs::write(&path, format!("{message}\n")).expect("transcript");
-        path
+        })
     }
 
     fn command(&self, pid: u32) -> Command {
@@ -101,6 +125,17 @@ fn duplicate_descriptors_do_not_make_one_transcript_ambiguous() {
     let fixture = Fixture::new("duplicates");
     let process = HoldingProcess::new(&fixture.selected, Some(&fixture.selected));
     let out = fixture.command(process.0.id()).output().expect("runs");
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "SELECTED PANE");
+    assert!(out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+#[test]
+fn open_subagent_rollouts_do_not_make_one_transcript_ambiguous() {
+    let fixture = Fixture::new("subagent");
+    let subagent = fixture.subagent_rollout();
+    let process = HoldingProcess::new(&fixture.selected, Some(&subagent));
+    let out = fixture.command(process.0.id()).output().expect("runs");
+    assert!(out.status.success());
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "SELECTED PANE");
     assert!(out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
 }

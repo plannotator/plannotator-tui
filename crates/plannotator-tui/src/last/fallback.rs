@@ -61,6 +61,7 @@ pub(super) fn read(
 
 /// A selected Linux process is a stronger hint than an inherited thread id or the newest
 /// rollout. Missing or ambiguous descriptors must not silently select another session.
+/// Codex keeps its subagents' rollouts (reviews, guardians) open too; those are ignored.
 #[cfg(target_os = "linux")]
 fn find_codex_transcript(pid: u32) -> Result<PathBuf> {
     let directory = PathBuf::from(format!("/proc/{pid}/fd"));
@@ -77,6 +78,7 @@ fn find_codex_transcript(pid: u32) -> Result<PathBuf> {
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.starts_with("rollout-"))
             && path.is_file()
+            && !plannotator_tui_hosts::codex::is_subagent(&path)
         {
             transcripts.insert(path);
         }
