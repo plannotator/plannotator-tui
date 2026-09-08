@@ -6,6 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use plannotator_tui_hosts::Match;
 use plannotator_tui_hosts::claude::{find_transcript, parse_ps, parse_session_meta, project_slug};
 
 const TRANSCRIPT: &str = include_str!("fixtures/claude-code.jsonl");
@@ -83,7 +84,7 @@ fn a_direct_pid_hit_is_the_herdr_case() {
     home.session(500, "s500", cwd, 10);
     let expected = home.transcript(cwd, "s500", TRANSCRIPT, 60);
     let found = find_transcript(&home.sessions(), &home.projects(), cwd, &[], 500);
-    assert_eq!(found, Some(expected));
+    assert_eq!(found, Some((expected, Match::Session)));
 }
 
 #[test]
@@ -96,7 +97,7 @@ fn an_ancestor_within_eight_hops_is_found_and_the_ninth_is_not() {
     let table: Vec<(u32, u32)> = (1001..=1009).map(|p| (p, p - 1)).collect();
     assert_eq!(
         find_transcript(&home.sessions(), &home.projects(), Path::new("/elsewhere"), &table, 1008),
-        Some(expected)
+        Some((expected, Match::Session))
     );
     assert_eq!(
         find_transcript(&home.sessions(), &home.projects(), Path::new("/elsewhere"), &table, 1009),
@@ -111,7 +112,11 @@ fn a_newer_unregistered_transcript_in_the_project_is_a_clear_session_and_wins() 
     home.session(700, "s700", cwd, 10);
     home.transcript(cwd, "s700", TRANSCRIPT, 600);
     let ghost = home.transcript(cwd, "after-clear", TRANSCRIPT, 5);
-    assert_eq!(find_transcript(&home.sessions(), &home.projects(), cwd, &[], 700), Some(ghost));
+    assert_eq!(
+        find_transcript(&home.sessions(), &home.projects(), cwd, &[], 700),
+        Some((ghost, Match::Session)),
+        "the ghost stands in for the registered session, so it is still the pid's own"
+    );
 }
 
 #[test]
@@ -123,7 +128,10 @@ fn without_a_pid_hit_the_cwd_scan_prefers_the_newest_session() {
     home.session(12, "other", Path::new("/w/other"), 300);
     home.transcript(cwd, "old", TRANSCRIPT, 30);
     let expected = home.transcript(cwd, "new", TRANSCRIPT, 30);
-    assert_eq!(find_transcript(&home.sessions(), &home.projects(), cwd, &[], 9999), Some(expected));
+    assert_eq!(
+        find_transcript(&home.sessions(), &home.projects(), cwd, &[], 9999),
+        Some((expected, Match::Cwd))
+    );
 }
 
 #[test]
@@ -134,8 +142,9 @@ fn slug_and_mtime_pick_the_newest_transcript_even_in_a_lowercased_dir() {
     home.transcript_in(&lower, "older", TRANSCRIPT, 300);
     let expected = home.transcript_in(&lower, "newer", TRANSCRIPT, 30);
     // Case-insensitive filesystems (macOS) resolve either spelling; compare the real path.
-    let found = find_transcript(&home.sessions(), &home.projects(), cwd, &[], 1).expect("found");
+    let (found, rung) = find_transcript(&home.sessions(), &home.projects(), cwd, &[], 1).expect("found");
     assert_eq!(fs::canonicalize(found).expect("real"), fs::canonicalize(expected).expect("real"));
+    assert_eq!(rung, Match::Folder);
 }
 
 #[test]
@@ -144,7 +153,7 @@ fn a_parent_directory_of_cwd_is_tried_when_cwd_has_no_project() {
     let expected = home.transcript(Path::new("/w/repo"), "s", TRANSCRIPT, 30);
     assert_eq!(
         find_transcript(&home.sessions(), &home.projects(), Path::new("/w/repo/deep/dir"), &[], 1),
-        Some(expected)
+        Some((expected, Match::Folder))
     );
 }
 
@@ -154,5 +163,27 @@ fn a_candidate_with_no_messages_is_skipped_for_the_next_one() {
     let cwd = Path::new("/w/repo");
     home.transcript(cwd, "empty", "{\"type\":\"progress\"}\n", 5);
     let expected = home.transcript(cwd, "real", TRANSCRIPT, 60);
-    assert_eq!(find_transcript(&home.sessions(), &home.projects(), cwd, &[], 1), Some(expected));
+    assert_eq!(
+        find_transcript(&home.sessions(), &home.projects(), cwd, &[], 1),
+        Some((expected, Match::Folder))
+    );
+}
+
+#[test]
+fn the_rung_that_chose_the_transcript_is_reported() {
+    let home = Home::new("rungs");
+    let cwd = Path::new("/w/repo");
+    home.session(500, "s500", cwd, 10);
+    let own = home.transcript(cwd, "s500", TRANSCRIPT, 60);
+    let by_pid = find_transcript(&home.sessions(), &home.projects(), cwd, &[], 500);
+    assert_eq!(by_pid, Some((own.clone(), Match::Session)), "the pid's registered session is exact");
+
+    // No pid hit: a registered session for the same cwd is the folder's best guess.
+    let by_cwd = find_transcript(&home.sessions(), &home.projects(), cwd, &[], 9999);
+    assert_eq!(by_cwd, Some((own.clone(), Match::Cwd)));
+
+    // No registered session at all: the project directory decides.
+    fs::remove_file(home.sessions().join("500.json")).expect("unregister");
+    let by_folder = find_transcript(&home.sessions(), &home.projects(), cwd, &[], 500);
+    assert_eq!(by_folder, Some((own, Match::Folder)));
 }

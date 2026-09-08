@@ -107,6 +107,20 @@ pub struct Message {
     pub at: Option<String>,
 }
 
+/// Which rung of a discovery ladder chose a session, so a caller can say whether the
+/// result identifies the agent's own session or is the best guess for its folder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Match {
+    /// The session the agent process (or one of its ancestors) registered: not a guess.
+    Session,
+    /// A session whose recorded working directory is the agent's, newest first.
+    Cwd,
+    /// The newest session filed under the agent's folder or one of its parents.
+    Folder,
+    /// The newest session the host has at all, not scoped to any directory.
+    Newest,
+}
+
 /// `~/.claude/sessions/<pid>.json`: one running Claude Code session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionMeta {

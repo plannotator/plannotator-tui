@@ -6,8 +6,8 @@ use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use plannotator_tui_hosts::Role;
 use plannotator_tui_hosts::copilot::{find_session, parse_messages};
+use plannotator_tui_hosts::{Match, Role};
 
 const EVENTS: &str =
     include_str!("fixtures/copilot/session-state/aaaa1111-0000-4000-8000-000000000001/events.jsonl");
@@ -77,7 +77,10 @@ fn a_lock_held_by_an_ancestor_beats_every_cwd_heuristic() {
     let locked = home.session("locked-elsewhere", "/elsewhere", &[300], 100);
     // 4242 → 4000 → 300: the third hop owns the lock.
     let table = [(4242, 4000), (4000, 300), (300, 1)];
-    assert_eq!(find_session(&home.root, Path::new("/w"), &table, 4242, always_copilot), Some(locked));
+    assert_eq!(
+        find_session(&home.root, Path::new("/w"), &table, 4242, always_copilot),
+        Some((locked, Match::Session))
+    );
 }
 
 #[test]
@@ -88,7 +91,7 @@ fn a_stale_lock_is_skipped_and_the_walk_continues() {
     let table = [(4242, 4000), (4000, 300), (300, 1)];
     // 4000 no longer names a copilot process; 300 does.
     let found = find_session(&home.root, Path::new("/w"), &table, 4242, |pid| pid == 300);
-    assert_eq!(found, Some(live));
+    assert_eq!(found, Some((live, Match::Session)));
 }
 
 #[test]
@@ -99,10 +102,16 @@ fn the_ninth_ancestor_is_out_of_reach() {
     let table: Vec<(u32, u32)> = (1..=17).map(|p| (p + 1, p)).collect(); // 18 → 17 → … → 2
     let only_nine_is_live = |pid: u32| pid == 9;
     // From 18 the walk reaches 11; the stale lock at 12 is dropped and 9 is never seen, so
-    // the cwd ladder decides: the newest active session.
-    assert_eq!(find_session(&home.root, Path::new("/none"), &table, 18, only_nine_is_live), Some(near));
+    // the cwd ladder decides: the newest active session, which is not scoped to a cwd.
+    assert_eq!(
+        find_session(&home.root, Path::new("/none"), &table, 18, only_nine_is_live),
+        Some((near, Match::Newest))
+    );
     // From 16 the eighth hop is 9 and its live lock wins.
-    assert_eq!(find_session(&home.root, Path::new("/none"), &table, 16, only_nine_is_live), Some(far));
+    assert_eq!(
+        find_session(&home.root, Path::new("/none"), &table, 16, only_nine_is_live),
+        Some((far, Match::Session))
+    );
 }
 
 #[test]
@@ -115,15 +124,15 @@ fn without_a_lock_match_the_cwd_ladder_applies_in_order() {
     let no_pid_match = [(1, 1)];
     let find = |cwd: &str| find_session(&home.root, Path::new(cwd), &no_pid_match, 4242, always_copilot);
 
-    assert_eq!(find("/w"), Some(cwd_locked.clone()), "an active session for the cwd wins");
+    assert_eq!(find("/w"), Some((cwd_locked.clone(), Match::Cwd)), "an active session for the cwd wins");
     fs::remove_file(cwd_locked.join("inuse.777.lock")).expect("unlock");
-    assert_eq!(find("/w"), Some(any_locked.clone()), "then any active session");
+    assert_eq!(find("/w"), Some((any_locked.clone(), Match::Newest)), "then any active session");
     fs::remove_file(any_locked.join("inuse.888.lock")).expect("unlock");
     // Removing locks touched those directories; restore their ages so mtime order holds.
     age(&cwd_locked, 40);
     age(&any_locked, 60);
-    assert_eq!(find("/w"), Some(cwd_plain), "then the newest session for the cwd");
-    assert_eq!(find("/nowhere"), Some(newest_any), "then the newest session at all");
+    assert_eq!(find("/w"), Some((cwd_plain, Match::Cwd)), "then the newest session for the cwd");
+    assert_eq!(find("/nowhere"), Some((newest_any, Match::Newest)), "then the newest session at all");
 }
 
 #[test]
@@ -132,7 +141,10 @@ fn a_session_directory_without_events_is_not_a_candidate() {
     let with_events = home.session("with-events", "/w", &[], 50);
     let bare = home.session("bare", "/w", &[], 5);
     fs::remove_file(bare.join("events.jsonl")).expect("strip events");
-    assert_eq!(find_session(&home.root, Path::new("/w"), &[], 1, always_copilot), Some(with_events));
+    assert_eq!(
+        find_session(&home.root, Path::new("/w"), &[], 1, always_copilot),
+        Some((with_events, Match::Cwd))
+    );
 }
 
 #[test]
@@ -141,7 +153,7 @@ fn cwd_comparison_ignores_case_and_slash_direction() {
     let win = home.session("win", "C:\\Users\\Me\\Repo", &[], 10);
     home.session("other", "/other", &[], 5);
     let found = find_session(&home.root, Path::new("c:/users/me/repo"), &[], 1, always_copilot);
-    assert_eq!(found, Some(win));
+    assert_eq!(found, Some((win, Match::Cwd)));
 }
 
 #[test]

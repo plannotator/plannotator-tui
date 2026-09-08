@@ -11,7 +11,7 @@ use std::time::SystemTime;
 
 use serde_json::Value;
 
-use crate::{Message, Role};
+use crate::{Match, Message, Role};
 
 const MAX_ANCESTOR_HOPS: usize = 8;
 
@@ -25,21 +25,23 @@ pub fn find_session_by_id(
     Ok(dir.join("events.jsonl").is_file().then_some(dir))
 }
 
-/// The session directory for the Copilot process we were launched from.
+/// The session directory for the Copilot process we were launched from, and the
+/// [`Match`] that says which rung chose it.
 ///
 /// 1. Walk `start_pid` and up to eight ancestors; the first pid that owns an
 ///    `inuse.<pid>.lock` wins, provided `is_copilot(pid)` confirms the pid still names a
 ///    Copilot process (locks outlive sessions and pids get reused; a stale match is dropped
-///    and the walk continues).
-/// 2. Else by cwd, newest directory first: a locked session for `cwd`, any locked session,
-///    a session for `cwd`, the newest session at all.
+///    and the walk continues). [`Match::Session`].
+/// 2. Else by cwd, newest directory first: a locked session for `cwd` ([`Match::Cwd`]),
+///    any locked session ([`Match::Newest`]), a session for `cwd` ([`Match::Cwd`]), the
+///    newest session at all ([`Match::Newest`]).
 pub fn find_session(
     copilot_home: &Path,
     cwd: &Path,
     process_table: &[(u32, u32)],
     start_pid: u32,
     is_copilot: impl Fn(u32) -> bool,
-) -> Option<PathBuf> {
+) -> Option<(PathBuf, Match)> {
     let state_dir = copilot_home.join("session-state");
     let sessions = list_sessions(&state_dir);
 
@@ -47,20 +49,21 @@ pub fn find_session(
     let locks = lock_owners(&sessions);
     while let Some(&pid) = chain.iter().find(|pid| locks.contains_key(pid)) {
         if is_copilot(pid) {
-            return locks.get(&pid).cloned();
+            return locks.get(&pid).cloned().map(|dir| (dir, Match::Session));
         }
         chain.retain(|&p| p != pid);
     }
 
     let wanted = normalize(cwd);
     let matches = |s: &Session| s.cwd.as_deref().is_some_and(|c| normalize(Path::new(c)) == wanted);
+    let pick = |session: &Session, rung: Match| (session.dir.clone(), rung);
     sessions
         .iter()
         .find(|s| s.locked && matches(s))
-        .or_else(|| sessions.iter().find(|s| s.locked))
-        .or_else(|| sessions.iter().find(|s| matches(s)))
-        .or_else(|| sessions.first())
-        .map(|s| s.dir.clone())
+        .map(|s| pick(s, Match::Cwd))
+        .or_else(|| sessions.iter().find(|s| s.locked).map(|s| pick(s, Match::Newest)))
+        .or_else(|| sessions.iter().find(|s| matches(s)).map(|s| pick(s, Match::Cwd)))
+        .or_else(|| sessions.first().map(|s| pick(s, Match::Newest)))
 }
 
 /// Human prompts and assistant replies from `events.jsonl`, newest first, at most `n`.
