@@ -90,7 +90,8 @@ Droid, Hermes CLI, OpenCode (1 and 2). `--host`, `--pid`, `--session <transcript
 no host is named) and `--session-id <id>` (Hermes, OpenCode) override detection; `--stdin`
 reads a document;
 `--print` writes the newest reply to stdout and always exits 0 (for hooks and scripts).
-Reply reviews are never written to disk.
+A reply review keeps its annotations in memory only; nothing about it survives the run, but
+the feedback you send or copy is archived like any other (see Feedback archive below).
 
 On Linux, an explicit Codex `--pid` selects the rollout opened by that process. If it
 cannot be identified uniquely, `last` reports the failure instead of choosing an unrelated
@@ -113,6 +114,18 @@ status line.
 its path: Plannotator's own layout, so both tools see one record per file. The JSON is the
 Plannotator Workspaces wire shape; any agent can read it. Nothing is written next to your
 files. `PLANNOTATOR_DATA_DIR` relocates the directory.
+
+### Feedback archive
+
+A successful Send or Copy also appends what was submitted (the feedback text, the quoted
+selections and their annotations, and the file, folder or agent session it was about) to
+`{data_dir}/feedback/<project>/index.jsonl`, with a Markdown copy under `records/`. The data
+dir is `PLANNOTATOR_DATA_DIR`, else an existing `~/.plannotator`, else
+`$XDG_DATA_HOME/plannotator`, else `~/.plannotator`. File, folder and reply reviews are all
+archived; a send that fails or is refused is not. The format is the one the Plannotator
+browser app writes, so both tools share one history. To turn it off, set
+`PLANNOTATOR_FEEDBACK_HISTORY=0` (once the variable is set, only `1` or `true` enable) or put
+`"feedbackHistory": false` in `{data_dir}/config.json`; the variable wins over the file.
 
 ## Headless
 
