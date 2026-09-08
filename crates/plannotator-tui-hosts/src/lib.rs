@@ -16,7 +16,7 @@ pub mod pi;
 pub(crate) mod sqlite;
 pub(crate) mod time;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A supported agent host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,6 +171,31 @@ impl From<std::io::Error> for HostError {
     }
 }
 
+/// The host-assigned session id a transcript's name carries, when the host's naming
+/// scheme makes it unambiguous: Claude Code and Droid file a session as `<uuid>.jsonl`,
+/// a Codex rollout ends in its thread uuid, and a Copilot session is a directory named by
+/// its uuid. Anything that is not uuid-shaped yields `None`: an arbitrary path handed in
+/// with `--session` must never be mistaken for an id, and a path is never one.
+pub fn session_id_of(host: Host, transcript: &Path) -> Option<String> {
+    let candidate = match host {
+        Host::ClaudeCode | Host::Droid => transcript.file_stem()?.to_str()?.to_owned(),
+        Host::Codex => codex::thread_of(transcript)?,
+        Host::Copilot => transcript.file_name()?.to_str()?.to_owned(),
+        Host::Pi | Host::Omp | Host::Hermes | Host::OpenCode => return None,
+    };
+    is_uuid(&candidate).then_some(candidate)
+}
+
+/// `8-4-4-4-12` hex groups, any case.
+fn is_uuid(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() == 36
+        && bytes.iter().enumerate().all(|(i, b)| match i {
+            8 | 13 | 18 | 23 => *b == b'-',
+            _ => b.is_ascii_hexdigit(),
+        })
+}
+
 /// Which host launched us, from the environment. `PLANNOTATOR_TUI_HOST` overrides when it
 /// names a known host; then the hosts' own markers, in Plannotator's order; then Claude Code.
 ///
@@ -218,4 +243,46 @@ pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostErr
         return Ok(Host::Omp);
     }
     Ok(Host::ClaudeCode)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ID: &str = "01a04583-a848-7b21-a890-f3ed0c9fef05";
+
+    #[test]
+    fn a_uuid_named_transcript_yields_its_session_id() {
+        let claude = Path::new("/h/.claude/projects/-w-repo").join(format!("{ID}.jsonl"));
+        assert_eq!(session_id_of(Host::ClaudeCode, &claude).as_deref(), Some(ID));
+        let droid = Path::new("/h/.factory/sessions/-w-repo").join(format!("{ID}.jsonl"));
+        assert_eq!(session_id_of(Host::Droid, &droid).as_deref(), Some(ID));
+        let codex = Path::new("/h/.codex/sessions/2026/08/27")
+            .join(format!("rollout-2026-08-27T16-17-33-{ID}.jsonl"));
+        assert_eq!(session_id_of(Host::Codex, &codex).as_deref(), Some(ID));
+        let copilot = Path::new("/h/.copilot/session-state").join(ID);
+        assert_eq!(session_id_of(Host::Copilot, &copilot).as_deref(), Some(ID));
+    }
+
+    #[test]
+    fn anything_that_is_not_uuid_shaped_is_not_an_id() {
+        assert_eq!(session_id_of(Host::ClaudeCode, Path::new("/tmp/session.jsonl")), None);
+        assert_eq!(
+            session_id_of(Host::Codex, Path::new("/tmp/rollout-2026-08-27T16-17-33-not-a-uuid.jsonl")),
+            None
+        );
+        assert_eq!(session_id_of(Host::Copilot, Path::new("/h/.copilot/session-state/near")), None);
+        let pi = Path::new("/h/.pi/agent/sessions/x").join(format!("{ID}.jsonl"));
+        assert_eq!(session_id_of(Host::Pi, &pi), None, "pi names sessions by pattern, not by id alone");
+        assert_eq!(session_id_of(Host::OpenCode, Path::new("/h/opencode.db")), None);
+    }
+
+    #[test]
+    fn uuid_shape_is_checked_strictly() {
+        assert!(is_uuid(ID));
+        assert!(is_uuid("AAAA1111-0000-4000-8000-000000000001"));
+        assert!(!is_uuid("01a04583a8487b21a890f3ed0c9fef05"));
+        assert!(!is_uuid("01a04583-a848-7b21-a890-f3ed0c9fef0g"));
+        assert!(!is_uuid(""));
+    }
 }

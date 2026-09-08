@@ -45,7 +45,7 @@ fn all_rollouts(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// The thread id is the trailing uuid of `rollout-<timestamp>-<uuid>.jsonl`.
-fn thread_of(path: &Path) -> Option<String> {
+pub(crate) fn thread_of(path: &Path) -> Option<String> {
     let stem = path.file_stem()?.to_str()?;
     let parts: Vec<&str> = stem.rsplitn(6, '-').collect();
     (parts.len() == 6).then(|| parts.iter().take(5).rev().copied().collect::<Vec<_>>().join("-"))

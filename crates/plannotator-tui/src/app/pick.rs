@@ -21,18 +21,21 @@ const PICK_MAX_WIDTH: u16 = 90;
 
 impl App {
     /// Open with `messages` (newest first) as candidates; the picker shows when there is a
-    /// choice to make.
+    /// choice to make. `transcript` is the path shown and archived; `session_id` is the
+    /// host's own id for the session, when known.
     pub(crate) fn open_message(
         host: &str,
         transcript: &str,
+        session_id: Option<&str>,
         messages: Vec<Message>,
         width: usize,
         delivery: Box<dyn crate::delivery::Delivery>,
     ) -> Result<Self> {
         let Some(newest) = messages.first() else { anyhow::bail!("no message to open") };
-        let mut app = Self::open(message_source(host, transcript, newest), width, delivery)?;
+        let mut app = Self::open(message_source(host, session_id, newest), width, delivery)?;
         host.clone_into(&mut app.message_host);
         transcript.clone_into(&mut app.message_transcript);
+        app.message_session = session_id.map(str::to_owned);
         app.candidates = messages;
         if app.candidates.len() > 1 {
             app.mode = Mode::Pick;
@@ -53,7 +56,7 @@ impl App {
             open
         } else {
             let Some(message) = self.candidates.get(index) else { return Ok(()) };
-            let source = message_source(&self.message_host, &self.message_transcript, message);
+            let source = message_source(&self.message_host, self.message_session.as_deref(), message);
             Open::new(source, self.open.layout.width, &self.data_dir, &self.project)?
         };
         let leaving = std::mem::replace(&mut self.open, next);

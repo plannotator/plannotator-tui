@@ -80,10 +80,18 @@ pub(crate) fn run(options: &LastOptions) -> Result<()> {
     }
     let label = located.host.label();
     let transcript = located.transcript.display().to_string();
+    let session_id = located.session_id;
     let messages = located.messages;
     let note = discovery_note(located.discovery, crate::herdr::context::HerdrEnv::from_env().in_herdr);
     cli::run_ui(|width| {
-        let mut app = App::open_message(label, &transcript, messages, width, cli::delivery(true))?;
+        let mut app = App::open_message(
+            label,
+            &transcript,
+            session_id.as_deref(),
+            messages,
+            width,
+            cli::delivery(true),
+        )?;
         if let Some(note) = note {
             app.set_status(note);
         }
@@ -105,15 +113,17 @@ fn discovery_note(discovery: Discovery, in_herdr: bool) -> Option<String> {
     Some(if in_herdr { format!("no session id from Herdr, {shown}") } else { shown.to_owned() })
 }
 
-/// A message as a document: transient, provenance names the host, transcript and message.
-pub(crate) fn message_source(host: &str, transcript: &str, message: &Message) -> DocumentSource {
+/// A message as a document: transient, provenance names the host, the host-assigned
+/// session id when one is known (never the transcript path; the app keeps that
+/// separately), and the message.
+pub(crate) fn message_source(host: &str, session_id: Option<&str>, message: &Message) -> DocumentSource {
     DocumentSource::new(
         message.text.clone(),
         format!("{host} · last message"),
         true,
         Provenance::AgentMessage {
             host: host.to_owned(),
-            session: Some(transcript.to_owned()),
+            session: session_id.map(str::to_owned),
             message_id: Some(message.id.clone()),
         },
     )

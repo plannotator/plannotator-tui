@@ -148,7 +148,10 @@ pub(crate) struct App {
     /// rather than dropped.
     pick_cache: HashMap<usize, Open>,
     message_host: String,
+    /// The transcript path, for the archive's `transcript`; never the session id.
     message_transcript: String,
+    /// The host-assigned session id, for the archive's `session`; never a path.
+    message_session: Option<String>,
     compose: Compose,
     /// Whether the terminal reports Shift+Enter distinctly (kitty keyboard protocol).
     pub(super) shift_enter: bool,
@@ -208,6 +211,7 @@ impl App {
             pick_cache: HashMap::new(),
             message_host: String::new(),
             message_transcript: String::new(),
+            message_session: None,
             compose: Compose::default(),
             shift_enter: false,
             last_click: None,

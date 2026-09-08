@@ -15,6 +15,9 @@ pub(crate) struct Located {
     pub(crate) host: Host,
     /// The transcript file (Claude) or the newest thread file (Codex); for the label.
     pub(crate) transcript: PathBuf,
+    /// The host-assigned session id: the one given, else the one the transcript's name
+    /// carries unambiguously. Never a path.
+    pub(crate) session_id: Option<String>,
     /// Assistant messages, newest first, at most `options.pick`.
     pub(crate) messages: Vec<Message>,
     /// How the transcript was chosen; the UI says so when nothing identified it exactly.
@@ -50,7 +53,9 @@ pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
     if messages.is_empty() {
         bail!("transcript {} has no assistant messages yet", transcript.display());
     }
-    Ok(Located { host, transcript, messages, discovery })
+    let session_id =
+        options.session_id.clone().or_else(|| plannotator_tui_hosts::session_id_of(host, &transcript));
+    Ok(Located { host, transcript, session_id, messages, discovery })
 }
 
 /// Was a host named explicitly, by flag or by the launcher?
@@ -167,6 +172,31 @@ mod tests {
 
         assert_eq!(located.discovery, Discovery::Exact);
         assert_eq!(located.messages.first().map(|m| m.text.as_str()), Some("reply"));
+        assert_eq!(located.session_id, None, "`session.jsonl` is not a session id");
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn a_uuid_named_transcript_yields_its_id_and_an_explicit_id_wins() {
+        let dir = std::env::temp_dir().join(format!("plannotator locate id-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let id = "01a04583-a848-7b21-a890-f3ed0c9fef05";
+        let named = dir.join(format!("{id}.jsonl"));
+        std::fs::copy(transcript(&dir), &named).expect("copy");
+        let options = LastOptions {
+            host: Some("claude".to_owned()),
+            session: Some(named),
+            pick: 25,
+            ..LastOptions::default()
+        };
+
+        let located = locate(&options).expect("the named transcript is read");
+        assert_eq!(located.session_id.as_deref(), Some(id));
+
+        let explicit = LastOptions { session_id: Some("given-by-herdr".to_owned()), ..options };
+        let located = locate(&explicit).expect("the named transcript is read");
+        assert_eq!(located.session_id.as_deref(), Some("given-by-herdr"));
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 }
