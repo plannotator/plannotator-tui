@@ -49,6 +49,16 @@ pub(crate) trait Delivery {
     fn deliver(&self, feedback: &str) -> Result<(), DeliveryError>;
 }
 
+/// The OSC 52 sequence that hands `text` to the terminal's clipboard.
+///
+/// The terminal the app draws on is the one the person is sitting at, so a copy lands on their
+/// machine even when the app itself runs on a remote server: Herdr 0.9.0 forwards a pane's OSC 52
+/// to the viewing client. Terminals commonly refuse a base64 payload over 74994 bytes; the sequence
+/// is still emitted whole, because truncating a copy silently is worse than one the terminal drops.
+pub(crate) fn osc52_sequence(text: &str) -> String {
+    format!("\x1b]52;c;{}\x07", crate::base64::encode(text.as_bytes()))
+}
+
 /// OSC 52: hand text to the terminal's clipboard so Cmd-V works outside the app.
 #[derive(Debug, Default)]
 pub(crate) struct Clipboard;
@@ -60,7 +70,8 @@ impl Delivery for Clipboard {
 
     fn deliver(&self, feedback: &str) -> Result<(), DeliveryError> {
         let mut out = std::io::stdout().lock();
-        write!(out, "\x1b]52;c;{}\x07", crate::base64::encode(feedback.as_bytes()))?;
+        // Callers write between frames, so the sequence never lands inside one.
+        out.write_all(osc52_sequence(feedback).as_bytes())?;
         out.flush()?;
         Ok(())
     }
@@ -163,6 +174,38 @@ mod tests {
 
     fn envelope(code: &str, message: &str) -> String {
         format!(r#"{{"id":"cli:agent:prompt","error":{{"code":"{code}","message":"{message}"}}}}"#)
+    }
+
+    #[test]
+    fn the_clipboard_sequence_is_osc52_over_the_raw_utf8_bytes() {
+        assert_eq!(osc52_sequence("hi"), "\x1b]52;c;aGk=\x07");
+        assert_eq!(
+            osc52_sequence("hi").as_bytes(),
+            &[0x1b, 0x5d, 0x35, 0x32, 0x3b, 0x63, 0x3b, 0x61, 0x47, 0x6b, 0x3d, 0x07]
+        );
+        assert_eq!(osc52_sequence(""), "\x1b]52;c;\x07");
+        assert_eq!(osc52_sequence("한글 · é"), "\x1b]52;c;7ZWc6riAIMK3IMOp\x07");
+    }
+
+    #[test]
+    fn an_oversized_copy_is_emitted_whole_rather_than_truncated() {
+        // 74994 base64 bytes is the payload many terminals stop at; we never cut a copy to fit.
+        let text = "a".repeat(80_000);
+        let sequence = osc52_sequence(&text);
+        assert!(sequence.len() > 74_994);
+        assert!(sequence.starts_with("\x1b]52;c;") && sequence.ends_with('\x07'));
+        assert!(sequence.contains(&crate::base64::encode(text.as_bytes())));
+    }
+
+    #[test]
+    fn headless_runs_never_reach_the_terminal_clipboard() {
+        // `--print`, `--export` and `--snapshot` open the app non-interactively, and a freshly
+        // opened app has not enabled clipboard copies; only the interactive event loop does.
+        assert_eq!(crate::cli::delivery(false).describe(), Discard.describe());
+        let source =
+            plannotator_tui_schema::DocumentSource::file(PathBuf::from("doc.md"), "# hi\n".to_owned());
+        let app = crate::app::App::open(source, 80, crate::cli::delivery(false)).expect("open");
+        assert!(!app.clipboard);
     }
 
     #[test]
