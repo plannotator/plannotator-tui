@@ -28,10 +28,11 @@ fn incremental_send_and_explicit_resend_use_the_same_set_for_body_history_and_id
     assert_eq!(app.send_count(), 1, "edited B remains pending after reopening");
     press(&mut app, 'E');
     assert_eq!(app.send_count(), 0);
+    press(&mut app, 'm');
     let screen = draw(&mut app, 80, 24);
-    assert!(screen.contains("Resend all (3 sent)"), "{screen}");
-    let resend = app.geometry.resend_button.expect("resend button");
-    click(&mut app, resend);
+    assert!(screen.contains("R  Resend all \u{b7} 3 sent"), "{screen}");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Enter))).expect("resend from the menu");
+    assert_eq!(app.mode, Mode::Browse);
 
     let calls = delivery.calls.borrow();
     assert_eq!(calls.len(), 4);
@@ -217,7 +218,7 @@ fn reply_reviews_keep_sending_the_whole_transient_review() {
     assert_eq!(app.open.store.len(), 2);
     assert!(app.open.store.archived().is_empty());
     assert!(app.open.store.is_transient());
-    assert!(!draw(&mut app, 80, 24).contains("Finish review"));
+    assert!(!draw(&mut app, 80, 24).contains("Review \u{25be}"), "a reply review has no Review menu");
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 

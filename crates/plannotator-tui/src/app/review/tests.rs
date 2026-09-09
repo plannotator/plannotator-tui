@@ -72,42 +72,6 @@ fn sent_markers_clear_on_edit_and_review_shortcuts_are_text_while_composing() {
 }
 
 #[test]
-fn every_review_action_stays_visible_and_clickable_in_a_narrow_pane() {
-    let (root, mut app, _) = file_app("buttons");
-    app.add_quote_annotation("one", Kind::Comment, "note".into()).expect("note");
-    press(&mut app, 'E');
-    for width in [80, 40] {
-        let screen = draw(&mut app, width, 24);
-        let buttons = [
-            app.geometry.send_button,
-            app.geometry.resend_button,
-            app.geometry.finish_button,
-            app.geometry.archive_button,
-        ];
-        for rect in buttons.into_iter().map(|r| r.expect("visible button")) {
-            assert!(rect.right() <= width && rect.bottom() < 24, "{screen}");
-        }
-        assert!(
-            screen.contains("Finish review") && screen.contains("Archive 0") && screen.contains("Resend all"),
-            "{screen}"
-        );
-    }
-    let finish = app.geometry.finish_button.expect("finish");
-    click(&mut app, finish);
-    assert_eq!(app.open.store.len(), 0);
-    draw(&mut app, 40, 24);
-    let archive = app.geometry.archive_button.expect("archive");
-    click(&mut app, archive);
-    assert_eq!(app.mode, Mode::Archive);
-    draw(&mut app, 40, 24);
-    let row = app.geometry.archive_rows[0].0;
-    click(&mut app, row);
-    assert_eq!(app.open.store.len(), 1);
-    assert_eq!(app.send_count(), 0);
-    std::fs::remove_dir_all(root).expect("cleanup");
-}
-
-#[test]
 fn the_archive_picker_scrolls_and_restores_the_clicked_annotation() {
     let (root, mut app, _) = file_app("archive-scroll");
     for index in 0..10 {

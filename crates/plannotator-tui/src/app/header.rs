@@ -1,5 +1,5 @@
-//! Visible review actions. Buttons wrap onto another row in a narrow pane instead of
-//! disappearing or hiding a single action behind a menu.
+//! The header: the send button and, for file and folder reviews, the Review menu button.
+//! The two wrap onto another row only when a pane is too narrow for both.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -15,27 +15,24 @@ const IDLE_BG: Color = Color::Indexed(238);
 const SENT_BG: Color = Color::Indexed(22);
 const BLOCKED_BG: Color = Color::Indexed(58);
 
+pub(super) const REVIEW_LABEL: &str = "Review \u{25be} (m)";
+
 #[derive(Debug, Clone, Copy)]
 enum Button {
     Send,
-    Resend,
-    Finish,
-    Archive,
+    Review,
 }
 
 impl App {
+    /// Buttons with their rects relative to the header, right to left: send on the edge,
+    /// the Review menu to its left.
     fn header_buttons(&self, width: u16) -> Vec<(Button, String, Rect)> {
         if width == 0 {
             return Vec::new();
         }
         let mut labels = vec![(Button::Send, self.send_label())];
         if self.is_file_review() {
-            let counts = self.review_counts();
-            labels.extend([
-                (Button::Resend, format!("Resend all ({} sent) (R)", counts.sent)),
-                (Button::Finish, "Finish review (F)".into()),
-                (Button::Archive, format!("Archive {} (H)", counts.archived)),
-            ]);
+            labels.push((Button::Review, REVIEW_LABEL.to_owned()));
         }
         let mut right = width;
         let mut y = 0;
@@ -71,16 +68,8 @@ impl App {
                     self.geometry.send_button = Some(rect);
                     self.button_style()
                 }
-                Button::Resend => {
-                    self.geometry.resend_button = Some(rect);
-                    Style::new().fg(Color::Cyan).bg(IDLE_BG)
-                }
-                Button::Finish => {
-                    self.geometry.finish_button = Some(rect);
-                    Style::new().fg(Color::Cyan).bg(IDLE_BG)
-                }
-                Button::Archive => {
-                    self.geometry.archive_button = Some(rect);
+                Button::Review => {
+                    self.geometry.review_button = Some(rect);
                     Style::new().fg(Color::Cyan).bg(IDLE_BG)
                 }
             };

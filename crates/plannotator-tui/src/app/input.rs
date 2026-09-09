@@ -7,6 +7,7 @@ use ratatui::crossterm::event::{
 };
 
 use super::compose::ComposeAction;
+use super::menu::ReviewAction;
 use super::selection::Selection;
 use super::send::SendState;
 use super::{App, Focus, GUTTER, Mode, Pending, TOOLBAR};
@@ -23,6 +24,7 @@ impl App {
                     self.archive_key(*key);
                     Ok(())
                 }
+                Mode::ReviewMenu => self.menu_key(*key),
                 Mode::Compose | Mode::Edit(_) => self.text_key(*key),
             },
             // A paste lands in the comment box verbatim, newlines included; anywhere else
@@ -33,6 +35,7 @@ impl App {
             }
             Event::Mouse(mouse) if self.mode == Mode::Browse => self.mouse(*mouse),
             Event::Mouse(mouse) if self.mode == Mode::Pick => self.pick_mouse(*mouse),
+            Event::Mouse(mouse) if self.mode == Mode::ReviewMenu => self.menu_mouse(*mouse),
             Event::Mouse(mouse) if self.mode == Mode::Archive => {
                 self.archive_mouse(*mouse);
                 Ok(())
@@ -53,18 +56,21 @@ impl App {
                 return Ok(());
             }
             (KeyCode::Char('E'), _) => return self.send_feedback(),
-            (KeyCode::Char('R'), _) if self.is_file_review() => return self.resend_all(),
-            (KeyCode::Char('F'), _) if self.is_file_review() => {
-                self.finish_review();
+            (KeyCode::Char('m'), _) if self.is_file_review() => {
+                self.open_review_menu();
                 return Ok(());
             }
-            (KeyCode::Char('H'), _) if self.is_file_review() => {
-                self.open_archive();
-                return Ok(());
+            (KeyCode::Char('R'), _) if self.is_file_review() => {
+                return self.run_review_action(ReviewAction::ResendAll);
+            }
+            (KeyCode::Char('F'), _) if self.is_file_review() => {
+                return self.run_review_action(ReviewAction::Finish);
             }
             (KeyCode::Char('U'), _) if self.is_file_review() => {
-                self.undo_finish_review();
-                return Ok(());
+                return self.run_review_action(ReviewAction::Undo);
+            }
+            (KeyCode::Char('H'), _) if self.is_file_review() => {
+                return self.run_review_action(ReviewAction::Archive);
             }
             (KeyCode::Char('t'), _) => {
                 self.toggle_tree(self.geometry.doc.width + self.geometry.tree.width + GUTTER);
@@ -295,7 +301,12 @@ impl App {
                             self.status = Some("annotation updated".into());
                         }
                     }
-                    Mode::Compose | Mode::Browse | Mode::ConfirmQuit | Mode::Pick | Mode::Archive => {
+                    Mode::Compose
+                    | Mode::Browse
+                    | Mode::ConfirmQuit
+                    | Mode::Pick
+                    | Mode::Archive
+                    | Mode::ReviewMenu => {
                         if !body.is_empty()
                             && let Some(pending) = self.pending.take()
                         {
@@ -324,15 +335,8 @@ impl App {
                 let hit = |rect: Option<ratatui::layout::Rect>| {
                     rect.is_some_and(|r| mouse.row == r.y && mouse.column >= r.x && mouse.column < r.right())
                 };
-                if hit(self.geometry.resend_button) {
-                    return self.resend_all();
-                }
-                if hit(self.geometry.finish_button) {
-                    self.finish_review();
-                    return Ok(());
-                }
-                if hit(self.geometry.archive_button) {
-                    self.open_archive();
+                if hit(self.geometry.review_button) {
+                    self.open_review_menu();
                     return Ok(());
                 }
                 if hit(self.geometry.undo_button) {

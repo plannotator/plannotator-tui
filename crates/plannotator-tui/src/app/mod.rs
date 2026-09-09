@@ -7,7 +7,7 @@ mod draw;
 mod feedback;
 mod header;
 mod input;
-
+mod menu;
 mod pick;
 mod review;
 #[cfg(test)]
@@ -57,6 +57,8 @@ enum Mode {
     Pick,
     /// Restoring annotations from finished file reviews.
     Archive,
+    /// The header's Review menu is open over a file or folder review.
+    ReviewMenu,
 }
 
 /// Which pane keyboard input goes to.
@@ -78,10 +80,12 @@ struct Geometry {
     bubbles: Vec<(Rect, String)>,
     /// The header's Send button; `None` when the header was too narrow for it.
     send_button: Option<Rect>,
-    resend_button: Option<Rect>,
-    finish_button: Option<Rect>,
-    archive_button: Option<Rect>,
+    /// The header's Review button; only file and folder reviews draw it.
+    review_button: Option<Rect>,
     undo_button: Option<Rect>,
+    /// The Review menu drawn last frame and its rows, with their action index.
+    menu: Option<Rect>,
+    menu_rows: Vec<(Rect, usize)>,
     archive_rows: Vec<(Rect, usize)>,
     /// Picker rows drawn last frame, with their candidate index.
     pick_rows: Vec<(Rect, usize)>,
@@ -140,6 +144,8 @@ pub(crate) struct App {
     undo_archive: Vec<review::ArchivedBatch>,
     archive_items: Vec<review::ArchivedItem>,
     archive_cursor: usize,
+    /// The highlighted row of the Review menu.
+    menu_cursor: usize,
     focus: Focus,
     scroll: usize,
     selected: usize,
@@ -216,6 +222,7 @@ impl App {
             undo_archive: Vec::new(),
             archive_items: Vec::new(),
             archive_cursor: 0,
+            menu_cursor: 0,
             focus: Focus::Document,
             scroll: 0,
             selected: 0,

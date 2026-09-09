@@ -95,6 +95,7 @@ impl App {
             Mode::Browse if self.pending.is_some() => self.draw_toolbar(frame),
             Mode::Pick => self.draw_pick(frame),
             Mode::Archive => self.draw_archive(frame),
+            Mode::ReviewMenu => self.draw_review_menu(frame),
             Mode::Browse | Mode::ConfirmQuit => {}
         }
     }
