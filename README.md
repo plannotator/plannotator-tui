@@ -50,12 +50,27 @@ plannotator-tui last               # your coding agent's recent replies, pick on
 ```
 
 Drag with the mouse (or `v` and move) to select, then `a` 👍 · `c` 💬 · `d` ✗. `E` copies the
-review to the clipboard as numbered annotations (`# Annotations on plan.md`, `## Annotation 1
+feedback to the clipboard as numbered annotations (`# Annotations on plan.md`, `## Annotation 1
 (line 12)`, …). Every annotation is saved as JSON the moment you make it; `q` closes.
 
 Copies go to the clipboard as OSC 52, which is the terminal you are looking at, so on Herdr 0.9.0
 they reach your own machine even when the app runs on a remote server; Herdr Annotate's global
 `copy-context` and `copy-archive` actions do not, because they run outside a pane.
+
+For file and folder reviews, `E` sends only new or edited annotations. Send A and B, then
+add C: the next send includes just C. Sent notes stay visible with a marker; editing one
+makes it pending again, including after a restart. `R` **Resend all** includes every active
+note. With nothing pending, `E` reports “nothing new to send”. A failed send keeps the notes
+pending for retry.
+
+`F` **Finish review** archives sent, unchanged notes and leaves pending ones in place.
+`U` undoes the last finish during this session. `H` opens the archive, where Enter or a
+click restores a note even after reopening the app. Restoring keeps its original id and
+sent status. The archive is stored with the annotations and works even when feedback
+history is turned off. The header holds the send button and a `Review ▾ (m)` button whose
+menu lists these four actions with live counts (`R` resend all · 3 sent, `F` finish review
+· archive 3 sent, `U` undo finish, `H` archive · 2 notes); rows with nothing to act on are
+dimmed. The keys also work without opening the menu.
 
 | Where | Keys |
 |---|---|
@@ -63,14 +78,16 @@ they reach your own machine even when the app runs on a remote server; Herdr Ann
 | document | `j`/`k` block; `c` comment on the block; `x` clear its annotations; `v` select with `hjkl` `w` `b` `0` `$` |
 | toolbar | `a` looks good · `c` comment · `d` delete · `Esc` |
 | notes | `j`/`k`; `e` edit; `x` remove; click a bubble |
-| tree | `j`/`k`; `Enter` open; `E` sends every annotated file |
+| file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
+| tree | `j`/`k`; `Enter` open; `E` sends new notes across all reviewed files, including collapsed folders |
 
 ## Inside Herdr
 
 Install [Herdr Annotate](https://github.com/plannotator/herdr-annotate); it bundles this binary,
 opens it in a pane with `prefix+o` (folder) or `prefix+shift+o` (agent's last reply) or by
 Ctrl-clicking a `file://…md` link, and the header button sends the review straight back to
-the agent as its next message: `Send 3 to claude in w1:p2 ▸`.
+the agent as its next message: `Send 3 new ▸ claude in w1:p2 (E)`. Folder reviews show
+`Send 3 new across 2 files` and send one combined feedback message.
 
 ```toml
 # ~/.config/plannotator-tui/config.toml
@@ -134,7 +151,7 @@ browser app writes, so both tools share one history. To turn it off, set
 ## Headless
 
 ```sh
-plannotator-tui --export <file|folder>                          # the review, to stdout
+plannotator-tui --export <file|folder>                          # all active notes, to stdout (no delivery recorded)
 plannotator-tui --annotate <file> <quote> <text> [comment|looks_good|delete]
 plannotator-tui --snapshot <file|folder> [cols rows scroll] [quote]   # one frame as text
 plannotator-tui --bench <file>                                  # parse / layout timings

@@ -19,7 +19,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::doc::Document;
 
-#[derive(Debug)]
+mod review;
+use review::timestamp;
+
+#[derive(Debug, Clone)]
 pub(crate) struct Store {
     /// `None` for transient documents: nothing is ever written.
     path: Option<PathBuf>,
@@ -29,6 +32,7 @@ pub(crate) struct Store {
     /// Parallel to `annotations`.
     resolved: Vec<Resolution>,
     deliveries: Vec<Delivered>,
+    archived: Vec<Annotation>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -42,6 +46,10 @@ struct Record {
     /// Every send, newest last. Lets the UI say "sent" across restarts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     deliveries: Vec<Delivered>,
+    /// Finished annotations, kept whole so restoring preserves ids, anchors and metadata.
+    /// Additive: consumers of the existing annotations array can ignore this field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    archived: Vec<Annotation>,
 }
 
 /// One send of the feedback: when, where, and which annotations it covered.
@@ -122,6 +130,7 @@ impl Store {
             annotations: record.annotations,
             resolved: Vec::new(),
             deliveries: record.deliveries,
+            archived: record.archived,
         };
         store.resolve_all(doc);
         if imported && !store.annotations.is_empty() {
@@ -141,6 +150,7 @@ impl Store {
             annotations: Vec::new(),
             resolved: Vec::new(),
             deliveries: Vec::new(),
+            archived: Vec::new(),
         }
     }
 
@@ -150,7 +160,7 @@ impl Store {
         self.path.is_none()
     }
 
-    /// Every annotated document recorded for `project`, from the records that carry their
+    /// Every document with active or archived annotations recorded for `project`, from records carrying their
     /// path (written since 0.5.0). Older records surface through listed tree rows instead.
     pub(crate) fn annotated_documents(data_dir: &Path, project: &str) -> Vec<PathBuf> {
         let dir = plannotator_tui_schema::annotations_dir(data_dir, project, "x");
@@ -160,7 +170,7 @@ impl Store {
             .filter_map(Result::ok)
             .map(|e| e.path().join("annotations.json"))
             .filter_map(|record| read_record(&record).ok().flatten())
-            .filter(|record| !record.annotations.is_empty())
+            .filter(|record| !record.annotations.is_empty() || !record.archived.is_empty())
             .filter_map(|record| record.path)
             .collect();
         found.sort();
@@ -186,6 +196,7 @@ impl Store {
             path: self.document.clone(),
             annotations: self.annotations.clone(),
             deliveries: self.deliveries.clone(),
+            archived: self.archived.clone(),
         };
         let json = serde_json::to_string_pretty(&record)?;
         let tmp = path.with_extension("json.tmp");
@@ -210,7 +221,7 @@ impl Store {
             version: plannotator_tui_schema::blob_sha(doc.source.as_bytes()),
         };
         let anchor = Anchor::new(rendered, &doc.source, source_range, kind, block);
-        let now = timestamp();
+        let now = timestamp()?;
         self.annotations.push(Annotation {
             id: local_id(),
             document_id: String::new(),
@@ -258,15 +269,6 @@ impl Store {
         true
     }
 
-    /// Replace the body of annotation `id`.
-    pub(crate) fn edit_body(&mut self, id: &str, body: String) -> Result<bool> {
-        let Some(annotation) = self.annotations.iter_mut().find(|a| a.id == id) else { return Ok(false) };
-        annotation.body = body;
-        annotation.updated_at = timestamp();
-        self.save()?;
-        Ok(true)
-    }
-
     pub(crate) fn resolve_all(&mut self, doc: &Document) {
         self.resolved = self
             .annotations
@@ -294,40 +296,9 @@ impl Store {
         self.annotations.len()
     }
 
-    /// Remember that everything currently recorded was sent to `target`.
-    pub(crate) fn record_delivery(&mut self, target: &str) -> Result<()> {
-        self.deliveries.push(Delivered {
-            at: timestamp(),
-            target: target.to_owned(),
-            annotation_ids: self.annotations.iter().map(|a| a.id.clone()).collect(),
-        });
-        self.save()
-    }
-
-    /// True when the annotations on record are exactly the set of the last send.
-    pub(crate) fn all_delivered(&self) -> bool {
-        let Some(last) = self.deliveries.last() else { return false };
-        if self.annotations.is_empty() {
-            return false;
-        }
-        let mut sent: Vec<&str> = last.annotation_ids.iter().map(String::as_str).collect();
-        let mut have: Vec<&str> = self.annotations.iter().map(|a| a.id.as_str()).collect();
-        sent.sort_unstable();
-        have.sort_unstable();
-        sent == have
-    }
-
     pub(crate) fn orphans(&self) -> usize {
         self.resolved.iter().filter(|r| **r == Resolution::Orphan).count()
     }
-}
-
-fn timestamp() -> String {
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    // RFC 3339 without pulling in a date crate: the API accepts and returns this form.
-    let (year, month, day) = civil_from_days(secs / 86_400);
-    let (hour, minute, second) = ((secs / 3600) % 24, (secs / 60) % 60, secs % 60);
-    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
 /// Howard Hinnant's days-to-civil, for a dependency-free UTC date.
@@ -408,6 +379,7 @@ mod tests {
             annotations: Vec::new(),
             resolved: Vec::new(),
             deliveries: Vec::new(),
+            archived: Vec::new(),
         };
         seed.add(&doc, 0..5, "hello".into(), Kind::Comment, "hi".into()).expect("seed sidecar");
         let before = std::fs::read_to_string(&sidecar).expect("sidecar");
@@ -442,7 +414,8 @@ mod tests {
         assert!(!store.all_delivered(), "nothing to send yet");
         store.add(&doc, 0..3, "one".into(), Kind::Comment, "a".into()).expect("add");
         assert!(!store.all_delivered());
-        store.record_delivery("claude in w1:p1").expect("record");
+        let ids = store.placed().iter().map(|p| p.annotation.id.clone()).collect::<Vec<_>>();
+        store.record_delivery("claude in w1:p1", &ids).expect("record");
         assert!(store.all_delivered());
 
         let mut reloaded = Store::load(&location, &doc).expect("reload");

@@ -30,7 +30,7 @@ const USAGE: &str = "usage:
   plannotator-tui --blocks <file.md>
   plannotator-tui --annotate <file.md> <quote> <text> [comment|looks_good|delete]
   plannotator-tui --annotate-block <file.md> <block> <text>
-  plannotator-tui --snapshot <file.md> [cols rows scroll] [select-quote]
+  plannotator-tui --snapshot <file.md> [cols rows scroll] [select-quote] [menu]
   plannotator-tui config
   plannotator-tui --version
   plannotator-tui herdr open [file.md | folder] [--placement overlay|split|popup] [--deliver-to <pane>]
@@ -117,7 +117,10 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
             let cols: u16 = arg(2).and_then(|s| s.parse().ok()).unwrap_or(140);
             let rows: u16 = arg(3).and_then(|s| s.parse().ok()).unwrap_or(40);
             let scroll: i64 = arg(4).and_then(|s| s.parse().ok()).unwrap_or(0);
-            snapshot(&path(1)?, cols, rows, scroll, arg(5))
+            // A trailing `menu` opens the Review menu; a quote may come before it.
+            let menu = args.get(5..).is_some_and(|rest| rest.last().is_some_and(|last| last == "menu"));
+            let select = arg(5).filter(|quote| *quote != "menu");
+            snapshot(&path(1)?, cols, rows, scroll, select, menu)
         }
         Some("--version" | "-V") => {
             println!("plannotator-tui {}", env!("CARGO_PKG_VERSION"));
@@ -334,8 +337,15 @@ fn bench(path: &PathBuf) -> Result<()> {
 }
 
 /// Draw one frame into an in-memory backend and print it as text, followed by a mark map:
-/// `#` comment, `+` looks good, `-` delete, `%` selected.
-fn snapshot(path: &PathBuf, cols: u16, rows: u16, scroll: i64, select: Option<&str>) -> Result<()> {
+/// `#` comment, `+` looks good, `-` delete, `%` selected or highlighted.
+fn snapshot(
+    path: &PathBuf,
+    cols: u16,
+    rows: u16,
+    scroll: i64,
+    select: Option<&str>,
+    menu: bool,
+) -> Result<()> {
     use ratatui::backend::TestBackend;
     use ratatui::style::{Color, Modifier};
     let mut terminal = ratatui::Terminal::new(TestBackend::new(cols, rows))?;
@@ -344,6 +354,9 @@ fn snapshot(path: &PathBuf, cols: u16, rows: u16, scroll: i64, select: Option<&s
     app.scroll_for_snapshot(scroll);
     if let Some(quote) = select {
         app.select_quote_for_snapshot(quote)?;
+    }
+    if menu {
+        app.open_review_menu();
     }
     terminal.draw(|frame| app.draw(frame))?;
     let buffer = terminal.backend().buffer();

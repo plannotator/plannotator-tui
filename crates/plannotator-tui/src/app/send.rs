@@ -1,73 +1,146 @@
-//! Sending feedback to the delivery target and the state the Send button shows.
+//! Sending feedback and the state of the Send button.
+
+use std::fmt::Write as _;
 
 use anyhow::Result;
+use plannotator_tui_schema::Provenance;
 
+use super::feedback::{Feedback, FeedbackPart, ReviewCounts, SendScope};
 use super::{App, Mode};
 use crate::delivery::{Clipboard, Delivery as _, DeliveryError};
-use crate::store::Store;
-use plannotator_tui_schema::{Kind, Provenance};
+use crate::store::{Location, Store};
 
-/// What the Send button says. Re-derived from the store on load and file switch.
+#[cfg(test)]
+mod tests;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum SendState {
-    /// Something to send (or nothing yet, in which case the button is dimmed).
     Ready,
-    /// Everything on record has been sent; nothing changed since.
     Sent,
-    /// The last send was refused because the agent is at a dialog.
     Blocked(String),
 }
 
 impl App {
-    /// Send feedback: every annotated file's in folder mode, else the open file's.
     pub(super) fn send_feedback(&mut self) -> Result<()> {
-        let text = if self.tree.is_some() { self.folder_feedback()? } else { self.feedback() };
-        let count = self.send_count();
+        let scope = if self.is_file_review() { SendScope::Pending } else { SendScope::All };
+        self.send_feedback_scope(scope)
+    }
+
+    pub(super) fn resend_all(&mut self) -> Result<()> {
+        self.send_feedback_scope(SendScope::All)
+    }
+
+    fn send_feedback_scope(&mut self, scope: SendScope) -> Result<()> {
+        let mut feedback = self.prepare_feedback(scope)?;
+        if self.tree.is_some() {
+            self.folder_counts = std::mem::take(&mut feedback.counts);
+        }
+        if feedback.count == 0 {
+            self.derive_send_state();
+            self.status = Some(if scope == SendScope::Pending {
+                "nothing new to send".into()
+            } else {
+                "nothing to send".into()
+            });
+            return Ok(());
+        }
         let target = self.delivery.describe();
-        match self.delivery.deliver(&text) {
+        let retry = if scope == SendScope::All && self.is_file_review() { 'R' } else { 'E' };
+        match self.delivery.deliver(&feedback.text) {
             Ok(()) => {
-                self.record_delivery(&target)?;
-                self.archive_submission(&text);
-                self.send_state = SendState::Sent;
-                self.status = Some(format!("sent {count} annotation(s) → {target}"));
+                let files = feedback.parts.len();
+                self.archive_submission(&mut feedback);
+                let errors = self.remember_delivery(&mut feedback, &target);
+                self.derive_send_state();
+                let verb = if self.delivery.is_agent() { "sent" } else { "copied" };
+                let across =
+                    if self.tree.is_some() { format!(" across {files} files") } else { String::new() };
+                let mut status = format!("{verb} {} annotation(s){across} → {target}", feedback.count);
+                if !errors.is_empty() {
+                    let _ = write!(
+                        status,
+                        "; could not save sent status: {} · next send may repeat it",
+                        errors.join("; ")
+                    );
+                }
+                self.status = Some(status);
             }
             Err(DeliveryError::Blocked(msg)) => {
-                self.copy_fallback(&text);
-                self.status =
-                    Some(format!("{target} is at a dialog — copied to clipboard instead; E retries"));
+                let copied = if self.copy_fallback(&feedback.text) { " · copied to clipboard" } else { "" };
+                self.status = Some(format!("{target} is at a dialog{copied} · {retry} retry"));
                 self.send_state = SendState::Blocked(msg);
             }
             Err(DeliveryError::Unavailable(msg)) => {
-                self.copy_fallback(&text);
-                self.status = Some(format!("no agent to send to ({msg}) — copied to clipboard"));
+                let copied = if self.copy_fallback(&feedback.text) { " · copied to clipboard" } else { "" };
+                self.status = Some(format!("no agent to send to ({msg}){copied} · {retry} retry"));
+                self.derive_send_state();
             }
             Err(DeliveryError::Failed(err)) => {
-                self.status = Some(format!("send failed: {err:#}"));
+                self.status = Some(format!("send failed: {err:#} · {retry} retry"));
+                self.derive_send_state();
             }
         }
         Ok(())
     }
 
-    fn copy_fallback(&self, text: &str) {
-        if self.clipboard {
-            let _ = Clipboard.deliver(text);
-        }
+    fn copy_fallback(&self, text: &str) -> bool {
+        self.clipboard && Clipboard.deliver(text).is_ok()
     }
 
-    /// Record the submission in the shared feedback archive (contract: Plannotator's
-    /// `feedback-archive.ts` v1). Never fails the send; the annotation store is the
-    /// recovery copy when archiving cannot write.
-    fn archive_submission(&self, feedback: &str) {
+    /// Keep the ids from the body we delivered. Attempt every file even when one record
+    /// cannot be saved, and refresh counts from any intervening changes.
+    fn remember_delivery(&mut self, feedback: &mut Feedback, target: &str) -> Vec<String> {
+        let mut errors = Vec::new();
+        for mut part in feedback.parts.drain(..) {
+            if let Err(err) = self.record_feedback_delivery(&mut part, target) {
+                let name = part
+                    .path
+                    .as_ref()
+                    .map_or_else(|| self.open.source.name.clone(), |p| self.review_file_name(p));
+                errors.push(format!("{name}: {err:#}"));
+            }
+            if self.tree.is_some()
+                && let Some(path) = &part.path
+            {
+                self.folder_counts.insert(path.clone(), ReviewCounts::for_store(&part.store));
+            }
+            if part.path.as_deref().is_none_or(|p| self.is_open(p)) {
+                self.open.store = part.store;
+            }
+        }
+        errors
+    }
+
+    fn record_feedback_delivery(&self, part: &mut FeedbackPart, target: &str) -> Result<()> {
+        if self.is_file_review()
+            && let Some(path) = &part.path
+        {
+            let latest = if self.is_open(path) {
+                let location = Location::for_file(&self.data_dir, &self.project, path);
+                Store::load(&location, &self.open.doc)?
+            } else {
+                self.load_review_file(path)?.1
+            };
+            let unchanged = part.store.same_review(&latest);
+            part.store = latest;
+            // The transport can block while another writer changes the shared record.
+            // Keep that record intact; its newer notes were not in the delivered body.
+            anyhow::ensure!(unchanged, "annotations changed while sending; kept the newer record");
+        }
+        part.store.record_delivery(target, &part.ids)
+    }
+
+    /// The shared submission history records only the selected feedback. Finishing a
+    /// review has its own complete copies in the annotation record and does not rely on it.
+    fn archive_submission(&self, feedback: &mut Feedback) {
         use crate::archive::{self, Submission, Target};
         if !archive::enabled(|key| std::env::var(key).ok(), &self.data_dir) {
             return;
         }
         let (surface, target, annotations) = if let Some(tree) = &self.tree {
-            // A folder session submits one body of feedback for the whole session;
-            // the per-document records are not part of it (contract semantics).
             ("annotate-folder", Target::file(tree.root()), Vec::new())
         } else {
-            let annotations = Self::annotation_records(&self.open.store);
+            let annotations = std::mem::take(&mut feedback.annotations);
             match &self.open.source.provenance {
                 Provenance::File { path } => ("annotate", Target::file(path), annotations),
                 Provenance::AgentMessage { host, session, .. } => (
@@ -89,54 +162,35 @@ impl App {
             surface,
             origin,
             target,
-            feedback,
+            feedback: &feedback.text,
             annotations,
-            count: self.send_count(),
+            count: feedback.count,
             now_ms: None,
         });
     }
 
-    fn annotation_records(store: &Store) -> Vec<crate::archive::AnnotationRecord> {
-        store
-            .placed()
-            .iter()
-            .map(|placed| {
-                let a = placed.annotation;
-                crate::archive::AnnotationRecord {
-                    id: Some(a.id.clone()),
-                    kind: Some(
-                        match a.anchor.kind() {
-                            Kind::Comment => "comment",
-                            Kind::LooksGood => "looks-good",
-                            Kind::Delete => "delete",
-                        }
-                        .to_owned(),
-                    ),
-                    text: (!a.body.is_empty()).then(|| a.body.clone()),
-                    original_text: (!a.anchor.original_text.is_empty())
-                        .then(|| a.anchor.original_text.clone()),
-                }
-            })
-            .collect()
-    }
-
-    /// Annotations the next send covers: the whole folder's, or the open file's.
     pub(super) fn send_count(&self) -> usize {
-        match &self.tree {
-            Some(tree) => tree.rows.iter().filter(|r| !r.is_dir).map(|r| r.annotations).sum(),
-            None => self.open.store.placed().len(),
-        }
+        if self.is_file_review() { self.review_counts().pending } else { self.open.store.placed().len() }
     }
 
-    /// Text for the Send button.
     pub(super) fn send_label(&self) -> String {
         let target = self.delivery.describe();
         let count = self.send_count();
+        if self.is_file_review() {
+            let verb = if self.delivery.is_agent() { "Send" } else { "Copy" };
+            let across = if self.tree.is_some() {
+                format!(" across {} files", self.pending_file_count())
+            } else {
+                String::new()
+            };
+            let to = if self.delivery.is_agent() { format!(" ▸ {target}") } else { String::new() };
+            return format!("{verb} {count} new{across}{to} (E)");
+        }
         if self.delivery.is_agent() {
             match &self.send_state {
                 SendState::Ready => format!("Send {count} to {target} ▸"),
                 SendState::Sent => format!("Sent ▸ {target}"),
-                SendState::Blocked(_) => format!("{target} at a dialog · copied · click to retry"),
+                SendState::Blocked(_) => format!("{target} at a dialog · click to retry"),
             }
         } else {
             match &self.send_state {
@@ -146,12 +200,12 @@ impl App {
         }
     }
 
-    /// True when an agent is waiting on feedback that has not been sent since it changed.
     pub(super) fn has_unsent(&self) -> bool {
-        self.delivery.is_agent() && self.send_count() > 0 && self.send_state != SendState::Sent
+        self.delivery.is_agent()
+            && self.send_count() > 0
+            && (self.is_file_review() || self.send_state != SendState::Sent)
     }
 
-    /// Quit, unless an agent is still waiting on feedback: then ask in the footer first.
     pub(super) fn request_quit(&mut self) {
         if self.has_unsent() {
             self.mode = Mode::ConfirmQuit;
@@ -160,17 +214,18 @@ impl App {
         }
     }
 
-    /// Recompute the send state from the record (on load and file switch).
     pub(super) fn derive_send_state(&mut self) {
-        let delivered = match &self.tree {
-            Some(_) => self.folder_all_delivered().unwrap_or(false),
-            None => self.open.store.all_delivered(),
+        let delivered = if self.is_file_review() {
+            let counts = self.review_counts();
+            counts.pending == 0 && counts.sent > 0
+        } else {
+            self.open.store.all_delivered()
         };
         self.send_state = if delivered { SendState::Sent } else { SendState::Ready };
     }
 
-    /// Any annotation change makes the record unsent again.
     pub(super) fn mark_unsent(&mut self) {
-        self.send_state = SendState::Ready;
+        self.update_open_review_counts();
+        self.derive_send_state();
     }
 }
