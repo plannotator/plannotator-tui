@@ -3,9 +3,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use plannotator_tui_schema::Kind;
+use plannotator_tui_schema::{DocumentSource, Kind, Provenance};
 
 use crate::app::review_test_support::{RecordingDelivery, file_app, folder_app, press};
+use crate::app::send::SendState;
+use crate::app::{Focus, Mode, Open};
 use crate::delivery::{Delivery, DeliveryError};
 use crate::doc::Document;
 use crate::store::{Location, Store};
@@ -92,6 +94,52 @@ fn send_writeback_preserves_changes_made_while_the_transport_is_running() {
         let resent = delivery.calls.borrow()[1].clone();
         assert!(resent.contains("edited during send") && resent.contains("added during send"));
         assert!(!resent.contains("unchanged open file"));
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+}
+
+/// The rule: removing a delivered note creates nothing new to send. After A and B were
+/// sent and B is removed, the review stays `Sent` and `q` quits without asking. This
+/// holds for file reviews and reply reviews alike; 0.7.0 re-armed a reply review to
+/// "Send 1" here, which would have resent A although it was never changed.
+#[test]
+fn removing_a_sent_annotation_leaves_the_review_sent() {
+    for reply in [false, true] {
+        let (root, mut app, delivery) = file_app("remove-after-send");
+        if reply {
+            let source = DocumentSource::new(
+                "one\n\ntwo\n".into(),
+                "agent reply",
+                true,
+                Provenance::AgentMessage {
+                    host: "claude".into(),
+                    session: None,
+                    message_id: Some("message-1".into()),
+                },
+            );
+            app.open = Open::new(source, 80, &app.data_dir, &app.project).expect("reply");
+        }
+        app.add_quote_annotation("one", Kind::Comment, "A".into()).expect("A");
+        app.add_quote_annotation("two", Kind::Comment, "B".into()).expect("B");
+        assert!(app.has_unsent(), "reply={reply}");
+        press(&mut app, 'E');
+        assert_eq!(delivery.calls.borrow().len(), 1, "reply={reply}");
+        assert_eq!(app.send_state, SendState::Sent, "reply={reply}");
+
+        app.focus = Focus::Rail;
+        app.rail_cursor = 1;
+        press(&mut app, 'x');
+        assert_eq!(app.open.store.len(), 1, "reply={reply}");
+        assert_eq!(app.status.as_deref(), Some("annotation removed"), "reply={reply}");
+        assert_eq!(app.send_state, SendState::Sent, "reply={reply}: removing B is not a change to send");
+        assert!(!app.has_unsent(), "reply={reply}");
+        if !reply {
+            assert_eq!(app.send_count(), 0, "A was delivered and is still unchanged");
+        }
+        press(&mut app, 'q');
+        assert!(app.quit, "reply={reply}: nothing to send, so no confirmation");
+        assert_eq!(app.mode, Mode::Browse, "reply={reply}");
+        assert_eq!(delivery.calls.borrow().len(), 1, "reply={reply}: no send was triggered");
         std::fs::remove_dir_all(root).expect("cleanup");
     }
 }
