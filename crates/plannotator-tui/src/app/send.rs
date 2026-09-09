@@ -5,9 +5,13 @@ use std::fmt::Write as _;
 use anyhow::Result;
 use plannotator_tui_schema::Provenance;
 
-use super::feedback::{Feedback, ReviewCounts, SendScope};
+use super::feedback::{Feedback, FeedbackPart, ReviewCounts, SendScope};
 use super::{App, Mode};
 use crate::delivery::{Clipboard, Delivery as _, DeliveryError};
+use crate::store::{Location, Store};
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum SendState {
@@ -83,12 +87,12 @@ impl App {
         self.clipboard && Clipboard.deliver(text).is_ok()
     }
 
-    /// Use the stores and ids from the body we delivered, never a fresh export or the
-    /// whole active set. Attempt every file even when one record cannot be saved.
+    /// Keep the ids from the body we delivered. Attempt every file even when one record
+    /// cannot be saved, and refresh counts from any intervening changes.
     fn remember_delivery(&mut self, feedback: &mut Feedback, target: &str) -> Vec<String> {
         let mut errors = Vec::new();
         for mut part in feedback.parts.drain(..) {
-            if let Err(err) = part.store.record_delivery(target, &part.ids) {
+            if let Err(err) = self.record_feedback_delivery(&mut part, target) {
                 let name = part
                     .path
                     .as_ref()
@@ -105,6 +109,25 @@ impl App {
             }
         }
         errors
+    }
+
+    fn record_feedback_delivery(&self, part: &mut FeedbackPart, target: &str) -> Result<()> {
+        if self.is_file_review()
+            && let Some(path) = &part.path
+        {
+            let latest = if self.is_open(path) {
+                let location = Location::for_file(&self.data_dir, &self.project, path);
+                Store::load(&location, &self.open.doc)?
+            } else {
+                self.load_review_file(path)?.1
+            };
+            let unchanged = part.store.same_review(&latest);
+            part.store = latest;
+            // The transport can block while another writer changes the shared record.
+            // Keep that record intact; its newer notes were not in the delivered body.
+            anyhow::ensure!(unchanged, "annotations changed while sending; kept the newer record");
+        }
+        part.store.record_delivery(target, &part.ids)
     }
 
     /// The shared submission history records only the selected feedback. Finishing a

@@ -19,6 +19,13 @@ pub(super) fn timestamp() -> Result<String> {
 }
 
 impl Store {
+    /// Compare persisted review data, independent of resolution against the document.
+    pub(crate) fn same_review(&self, other: &Self) -> bool {
+        self.annotations == other.annotations
+            && self.deliveries == other.deliveries
+            && self.archived == other.archived
+    }
+
     fn last_delivery(&self, id: &str) -> Option<&Delivered> {
         self.deliveries.iter().rev().find(|d| d.annotation_ids.iter().any(|sent| sent == id))
     }
