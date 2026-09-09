@@ -16,7 +16,7 @@ cargo build --release
 | document | drag with the mouse, or `v` then `hjkl` / `w` `b` / `0` `$` to select; `Enter` confirms · `j`/`k` or click selects a block · `c` comments on the block · `x` clears the block's annotations |
 | selection toolbar | `a` 👍 looks good · `c` 💬 comment (opens a box at the selection) · `d` ✗ delete · `Esc` clears |
 | rail | `j`/`k` move · `e` / `Enter` edit body · `x` remove · click a bubble to focus it |
-| file/folder review | `E` send new or edited notes · `R` resend all active notes · `F` archive sent notes · `U` undo finish · `H` open archive |
+| file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | tree | `j`/`k` move · `Enter` open · `E` send new feedback across files, including collapsed folders · counts show active notes per file |
 | archive | `j`/`k` or ↑/↓ select · `Enter` or click restore · `Esc` close |
 
@@ -25,8 +25,10 @@ Selections and exports are copied to the terminal clipboard (OSC 52).
 Sent notes remain visible. File reviews send only new or edited notes by default;
 `R` explicitly includes the sent ones too. `F` archives only sent notes that have not
 changed since delivery. Archived notes survive restarts, and restoring them keeps their
-ids and delivery history. Failed sends keep the feedback pending. These actions also
-have clickable buttons, which wrap onto another header row in narrow panes.
+ids and delivery history. Failed sends keep the feedback pending. The header shows the
+send button and a `Review ▾ (m)` button; its menu lists the four actions with live counts,
+dims the ones with nothing to act on, and runs a row on `Enter`, a click, or the row's own
+key. The keys also work directly, without the menu.
 
 ## Where things live
 

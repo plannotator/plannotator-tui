@@ -60,14 +60,17 @@ they reach your own machine even when the app runs on a remote server; Herdr Ann
 For file and folder reviews, `E` sends only new or edited annotations. Send A and B, then
 add C: the next send includes just C. Sent notes stay visible with a marker; editing one
 makes it pending again, including after a restart. `R` **Resend all** includes every active
-note, with the button showing how many are already sent. With nothing pending, `E` reports
-“nothing new to send”. A failed send keeps the notes pending for retry.
+note. With nothing pending, `E` reports “nothing new to send”. A failed send keeps the notes
+pending for retry.
 
 `F` **Finish review** archives sent, unchanged notes and leaves pending ones in place.
 `U` undoes the last finish during this session. `H` opens the archive, where Enter or a
 click restores a note even after reopening the app. Restoring keeps its original id and
 sent status. The archive is stored with the annotations and works even when feedback
-history is turned off.
+history is turned off. The header holds the send button and a `Review ▾ (m)` button whose
+menu lists these four actions with live counts (`R` resend all · 3 sent, `F` finish review
+· archive 3 sent, `U` undo finish, `H` archive · 2 notes); rows with nothing to act on are
+dimmed. The keys also work without opening the menu.
 
 | Where | Keys |
 |---|---|
@@ -75,7 +78,7 @@ history is turned off.
 | document | `j`/`k` block; `c` comment on the block; `x` clear its annotations; `v` select with `hjkl` `w` `b` `0` `$` |
 | toolbar | `a` looks good · `c` comment · `d` delete · `Esc` |
 | notes | `j`/`k`; `e` edit; `x` remove; click a bubble |
-| file/folder review | `E` send new · `R` resend all · `F` finish review · `U` undo finish · `H` archive |
+| file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | tree | `j`/`k`; `Enter` open; `E` sends new notes across all reviewed files, including collapsed folders |
 
 ## Inside Herdr
