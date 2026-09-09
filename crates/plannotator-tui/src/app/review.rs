@@ -148,7 +148,10 @@ impl App {
         let Some(item) = self.archive_items.get(self.archive_cursor).cloned() else { return };
         match self.restore_review_file(&item.path, std::slice::from_ref(&item.annotation.id)) {
             Ok(0) => {
-                self.status = Some("could not restore: an annotation with this id is already active".into());
+                self.status = Some(format!(
+                    "could not restore {}: an annotation with this id is already active",
+                    self.review_file_name(&item.path)
+                ));
             }
             Ok(_) => {
                 for batch in &mut self.undo_archive {
