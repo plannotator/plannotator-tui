@@ -64,6 +64,54 @@ fn an_edit_advances_past_a_delivery_even_if_the_clock_went_backwards() {
     assert!(!store.is_pending(&store.annotations[0]));
 }
 
+/// `YYYY-MM-DDTHH:MM:SS.mmmZ`: exactly three fractional digits and a trailing `Z`.
+fn has_millis_shape(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 24
+        && bytes[19] == b'.'
+        && bytes[23] == b'Z'
+        && bytes[20..23].iter().all(u8::is_ascii_digit)
+        && parse_time(value).is_some()
+}
+
+#[test]
+fn every_written_timestamp_has_three_fractional_digits_and_a_trailing_z() {
+    let doc = Document::parse("one\n".into());
+    let mut store = Store::transient();
+    let id = add(&mut store, &doc, "one", "note");
+    let fresh = store.annotations[0].updated_at.clone();
+    assert!(has_millis_shape(&fresh), "fresh timestamp was {fresh:?}");
+    assert_eq!(store.annotations[0].created_at, fresh);
+
+    store.record_delivery("agent", std::slice::from_ref(&id)).expect("send");
+    let sent = store.deliveries[0].at.clone();
+    assert!(has_millis_shape(&sent), "delivery timestamp was {sent:?}");
+    assert!(!store.is_pending(&store.annotations[0]));
+
+    store.edit_body(&id, "edited".into()).expect("edit right after the send");
+    let advanced = store.annotations[0].updated_at.clone();
+    assert!(has_millis_shape(&advanced), "advanced timestamp was {advanced:?}");
+    assert!(store.is_pending(&store.annotations[0]));
+
+    // A clock that has not moved (or went backwards) since the send advances the edit by
+    // one millisecond, the smallest step the stored shape can represent.
+    store.annotations[0].updated_at = "2099-01-01T00:00:00Z".into();
+    store.deliveries = vec![Delivered {
+        at: "2099-01-01T00:00:00.000Z".into(),
+        target: "agent".into(),
+        annotation_ids: vec![id.clone()],
+    }];
+    store.edit_body(&id, "edited again".into()).expect("edit against a stalled clock");
+    assert_eq!(store.annotations[0].updated_at, "2099-01-01T00:00:00.001Z");
+
+    // Finer digits in an older record are read but never written back: a delivery after
+    // such a timestamp rounds up so the annotation does not stay pending.
+    store.annotations[0].updated_at = "2099-01-01T00:00:00.425677Z".into();
+    store.record_delivery("agent", &[id]).expect("send after a fine-grained timestamp");
+    assert_eq!(store.deliveries.last().expect("delivery").at, "2099-01-01T00:00:00.426Z");
+    assert!(!store.is_pending(&store.annotations[0]));
+}
+
 #[test]
 fn rfc3339_offsets_and_precision_are_compared_as_instants() {
     let doc = Document::parse("one\n".into());
