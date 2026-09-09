@@ -228,6 +228,11 @@ impl App {
                 feedback.add(Some(path), &name, &doc, store, scope);
             }
         }
+        // Folder feedback has always ended each file's block with one extra newline, so
+        // the body and `--export <folder>` keep the shape earlier releases produced.
+        if !feedback.text.is_empty() {
+            feedback.text.push('\n');
+        }
         Ok(feedback)
     }
 

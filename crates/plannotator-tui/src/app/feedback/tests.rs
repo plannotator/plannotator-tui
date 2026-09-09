@@ -159,6 +159,35 @@ fn folder_counts_and_delivery_cover_collapsed_files_but_exclude_orphans_and_sibl
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 
+/// Folder output is `writeln!` per file: every block, including the last, is followed by
+/// a blank line, while a single file's export ends with the block's own newline only.
+#[test]
+fn folder_feedback_ends_every_file_block_with_a_blank_line() {
+    let (root, mut app, delivery) = folder_app("folder-newline");
+    app.add_quote_annotation("one", Kind::Comment, "note A".into()).expect("A");
+    let other = root.join("docs/b.md");
+    std::fs::write(&other, "beta\n").expect("second file");
+    let (doc, mut store) = app.load_review_file(&other).expect("second store");
+    store.add(&doc, 0..4, "beta".into(), Kind::Comment, "note B".into()).expect("B");
+    app.refresh_review_counts().expect("counts");
+
+    let single = app.feedback();
+    assert!(single.ends_with("> note A\n\n") && !single.ends_with("\n\n\n"), "{single:?}");
+    let folder = app.folder_feedback().expect("folder export");
+    assert_eq!(
+        folder,
+        format!(
+            "{single}\n# Annotations on b.md\n\n## Annotation 1 (line 1)\nComment on: \"beta\"\n> note B\n\n\n"
+        )
+    );
+    assert!(folder.ends_with("> note B\n\n\n"), "{folder:?}");
+
+    press(&mut app, 'E');
+    let sent = delivery.calls.borrow()[0].clone();
+    assert_eq!(sent, folder, "the send body is the export");
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
 #[test]
 fn reply_reviews_keep_sending_the_whole_transient_review() {
     let (root, mut app, delivery) = file_app("reply-scope");
