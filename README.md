@@ -53,6 +53,10 @@ Drag with the mouse (or `v` and move) to select, then `a` 👍 · `c` 💬 · `d
 review to the clipboard as numbered annotations (`# Annotations on plan.md`, `## Annotation 1
 (line 12)`, …). Every annotation is saved as JSON the moment you make it; `q` closes.
 
+Copies go to the clipboard as OSC 52, which is the terminal you are looking at, so on Herdr 0.9.0
+they reach your own machine even when the app runs on a remote server; Herdr Annotate's global
+`copy-context` and `copy-archive` actions do not, because they run outside a pane.
+
 | Where | Keys |
 |---|---|
 | anywhere | `Tab` cycle tree · document · notes; `E` send; `t` tree; `r` reload; `q` quit |
