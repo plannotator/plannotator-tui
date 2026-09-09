@@ -1,6 +1,5 @@
-//! The header row: the Send button, right-aligned, and nothing else. The pane label
-//! (Herdr's) names the app; the footer names the file. The button is clickable, so its rect
-//! is recorded for hit-testing.
+//! Visible review actions. Buttons wrap onto another row in a narrow pane instead of
+//! disappearing or hiding a single action behind a menu.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -16,20 +15,80 @@ const IDLE_BG: Color = Color::Indexed(238);
 const SENT_BG: Color = Color::Indexed(22);
 const BLOCKED_BG: Color = Color::Indexed(58);
 
+#[derive(Debug, Clone, Copy)]
+enum Button {
+    Send,
+    Resend,
+    Finish,
+    Archive,
+}
+
 impl App {
+    fn header_buttons(&self, width: u16) -> Vec<(Button, String, Rect)> {
+        if width == 0 {
+            return Vec::new();
+        }
+        let mut labels = vec![(Button::Send, self.send_label())];
+        if self.is_file_review() {
+            let counts = self.review_counts();
+            labels.extend([
+                (Button::Resend, format!("Resend all ({} sent) (R)", counts.sent)),
+                (Button::Finish, "Finish review (F)".into()),
+                (Button::Archive, format!("Archive {} (H)", counts.archived)),
+            ]);
+        }
+        let mut right = width;
+        let mut y = 0;
+        labels
+            .into_iter()
+            .map(|(button, label)| {
+                let label = format!(" {label} ");
+                let button_width = label.width().min(usize::from(width)) as u16;
+                if button_width > right {
+                    y += 1;
+                    right = width;
+                }
+                let rect = Rect { x: right - button_width, y, width: button_width, height: 1 };
+                right = rect.x.saturating_sub(1);
+                (button, label, rect)
+            })
+            .collect()
+    }
+
+    pub(super) fn header_height(&self, width: u16) -> u16 {
+        self.header_buttons(width).last().map_or(1, |(_, _, rect)| rect.y + 1)
+    }
+
     pub(super) fn draw_header(&mut self, frame: &mut Frame, area: Rect) {
-        let button = format!(" {} ", self.send_label());
-        let width = button.width() as u16;
-        self.geometry.send_button =
-            (area.width >= width).then(|| Rect { x: area.right() - width, y: area.y, width, height: 1 });
-        if let Some(rect) = self.geometry.send_button {
-            let span = Span::styled(button, self.button_style());
-            frame.buffer_mut().set_span(rect.x, rect.y, &span, rect.width);
+        for (button, label, mut rect) in self.header_buttons(area.width) {
+            if rect.y >= area.height {
+                continue;
+            }
+            rect.x += area.x;
+            rect.y += area.y;
+            let style = match button {
+                Button::Send => {
+                    self.geometry.send_button = Some(rect);
+                    self.button_style()
+                }
+                Button::Resend => {
+                    self.geometry.resend_button = Some(rect);
+                    Style::new().fg(Color::Cyan).bg(IDLE_BG)
+                }
+                Button::Finish => {
+                    self.geometry.finish_button = Some(rect);
+                    Style::new().fg(Color::Cyan).bg(IDLE_BG)
+                }
+                Button::Archive => {
+                    self.geometry.archive_button = Some(rect);
+                    Style::new().fg(Color::Cyan).bg(IDLE_BG)
+                }
+            };
+            frame.buffer_mut().set_span(rect.x, rect.y, &Span::styled(label, style), rect.width);
         }
     }
 
-    /// Teal when there is something to send, grey at zero, green once sent, yellow when the
-    /// agent refused it.
+    /// At zero the button is still drawn and clickable; it reports the no-op in the footer.
     fn button_style(&self) -> Style {
         match &self.send_state {
             SendState::Ready if self.send_count() == 0 => {

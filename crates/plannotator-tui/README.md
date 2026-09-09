@@ -16,9 +16,17 @@ cargo build --release
 | document | drag with the mouse, or `v` then `hjkl` / `w` `b` / `0` `$` to select; `Enter` confirms · `j`/`k` or click selects a block · `c` comments on the block · `x` clears the block's annotations |
 | selection toolbar | `a` 👍 looks good · `c` 💬 comment (opens a box at the selection) · `d` ✗ delete · `Esc` clears |
 | rail | `j`/`k` move · `e` / `Enter` edit body · `x` remove · click a bubble to focus it |
-| tree | `j`/`k` move · `Enter` open · `E` send feedback for every annotated file · counts show per file |
+| file/folder review | `E` send new or edited notes · `R` resend all active notes · `F` archive sent notes · `U` undo finish · `H` open archive |
+| tree | `j`/`k` move · `Enter` open · `E` send new feedback across files, including collapsed folders · counts show active notes per file |
+| archive | `j`/`k` or ↑/↓ select · `Enter` or click restore · `Esc` close |
 
 Selections and exports are copied to the terminal clipboard (OSC 52).
+
+Sent notes remain visible. File reviews send only new or edited notes by default;
+`R` explicitly includes the sent ones too. `F` archives only sent notes that have not
+changed since delivery. Archived notes survive restarts, and restoring them keeps their
+ids and delivery history. Failed sends keep the feedback pending. These actions also
+have clickable buttons, which wrap onto another header row in narrow panes.
 
 ## Where things live
 
@@ -37,7 +45,7 @@ documents (an agent's last message, stdin) are never persisted.
 ## Headless tools
 
 ```bash
-plannotator-tui --export <file.md>                     # feedback markdown to stdout
+plannotator-tui --export <file.md>                     # all active feedback to stdout; does not mark it sent
 plannotator-tui --bench <file.md>                      # parse / render / reflow timings
 plannotator-tui --blocks <file.md>                     # block index, kind, first row
 plannotator-tui --annotate <file.md> <quote> <text> [comment|looks_good|delete]

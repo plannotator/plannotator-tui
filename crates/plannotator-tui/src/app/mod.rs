@@ -1,19 +1,23 @@
 //! Application state. Input handling lives in `input`, drawing in `draw`; this module owns
 //! the data they share and the operations that change it.
 
+mod archive_view;
 mod compose;
 mod draw;
+mod feedback;
 mod header;
 mod input;
 
 mod pick;
+mod review;
+#[cfg(test)]
+mod review_test_support;
 mod selection;
 mod send;
 #[cfg(test)]
 mod tests;
 
 use std::collections::HashMap;
-use std::fmt::Write as _;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
@@ -23,7 +27,6 @@ use ratatui::layout::Rect;
 
 use crate::delivery::Delivery;
 use crate::doc::Document;
-use crate::export;
 use crate::layout::DocLayout;
 use crate::store::{Location, Store};
 use crate::tree::Tree;
@@ -52,6 +55,8 @@ enum Mode {
     ConfirmQuit,
     /// Choosing which of the agent's recent messages to review.
     Pick,
+    /// Restoring annotations from finished file reviews.
+    Archive,
 }
 
 /// Which pane keyboard input goes to.
@@ -73,6 +78,11 @@ struct Geometry {
     bubbles: Vec<(Rect, String)>,
     /// The header's Send button; `None` when the header was too narrow for it.
     send_button: Option<Rect>,
+    resend_button: Option<Rect>,
+    finish_button: Option<Rect>,
+    archive_button: Option<Rect>,
+    undo_button: Option<Rect>,
+    archive_rows: Vec<(Rect, usize)>,
     /// Picker rows drawn last frame, with their candidate index.
     pick_rows: Vec<(Rect, usize)>,
 }
@@ -124,6 +134,10 @@ pub(crate) struct App {
     tree_visible: Option<bool>,
     delivery: Box<dyn Delivery>,
     send_state: SendState,
+    folder_counts: HashMap<PathBuf, feedback::ReviewCounts>,
+    undo_archive: Vec<review::ArchivedBatch>,
+    archive_items: Vec<review::ArchivedItem>,
+    archive_cursor: usize,
     focus: Focus,
     scroll: usize,
     selected: usize,
@@ -195,6 +209,10 @@ impl App {
             tree_visible: None,
             delivery,
             send_state,
+            folder_counts: HashMap::new(),
+            undo_archive: Vec::new(),
+            archive_items: Vec::new(),
+            archive_cursor: 0,
             focus: Focus::Document,
             scroll: 0,
             selected: 0,
@@ -247,10 +265,11 @@ impl App {
         if let Some(path) = &first {
             app.open = Open::new(read_file(path)?, width, &app.data_dir, &app.project)?;
         }
-        app.derive_send_state();
         app.refresh_counts(&mut tree);
         app.tree_cursor = first.as_deref().and_then(|p| tree.position(p)).unwrap_or(0);
         app.tree = Some(tree);
+        app.refresh_review_counts()?;
+        app.derive_send_state();
         Ok(app)
     }
 
@@ -290,6 +309,8 @@ impl App {
                 self.refresh_counts(&mut tree);
                 self.tree = Some(tree);
                 result?;
+                self.refresh_review_counts()?;
+                self.derive_send_state();
             }
             return Ok(());
         }
@@ -300,6 +321,7 @@ impl App {
         }
         let width = self.open.layout.width;
         self.open = Open::new(read_file(&path)?, width, &self.data_dir, &self.project)?;
+        self.update_open_review_counts();
         self.derive_send_state();
         self.scroll = 0;
         self.selected = 0;
@@ -364,95 +386,6 @@ impl App {
             self.sync_tree_counts();
         }
         Ok(())
-    }
-
-    /// The feedback document for every placed annotation of the open file.
-    pub(crate) fn feedback(&self) -> String {
-        Self::feedback_for(&self.open, &self.open.source.name)
-    }
-
-    fn feedback_for(open: &Open, name: &str) -> String {
-        let source = &open.doc.source;
-        let entries: Vec<export::Entry<'_>> = open
-            .store
-            .placed()
-            .into_iter()
-            .map(|p| export::Entry {
-                annotation: p.annotation,
-                lines: export::line_span(source, p.range),
-                range: p.range.clone(),
-            })
-            .collect();
-        export::feedback(source, name, &entries)
-    }
-
-    /// Feedback for every annotated file in the folder, one `# Annotations on <path>` block each.
-    pub(crate) fn folder_feedback(&self) -> Result<String> {
-        let Some(tree) = &self.tree else { return Ok(self.feedback()) };
-        let width = self.open.layout.width;
-        let mut out = String::new();
-        for path in self.annotated_files() {
-            let open = Open::new(read_file(&path)?, width, &self.data_dir, &self.project)?;
-            let relative = path.strip_prefix(tree.root()).unwrap_or(&path);
-            let _ = writeln!(out, "{}", Self::feedback_for(&open, &relative.display().to_string()));
-        }
-        Ok(if out.is_empty() { "No annotations.".to_owned() } else { out })
-    }
-
-    /// Paths of every annotated file in the folder: the project's records (which carry their
-    /// document path since 0.5.0) plus any listed tree row with a count, so nothing depends
-    /// on which directories happen to be expanded.
-    fn annotated_files(&self) -> Vec<PathBuf> {
-        let Some(tree) = &self.tree else { return Vec::new() };
-        let mut found = Store::annotated_documents(&self.data_dir, &self.project);
-        for row in tree.rows.iter().filter(|r| !r.is_dir && r.annotations > 0) {
-            found.push(row.path.clone());
-        }
-        found.sort();
-        found.dedup();
-        found.retain(|p| p.is_file());
-        found
-    }
-
-    fn is_open(&self, path: &Path) -> bool {
-        matches!(&self.open.source.provenance, Provenance::File { path: p } if p == path)
-    }
-
-    /// Remember the send on every file it covered: the open one in memory, the rest on disk.
-    fn record_delivery(&mut self, target: &str) -> Result<()> {
-        if self.tree.is_none() {
-            return self.open.store.record_delivery(target);
-        }
-        let width = self.open.layout.width;
-        for path in self.annotated_files() {
-            if self.is_open(&path) {
-                self.open.store.record_delivery(target)?;
-            } else {
-                let mut open = Open::new(read_file(&path)?, width, &self.data_dir, &self.project)?;
-                open.store.record_delivery(target)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// True when every annotated file in the folder has been sent since it last changed.
-    fn folder_all_delivered(&self) -> Result<bool> {
-        let files = self.annotated_files();
-        if files.is_empty() {
-            return Ok(false);
-        }
-        let width = self.open.layout.width;
-        for path in files {
-            let delivered = if self.is_open(&path) {
-                self.open.store.all_delivered()
-            } else {
-                Open::new(read_file(&path)?, width, &self.data_dir, &self.project)?.store.all_delivered()
-            };
-            if !delivered {
-                return Ok(false);
-            }
-        }
-        Ok(true)
     }
 
     fn clear_selection(&mut self) {
@@ -533,7 +466,11 @@ impl App {
         self.open.source = read_file(&path)?;
         self.open.doc = Document::parse(self.open.source.content.clone());
         self.open.layout = DocLayout::build(&self.open.doc, self.open.layout.width);
-        self.open.store.resolve_all(&self.open.doc);
+        self.open.store =
+            Store::load(&Location::for_file(&self.data_dir, &self.project, &path), &self.open.doc)?;
+        self.refresh_review_counts()?;
+        self.derive_send_state();
+        self.sync_tree_counts();
         self.clear_selection();
         self.selected = self.selected.min(self.open.doc.blocks.len().saturating_sub(1));
         self.status = Some(format!("reloaded · {} orphaned", self.open.store.orphans()));
