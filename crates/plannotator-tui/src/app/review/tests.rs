@@ -142,11 +142,11 @@ fn folder_finish_reports_partial_failure_and_undo_covers_only_committed_archives
     std::fs::write(&other, "beta\n\nnew\n").expect("B file");
     let (doc, mut store) = app.load_review_file(&other).expect("B store");
     store.add(&doc, 0..4, "beta".into(), Kind::Comment, "B".into()).expect("B");
-    app.refresh_review_counts().expect("refresh");
+    app.refresh_review_counts();
     press(&mut app, 'E');
     let (doc, mut store) = app.load_review_file(&other).expect("sent B store");
     store.add(&doc, 6..9, "new".into(), Kind::Comment, "C pending".into()).expect("C");
-    app.refresh_review_counts().expect("refresh");
+    app.refresh_review_counts();
     let location = Location::for_file(&app.data_dir, &app.project, &other);
     let blocked_tmp = location.record.with_extension("json.tmp");
     std::fs::create_dir(&blocked_tmp).expect("block B archive");
@@ -207,7 +207,7 @@ fn a_deleted_files_archive_is_still_visible_and_restores_when_its_source_returns
     press(&mut app, 'E');
     press(&mut app, 'F');
     std::fs::remove_file(&path).expect("source removed");
-    app.refresh_review_counts().expect("refresh");
+    app.refresh_review_counts();
     assert_eq!(app.review_counts().archived, 1);
     press(&mut app, 'H');
     assert_eq!(app.archive_items.len(), 1);

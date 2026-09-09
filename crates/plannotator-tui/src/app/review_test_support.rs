@@ -76,7 +76,7 @@ pub(super) fn file_app(tag: &str) -> (PathBuf, App, RecordingDelivery) {
 pub(super) fn folder_app(tag: &str) -> (PathBuf, App, RecordingDelivery) {
     let (root, mut app, delivery) = file_app(tag);
     app.tree = Some(Tree::scan(&root.join("docs")).expect("tree"));
-    app.refresh_review_counts().expect("counts");
+    app.refresh_review_counts();
     (root, app, delivery)
 }
 
@@ -112,6 +112,6 @@ pub(super) fn draw(app: &mut App, width: u16, height: u16) -> String {
 pub(super) fn reopen(app: &mut App) {
     let Provenance::File { path } = &app.open.source.provenance else { return };
     app.open = Open::new(read_file(path).expect("read"), 100, &app.data_dir, &app.project).expect("reopen");
-    app.refresh_review_counts().expect("counts");
+    app.refresh_review_counts();
     app.derive_send_state();
 }

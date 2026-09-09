@@ -1,10 +1,15 @@
 #![allow(clippy::expect_used, clippy::indexing_slicing, reason = "tests assert by panicking")]
 
+use std::path::Path;
+
 use plannotator_tui_schema::{DocumentSource, Kind, Provenance};
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent};
 
 use crate::app::review_test_support::{Outcome, click, draw, file_app, folder_app, press, reopen};
-use crate::app::{Mode, Open};
-use crate::store::Location;
+use crate::app::{App, Focus, Mode, Open};
+use crate::doc::Document;
+use crate::store::{Location, Store};
+use crate::tree::Tree;
 
 #[test]
 fn incremental_send_and_explicit_resend_use_the_same_set_for_body_history_and_ids() {
@@ -133,7 +138,7 @@ fn folder_counts_and_delivery_cover_collapsed_files_but_exclude_orphans_and_sibl
     store.record_delivery("test agent", &[id]).expect("sent");
     store.archive_sent().expect("archive");
 
-    app.refresh_review_counts().expect("refresh counts");
+    app.refresh_review_counts();
     assert_eq!(app.send_count(), 2);
     assert_eq!(app.pending_file_count(), 2);
     assert_eq!(app.review_counts().archived, 1);
@@ -169,7 +174,7 @@ fn folder_feedback_ends_every_file_block_with_a_blank_line() {
     std::fs::write(&other, "beta\n").expect("second file");
     let (doc, mut store) = app.load_review_file(&other).expect("second store");
     store.add(&doc, 0..4, "beta".into(), Kind::Comment, "note B".into()).expect("B");
-    app.refresh_review_counts().expect("counts");
+    app.refresh_review_counts();
 
     let single = app.feedback();
     assert!(single.ends_with("> note A\n\n") && !single.ends_with("\n\n\n"), "{single:?}");
@@ -213,5 +218,76 @@ fn reply_reviews_keep_sending_the_whole_transient_review() {
     assert!(app.open.store.archived().is_empty());
     assert!(app.open.store.is_transient());
     assert!(!draw(&mut app, 80, 24).contains("Finish review"));
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// Make the document unreadable. `chmod 000` does it on Unix unless the tests run as root
+/// (a container), in which case a directory in its place fails every read the same way.
+fn make_unreadable(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+        if std::fs::read(path).is_err() {
+            return;
+        }
+    }
+    std::fs::remove_file(path).expect("replace the document");
+    std::fs::create_dir(path).expect("directory in its place");
+}
+
+/// One annotated file that cannot be read is left out of the counts with a status note.
+/// It never stops the folder from opening, expanding a directory, or reloading.
+#[test]
+fn a_folder_opens_expands_and_reloads_when_one_annotated_file_is_unreadable() {
+    let (root, mut app, delivery) = folder_app("unreadable");
+    let docs = root.join("docs");
+    app.add_quote_annotation("one", Kind::Comment, "readable".into()).expect("A");
+    let blocked = docs.join("b.md");
+    std::fs::write(&blocked, "beta\n").expect("b");
+    let (doc, mut store) = app.load_review_file(&blocked).expect("b store");
+    store.add(&doc, 0..4, "beta".into(), Kind::Comment, "cannot be read".into()).expect("B");
+    std::fs::create_dir_all(docs.join("deep")).expect("subdir");
+    std::fs::write(docs.join("deep/c.md"), "gamma\n").expect("c");
+    app.tree = Some(Tree::scan(&docs).expect("tree"));
+    make_unreadable(&blocked);
+    assert!(app.load_review_file(&blocked).is_err(), "fixture: the document is unreadable");
+
+    app.refresh_review_counts();
+    assert_eq!(app.unreadable_files, std::slice::from_ref(&blocked));
+    assert_eq!(app.status.as_deref(), Some("skipped 1 unreadable file(s): b.md"));
+    assert_eq!(app.send_count(), 1, "only the readable file counts");
+    assert!(!app.folder_counts.contains_key(&blocked));
+
+    // The note is shown once: an unchanged set does not overwrite a newer status.
+    app.status = Some("something else".into());
+    app.refresh_review_counts();
+    assert_eq!(app.status.as_deref(), Some("something else"));
+
+    app.focus = Focus::Tree;
+    app.tree_cursor = app.tree.as_ref().expect("tree").position(&docs.join("deep")).expect("deep row");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Enter))).expect("expanding a directory");
+    assert!(app.tree.as_ref().expect("tree").rows.iter().any(|r| r.path == docs.join("deep/c.md")));
+
+    app.focus = Focus::Document;
+    press(&mut app, 'r');
+    let status = app.status.as_deref().expect("status");
+    assert!(status.starts_with("reloaded · 0 orphaned · skipped 1 unreadable file(s): b.md"), "{status}");
+    assert_eq!(app.send_count(), 1);
+
+    // Opening from scratch resolves the data dir itself, so the record goes there too.
+    let data_dir = crate::workspace_paths::data_dir();
+    let location = Location::for_file(&data_dir, &crate::workspace_paths::project_name(&docs), &blocked);
+    let doc = Document::parse("beta\n".into());
+    let mut store = Store::load(&location, &doc).expect("record in the resolved data dir");
+    store.add(&doc, 0..4, "beta".into(), Kind::Comment, "cannot be read".into()).expect("B");
+    let opened = App::open_folder(&docs, 100, Box::new(delivery));
+    if let Some(record_dir) = location.record.parent() {
+        std::fs::remove_dir_all(record_dir).expect("cleanup record");
+    }
+    let opened = opened.expect("the folder opens although one annotated file is unreadable");
+    assert_eq!(opened.unreadable_files, std::slice::from_ref(&blocked));
+    assert_eq!(opened.status.as_deref(), Some("skipped 1 unreadable file(s): b.md"));
+    assert!(!opened.folder_counts.contains_key(&blocked));
     std::fs::remove_dir_all(root).expect("cleanup");
 }

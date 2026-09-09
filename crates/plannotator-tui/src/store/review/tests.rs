@@ -122,7 +122,10 @@ fn rfc3339_offsets_and_precision_are_compared_as_instants() {
         ("2026-09-09T05:00:00.001Z", "2026-09-09T05:00:00Z", true),
         ("2026-09-09T13:00:00+08:00", "2026-09-09T05:00:00Z", false),
         ("2026-09-09T00:00:00-05:00", "2026-09-09T05:00:00Z", false),
-        ("unknown", "2026-09-09T05:00:00Z", true),
+        // An unreadable `updated_at` counts as sent once any delivery covered the id:
+        // "pending forever" would resend it on every send and never archive it.
+        ("unknown", "2026-09-09T05:00:00Z", false),
+        ("unknown", "unknown", false),
         ("2026-09-09T05:00:00Z", "unknown", true),
     ] {
         store.annotations[0].updated_at = updated.into();
@@ -130,6 +133,28 @@ fn rfc3339_offsets_and_precision_are_compared_as_instants() {
             vec![Delivered { at: sent.into(), target: "agent".into(), annotation_ids: vec![id.clone()] }];
         assert_eq!(store.is_pending(&store.annotations[0]), pending, "{updated} vs {sent}");
     }
+    // Never delivered stays pending whatever the timestamp says.
+    store.deliveries.clear();
+    for updated in ["2026-09-09T05:00:00Z", "unknown"] {
+        store.annotations[0].updated_at = updated.into();
+        assert!(store.is_pending(&store.annotations[0]), "{updated} was never sent");
+    }
+}
+
+#[test]
+fn an_unparsable_timestamp_can_be_finished_and_is_pending_again_after_an_edit() {
+    let (root, location, doc, mut store) = fixture("unparsable");
+    let id = add(&mut store, &doc, "one", "note");
+    store.record_delivery("agent", std::slice::from_ref(&id)).expect("send");
+    store.annotations[0].updated_at = "not a timestamp".into();
+    assert!(!store.is_pending(&store.annotations[0]));
+    assert!(store.all_delivered());
+    assert_eq!(store.archive_sent().expect("finish").as_slice(), std::slice::from_ref(&id));
+    assert_eq!(store.restore_archived(&doc, std::slice::from_ref(&id)).expect("restore"), 1);
+    store.edit_body(&id, "edited".into()).expect("edit");
+    assert!(store.is_pending(&store.annotations[0]), "the edit wrote a readable timestamp");
+    assert!(Store::load(&location, &doc).expect("reopen").is_pending(&store.annotations[0]));
+    std::fs::remove_dir_all(root).expect("cleanup");
 }
 
 #[test]

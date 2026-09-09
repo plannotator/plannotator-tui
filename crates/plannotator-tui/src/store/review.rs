@@ -58,12 +58,17 @@ impl Store {
     }
 
     /// Coverage belongs to each annotation's last successful send, not the last batch.
-    /// Unknown timestamps stay pending rather than silently hiding feedback.
+    /// A delivery whose time cannot be read covers nothing, so the annotation stays
+    /// pending rather than silently hiding feedback. An annotation whose own `updated_at`
+    /// cannot be read is the other way round: once it has been in any delivery it counts as
+    /// sent, because "pending forever" would resend it on every send and never let it be
+    /// archived. The next edit rewrites the timestamp and makes it pending again.
     pub(crate) fn is_pending(&self, annotation: &Annotation) -> bool {
-        let covered = self.last_delivery(&annotation.id).and_then(|d| parse_time(&d.at));
-        match (parse_time(&annotation.updated_at), covered) {
+        let Some(delivery) = self.last_delivery(&annotation.id) else { return true };
+        match (parse_time(&annotation.updated_at), parse_time(&delivery.at)) {
             (Some(updated), Some(sent)) => updated > sent,
-            _ => true,
+            (None, _) => false,
+            (Some(_), None) => true,
         }
     }
 

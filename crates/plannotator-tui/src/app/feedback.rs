@@ -170,22 +170,49 @@ impl App {
         Ok((doc, store))
     }
 
-    pub(super) fn refresh_review_counts(&mut self) -> Result<()> {
+    /// Count what can be read. A file whose document or record cannot be loaded (permission
+    /// denied, a corrupt record) is left out and remembered; it never stops the folder from
+    /// opening, reloading or expanding. The status names the skipped files once, when the
+    /// set changes; sending still reports such a file as an error.
+    pub(super) fn refresh_review_counts(&mut self) {
         if self.tree.is_none() {
-            return Ok(());
+            return;
         }
         let mut counts = HashMap::new();
+        let mut unreadable = Vec::new();
         for path in self.review_files() {
             let count = if self.is_open(&path) && path.is_file() {
                 ReviewCounts::for_store(&self.open.store)
-            } else {
-                let (_, store) = self.load_review_file(&path)?;
+            } else if let Ok((_, store)) = self.load_review_file(&path) {
                 ReviewCounts::for_store(&store)
+            } else {
+                unreadable.push(path);
+                continue;
             };
             counts.insert(path, count);
         }
         self.folder_counts = counts;
-        Ok(())
+        if unreadable != self.unreadable_files {
+            self.unreadable_files = unreadable;
+            if let Some(note) = self.unreadable_note() {
+                self.status = Some(note);
+            }
+        }
+    }
+
+    /// One line naming the files the counts had to skip.
+    pub(super) fn unreadable_note(&self) -> Option<String> {
+        if self.unreadable_files.is_empty() {
+            return None;
+        }
+        let names: Vec<String> =
+            self.unreadable_files.iter().take(3).map(|path| self.review_file_name(path)).collect();
+        let more = if self.unreadable_files.len() > names.len() { ", ..." } else { "" };
+        Some(format!(
+            "skipped {} unreadable file(s): {}{more}",
+            self.unreadable_files.len(),
+            names.join(", ")
+        ))
     }
 
     pub(super) fn update_open_review_counts(&mut self) {

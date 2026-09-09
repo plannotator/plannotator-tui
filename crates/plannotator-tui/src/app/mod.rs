@@ -135,6 +135,8 @@ pub(crate) struct App {
     delivery: Box<dyn Delivery>,
     send_state: SendState,
     folder_counts: HashMap<PathBuf, feedback::ReviewCounts>,
+    /// Annotated files the folder counts could not read, in `review_files` order.
+    unreadable_files: Vec<PathBuf>,
     undo_archive: Vec<review::ArchivedBatch>,
     archive_items: Vec<review::ArchivedItem>,
     archive_cursor: usize,
@@ -210,6 +212,7 @@ impl App {
             delivery,
             send_state,
             folder_counts: HashMap::new(),
+            unreadable_files: Vec::new(),
             undo_archive: Vec::new(),
             archive_items: Vec::new(),
             archive_cursor: 0,
@@ -268,7 +271,7 @@ impl App {
         app.refresh_counts(&mut tree);
         app.tree_cursor = first.as_deref().and_then(|p| tree.position(p)).unwrap_or(0);
         app.tree = Some(tree);
-        app.refresh_review_counts()?;
+        app.refresh_review_counts();
         app.derive_send_state();
         Ok(app)
     }
@@ -309,7 +312,7 @@ impl App {
                 self.refresh_counts(&mut tree);
                 self.tree = Some(tree);
                 result?;
-                self.refresh_review_counts()?;
+                self.refresh_review_counts();
                 self.derive_send_state();
             }
             return Ok(());
@@ -468,12 +471,16 @@ impl App {
         self.open.layout = DocLayout::build(&self.open.doc, self.open.layout.width);
         self.open.store =
             Store::load(&Location::for_file(&self.data_dir, &self.project, &path), &self.open.doc)?;
-        self.refresh_review_counts()?;
+        self.refresh_review_counts();
         self.derive_send_state();
         self.sync_tree_counts();
         self.clear_selection();
         self.selected = self.selected.min(self.open.doc.blocks.len().saturating_sub(1));
-        self.status = Some(format!("reloaded · {} orphaned", self.open.store.orphans()));
+        let mut status = format!("reloaded · {} orphaned", self.open.store.orphans());
+        if let Some(note) = self.unreadable_note() {
+            status = format!("{status} · {note}");
+        }
+        self.status = Some(status);
         Ok(())
     }
 
