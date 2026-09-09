@@ -189,6 +189,30 @@ fn a_status_leads_the_footer_so_a_narrow_pane_cannot_truncate_it_away() {
     let rows = draw(&mut app);
     let footer = row(&rows, rows.len() - 1);
     assert!(footer.trim_start().starts_with("no session id from Herdr"), "footer was {footer:?}");
+    // At 80 columns the whole status is still there: the key help gives up its columns.
+    assert!(
+        footer.contains("no session id from Herdr, showing the newest transcript for this folder"),
+        "footer was {footer:?}"
+    );
+}
+
+#[test]
+fn a_status_leads_the_footer_and_the_name_counters_and_key_help_stay() {
+    let mut app = app(Box::new(Discard));
+    app.add_block_annotation(0, Kind::Comment, "x".to_owned()).expect("annotation");
+    app.set_status("comment saved".to_owned());
+    let rows = draw_sized(&mut app, 140, 20);
+    let footer = row(&rows, 19);
+    assert!(
+        footer.trim_start().starts_with("comment saved · plan.md · 1 annotations · block 1/"),
+        "footer was {footer:?}"
+    );
+    assert!(footer.trim_end().ends_with("· q quit"), "key help is still drawn: {footer:?}");
+    // Once the status is cleared the same line continues with the name.
+    app.status = None;
+    let rows = draw_sized(&mut app, 140, 20);
+    let footer = row(&rows, 19);
+    assert!(footer.trim_start().starts_with("plan.md · 1 annotations · block 1/"), "footer was {footer:?}");
 }
 
 #[test]

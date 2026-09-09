@@ -389,10 +389,6 @@ impl App {
             self.geometry.undo_button = Some(rect);
             area.width = area.width.saturating_sub(width);
         }
-        if let Some(status) = &self.status {
-            frame.render_widget(Paragraph::new(format!(" {status}")), area);
-            return;
-        }
         let orphans = self.open.store.orphans();
         // The status leads: it is the transient half of the line, and the name and counters
         // it pushes right are on screen for the whole session anyway.
@@ -421,8 +417,12 @@ impl App {
             Focus::Rail => "j/k · e edit · x remove · tab · q quit ",
             Focus::Document => "drag or v select · c comment · E send · tab · q quit ",
         };
+        // The status must stay readable at any width, so the key help yields columns to it
+        // (and is clipped) rather than the other way round.
+        let status_width = self.status.as_ref().map_or(0, |s| s.width() + 1) as u16;
+        let help_width = (help.width() as u16).min(area.width.saturating_sub(status_width.max(10)));
         let [left_area, right_area] =
-            Layout::horizontal([Constraint::Min(10), Constraint::Length(help.width() as u16)]).areas(area);
+            Layout::horizontal([Constraint::Min(10), Constraint::Length(help_width)]).areas(area);
         frame.render_widget(
             Paragraph::new(Line::from(Span::raw(format!(" {}", parts.join(" · "))).dim())),
             left_area,
