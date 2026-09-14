@@ -2,10 +2,9 @@
 //!
 //! The record is `annotations.json` under the Plannotator data directory, keyed the way
 //! Plannotator keys files (`plannotator_tui_schema::annotations_dir`). It holds
-//! `plannotator_tui_schema::Annotation` values — the Workspaces wire shape — so a local record
-//! and a server row are interchangeable. Local image references live under the additive
-//! `plannotator_tui` annotation namespace. Resolution against the current source happens on
-//! load; an annotation whose text is gone is kept as an orphan.
+//! `plannotator_tui_schema::Annotation` values; that type owns the wire contract and local
+//! extensions. Resolution against the current source happens on load; an annotation whose
+//! text is gone is kept as an orphan.
 //!
 //! A phase-2 sidecar (`<file>.annotations.json` next to the document) is imported once and
 //! left alone; nothing is written next to the document any more.

@@ -1,7 +1,7 @@
 # Spec: local annotation storage and the folder experience
 
 Status: reviewed with plannotator-ops 2026-08-28; conventions below are confirmed against the Plannotator source. Supersedes the sidecar-next-to-the-file storage of
-phase 2 for durable records; the sidecar remains as a per-file working copy (see §4).
+phase 2 for durable records; legacy sidecars are imported and left alone.
 
 ## Why this matters
 
@@ -60,19 +60,20 @@ Data dir: `$PLANNOTATOR_DATA_DIR` if set; else an existing `~/.plannotator`; els
 
 - Same data-dir resolution and the same `project` / `slug` rules as Plannotator (above),
   so one file maps to one directory, and a future tool can join the two archives by path.
-- `annotations.json` is the wire-shape `Annotation` array (phase 1) with the document
-  version each anchor was made against. Rewritten atomically on every change — add, edit,
-  remove, 👍, ✗. There is no submit, no export step, no session boundary.
-- We write nothing anywhere else in the data dir. `history/`, `plans/`, and the rest are
-  Plannotator's. No markdown records: the JSON is the record, and an agent reads JSON.
+- The persisted envelope is defined by `Record` in
+  [`store.rs`](../crates/plannotator-tui/src/store.rs); the
+  [annotation schema](../crates/plannotator-tui-schema/src/annotation.rs) owns the annotation
+  fields and local extensions. The record is rewritten atomically on every mutation,
+  independently of sending feedback.
+- Successful delivery also writes [feedback history](../README.md#feedback-archive) when enabled;
+  that history is separate from the durable annotation record.
 - `clients/plannotator-tui/` survives Plannotator's `uninstall --purge` (it only removes its own
   known entries); deleting it is the user's call.
 - No sidecar next to the file. An existing phase-2 sidecar is imported on first open and
   left alone. Annotating a repo leaves no trace in it.
 - Transient documents (an agent's last message, stdin) are never saved.
 
-`E` copies the feedback text to the clipboard for pasting into an agent. It is a
-convenience, not storage.
+See [Use](../README.md#use) for send, resend, and finish-review behavior.
 
 ## Folder experience (local, no sharing)
 
@@ -88,7 +89,7 @@ This slice adds:
 
 ## Not built
 
-Version snapshots, submission records, a history view, `recent`, `--uninstall-data`,
+Version snapshots, a feedback-history browser, `recent`, `--uninstall-data`,
 sidecar opt-in. Each waits for a reader that needs it.
 
 ## Phasing

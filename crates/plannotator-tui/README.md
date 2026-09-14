@@ -33,18 +33,10 @@ key. The keys also work directly, without the menu.
 
 ## Where things live
 
-Every annotation is saved the moment it is made, as JSON, in the Plannotator data directory:
-
-```
-~/.plannotator/clients/plannotator-tui/annotations/<project>/<slug>/annotations.json
-```
-
-`<project>` and `<slug>` follow Plannotator's own rules (git repo name; basename + 8 hex of
-sha256 of the path), so one file maps to one directory in both tools. The records are in the
-Plannotator Workspaces wire shape (`plannotator-tui-schema`); any agent can read them. Nothing is
-written next to your files. `PLANNOTATOR_DATA_DIR` relocates the directory. See the
-[annotation schema](../plannotator-tui-schema/src/annotation.rs) for attachment storage fields.
-Transient documents (an agent's last message, stdin) are never persisted.
+See the root guide for [annotation storage](../../README.md#where-annotations-live),
+[feedback history](../../README.md#feedback-archive), and
+[transient reply reviews](../../README.md#agent-replies). The
+[annotation schema](../plannotator-tui-schema/src/annotation.rs) owns attachment storage fields.
 
 ## Headless tools
 
