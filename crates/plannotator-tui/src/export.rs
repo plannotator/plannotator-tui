@@ -105,6 +105,15 @@ fn markdown_target(text: &str) -> String {
 
 fn file_uri(path: &str) -> String {
     let normalized = if cfg!(windows) { path.replace('\\', "/") } else { path.to_owned() };
+    let normalized = if cfg!(windows) {
+        if let Some(unc) = normalized.strip_prefix("//?/UNC/") {
+            format!("//{unc}")
+        } else {
+            normalized.strip_prefix("//?/").unwrap_or(&normalized).to_owned()
+        }
+    } else {
+        normalized
+    };
     let path = if cfg!(windows) && normalized.as_bytes().get(1) == Some(&b':') {
         format!("/{normalized}")
     } else {
@@ -139,6 +148,13 @@ pub(crate) fn line_span(source: &str, range: &Range<usize>) -> (usize, usize) {
 mod tests {
     use super::*;
     use plannotator_tui_schema::{Anchor, SourceRange, State};
+
+    #[cfg(windows)]
+    #[test]
+    fn canonical_attachment_paths_export_as_file_uris() {
+        assert_eq!(file_uri(r"\\?\C:\captures\shot.png"), "file:///C:/captures/shot.png");
+        assert_eq!(file_uri(r"\\?\UNC\server\captures\shot.png"), "file:////server/captures/shot.png");
+    }
 
     fn annotation(source: &str, quote: &str, kind: Kind, body: &str) -> (Annotation, Range<usize>) {
         let start = source.find(quote).expect("present");

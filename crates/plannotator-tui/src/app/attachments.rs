@@ -2,10 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use super::{App, Mode};
-use crate::workspace_paths;
 
 impl App {
     pub(super) fn begin_attach_image(&mut self) {
@@ -43,7 +42,7 @@ fn image_attachment_path(input: &str) -> Result<PathBuf> {
     let path = input.trim().trim_matches(['\'', '"']);
     anyhow::ensure!(!path.is_empty(), "image path is empty");
     let path = file_url_path(path).unwrap_or_else(|| PathBuf::from(path));
-    Ok(workspace_paths::absolute(&path))
+    path.canonicalize().with_context(|| format!("resolve image attachment {}", path.display()))
 }
 
 fn file_url_path(url: &str) -> Option<PathBuf> {
@@ -103,16 +102,42 @@ mod tests {
 
     #[test]
     fn file_urls_and_quoted_paths_become_absolute_paths() {
-        let cwd = std::env::current_dir().expect("cwd");
         assert_eq!(
-            image_attachment_path("'relative image.png'").expect("path"),
-            cwd.join("relative image.png")
+            image_attachment_path("'Cargo.toml'").expect("relative path"),
+            Path::new("Cargo.toml").canonicalize().expect("canonical relative path")
+        );
+        let dir = super::super::tests::scratch_data_dir();
+        let path = dir.join("screen shot.png");
+        std::fs::write(&path, b"image").expect("image");
+        assert_eq!(
+            image_attachment_path(&format!("'{}'", path.display())).expect("path"),
+            path.canonicalize().expect("canonical path")
         );
         #[cfg(unix)]
         assert_eq!(
-            image_attachment_path("file:///tmp/screen%20shot.png").expect("path"),
-            PathBuf::from("/tmp/screen shot.png")
+            image_attachment_path(&format!("file://{}/screen%20shot.png", dir.display())).expect("path"),
+            path.canonicalize().expect("canonical path")
         );
+        std::fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parent_components_follow_symlink_targets() {
+        let dir = super::super::tests::scratch_data_dir();
+        let work = dir.join("work");
+        let captures = dir.join("captures");
+        std::fs::create_dir_all(&work).expect("work directory");
+        std::fs::create_dir_all(captures.join("session")).expect("capture directory");
+        std::os::unix::fs::symlink(captures.join("session"), work.join("screens")).expect("screens symlink");
+        std::fs::write(work.join("shot.png"), b"wrong image").expect("decoy image");
+        std::fs::write(captures.join("shot.png"), b"intended image").expect("intended image");
+
+        let resolved = image_attachment_path(&work.join("screens/../shot.png").to_string_lossy())
+            .expect("attachment path");
+        assert_eq!(std::fs::read(&resolved).expect("attached image"), b"intended image");
+        assert_eq!(resolved, captures.join("shot.png").canonicalize().expect("canonical path"));
+        std::fs::remove_dir_all(dir).expect("cleanup");
     }
 
     #[test]

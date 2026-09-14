@@ -21,7 +21,7 @@ use crate::delivery::{Delivery, Discard, HerdrAgent};
 /// A fresh, empty data directory for one test. `App::open` resolves the real one, and a
 /// successful send archives into it, so every app under test is pointed here instead:
 /// nothing a test does may reach the developer's own Plannotator data.
-fn scratch_data_dir() -> PathBuf {
+pub(super) fn scratch_data_dir() -> PathBuf {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("plannotator-tui-app-{}-{n}", std::process::id()));
