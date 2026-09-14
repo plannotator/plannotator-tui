@@ -49,9 +49,11 @@ plannotator-tui docs               # a folder: file tree on the left, counts per
 plannotator-tui last               # your coding agent's recent replies, pick one, annotate it
 ```
 
-Drag with the mouse (or `v` and move) to select, then `a` 👍 · `c` 💬 · `d` ✗. `E` copies the
-feedback to the clipboard as numbered annotations (`# Annotations on plan.md`, `## Annotation 1
-(line 12)`, …). Every annotation is saved as JSON the moment you make it; `q` closes.
+Drag with the mouse (or `v` and move) to select, then `a` 👍 · `c` 💬 · `d` ✗. In the
+notes rail, `i` attaches a local image file (PNG/JPEG/GIF/WebP/BMP/SVG) to the selected
+annotation. `E` copies the feedback to the clipboard as numbered annotations (`# Annotations on
+plan.md`, `## Annotation 1 (line 12)`, …), with attached images listed as Markdown image links
+and local file paths. Every annotation is saved as JSON the moment you make it; `q` closes.
 
 Copies go to the clipboard as OSC 52, which is the terminal you are looking at, so on Herdr 0.9.0
 they reach your own machine even when the app runs on a remote server; Herdr Annotate's global
@@ -77,17 +79,24 @@ dimmed. The keys also work without opening the menu.
 | anywhere | `Tab` cycle tree · document · notes; `E` send; `t` tree; `r` reload; `q` quit |
 | document | `j`/`k` block; `c` comment on the block; `x` clear its annotations; `v` select with `hjkl` `w` `b` `0` `$` |
 | toolbar | `a` looks good · `c` comment · `d` delete · `Esc` |
-| notes | `j`/`k`; `e` edit; `x` remove; click a bubble |
+| notes | `j`/`k`; `e` edit; `i` attach image; `x` remove; click a bubble |
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | tree | `j`/`k`; `Enter` open; `E` sends new notes across all reviewed files, including collapsed folders |
 
 ## Inside Herdr
 
-Install [Herdr Annotate](https://github.com/plannotator/herdr-annotate); it bundles this binary,
-opens it in a pane with `prefix+o` (folder) or `prefix+shift+o` (agent's last reply) or by
-Ctrl-clicking a `file://…md` link, and the header button sends the review straight back to
-the agent as its next message: `Send 3 new ▸ claude in w1:p2 (E)`. Folder reviews show
-`Send 3 new across 2 files` and send one combined feedback message.
+Install [Herdr Annotate](https://github.com/plannotator/herdr-annotate); it bundles this binary
+and opens it in a pane for folder/document review, an agent's last reply, or a Ctrl-clicked
+`file://…md` link. In the current Herdr Annotate menu the Herdr prefix is `Ctrl+Space`:
+`Prefix + U` reviews a folder/document, `Prefix + Shift + U` reviews the agent's last reply,
+`Prefix + A` belongs to the wrapper's selected-terminal-text capture, `Prefix + Shift + A`
+copies annotations as context, `Prefix + Ctrl + A` copies and archives, and `Prefix + M`
+manages annotations. `plannotator-tui last`/`Prefix + Shift + U` reads the agent transcript;
+it does not depend on terminal selection. Selected-text capture depends on the terminal/Herdr
+selection state, so terminals configured for copy-on-select can clear the highlight before that
+wrapper path sees it. The header button sends the review straight back to the agent as its next
+message: `Send 3 new ▸ claude in w1:p2 (E)`. Folder reviews show `Send 3 new across 2 files` and
+send one combined feedback message.
 
 ```toml
 # ~/.config/plannotator-tui/config.toml
@@ -112,7 +121,9 @@ no host is named) and `--session-id <id>` (Hermes, OpenCode) override detection;
 reads a document;
 `--print` writes the newest reply to stdout and always exits 0 (for hooks and scripts).
 A reply review keeps its annotations in memory only; nothing about it survives the run, but
-the feedback you send or copy is archived like any other (see Feedback archive below).
+the feedback you send or copy is archived like any other (see Feedback archive below). If the
+picker offers several recent replies, `p` reopens it; annotations on every opened reply are kept
+in memory and `E` sends them together as one collected review.
 
 On Linux, an explicit Codex `--pid` selects the rollout opened by that process. If it
 cannot be identified uniquely, `last` reports the failure instead of choosing an unrelated
@@ -133,8 +144,10 @@ status line.
 
 `<project>` is the git repo name, `<slug>` the file's basename plus 8 hex of the sha256 of
 its path: Plannotator's own layout, so both tools see one record per file. The JSON is the
-Plannotator Workspaces wire shape; any agent can read it. Nothing is written next to your
-files. `PLANNOTATOR_DATA_DIR` relocates the directory.
+Plannotator Workspaces wire shape; any agent can read it. Workspaces image URLs stay in the
+standard top-level `attachments` list; local image file references live under
+`plannotator_tui.attachments` so they do not get sent to Workspaces as invalid URLs. Nothing is
+written next to your files. `PLANNOTATOR_DATA_DIR` relocates the directory.
 
 ### Feedback archive
 

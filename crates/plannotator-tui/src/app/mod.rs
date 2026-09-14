@@ -2,6 +2,7 @@
 //! the data they share and the operations that change it.
 
 mod archive_view;
+mod attachments;
 mod compose;
 mod draw;
 mod feedback;
@@ -44,13 +45,15 @@ const TOOLBAR: [(&str, &str, char, Kind); 3] = [
     ("✗", "delete", 'd', Kind::Delete),
 ];
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Mode {
     Browse,
     /// Typing a comment for the pending selection.
     Compose,
     /// Editing the body of an existing annotation (by id).
     Edit(String),
+    /// Typing a local image path to attach to an existing annotation (by id).
+    AttachImage(String),
     /// Quit was asked for while feedback is unsent; the footer asks first.
     ConfirmQuit,
     /// Choosing which of the agent's recent messages to review.

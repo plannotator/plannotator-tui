@@ -363,3 +363,40 @@ looked up in whichever table holds it. Verified against the `beta` source
 (`packages/core/src/session/sql.ts`, `packages/schema/src/session-message.ts`,
 `packages/util/src/global-roots.ts`) and a mixed-schema fixture reproducing the report.
 
+
+## 15. Image attachments are local references until uploaded (2026-09-14)
+
+Workspaces already reserves `Annotation.attachments` for uploaded image URLs: absolute `https://`
+strings that the server stores verbatim. A local screenshot path is not valid in that field, so
+plannotator-tui stores first-slice image attachments under the annotation-level
+`plannotator_tui.attachments` namespace instead:
+
+```json
+{
+  "plannotator_tui": {
+    "attachments": [
+      {"type": "image", "source": "local_file", "path": "/tmp/screen.png", "alt": "screen.png", "mediaType": "image/png"}
+    ]
+  }
+}
+```
+
+The namespace is additive, skipped when empty, and older plannotator-tui builds preserve it as an
+unknown top-level field. Type-like values remain strings so future attachment kinds round-trip.
+The UI slice is deliberately file-backed: focus a note in the rail and press `i` to attach an
+existing PNG/JPEG/GIF/WebP/BMP/SVG file. Clipboard image paste waits for a real terminal or Herdr
+binary-image path; the existing paste event is text-only.
+
+Feedback export renders every image (Workspaces URL attachments and local files) inside the same
+numbered annotation block, listing the path/URL and a Markdown image link. That keeps Herdr agent
+send, OSC-52 copy, headless export, and feedback history sidecars byte-identical. The shared
+feedback archive increments `counts.images`; the annotation JSON remains the durable structured
+record. Reply reviews now collect annotations from every opened picker candidate and send those
+message blocks together, because their stores were already kept in memory for preview navigation.
+
+Herdr selected-terminal-text annotation is not this path. In this repository the Herdr entrypoints
+open files/folders or `plannotator-tui last`, which reads the agent transcript and does not rely on
+a terminal selection. The separate Herdr Annotate wrapper's selected-text capture depends on
+Herdr's `selected_text` context; copy-on-select terminals can clear the highlight before that
+wrapper action receives it, so last-reply review is the reliable path for reviewing an agent's
+previous reply on such setups.

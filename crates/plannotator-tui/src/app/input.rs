@@ -25,11 +25,13 @@ impl App {
                     Ok(())
                 }
                 Mode::ReviewMenu => self.menu_key(*key),
-                Mode::Compose | Mode::Edit(_) => self.text_key(*key),
+                Mode::Compose | Mode::Edit(_) | Mode::AttachImage(_) => self.text_key(*key),
             },
             // A paste lands in the comment box verbatim, newlines included; anywhere else
             // it is ignored rather than replayed as keystrokes.
-            Event::Paste(text) if matches!(self.mode, Mode::Compose | Mode::Edit(_)) => {
+            Event::Paste(text)
+                if matches!(self.mode, Mode::Compose | Mode::Edit(_) | Mode::AttachImage(_)) =>
+            {
                 self.compose.insert_text(text);
                 Ok(())
             }
@@ -143,6 +145,7 @@ impl App {
             }
             KeyCode::Char('k') | KeyCode::Up => self.rail_cursor = self.rail_cursor.saturating_sub(1),
             KeyCode::Enter | KeyCode::Char('e') => self.edit_selected_annotation(),
+            KeyCode::Char('i') => self.begin_attach_image(),
             KeyCode::Char('x') | KeyCode::Delete => self.remove_selected_annotation()?,
             KeyCode::Esc => self.focus = Focus::Document,
             _ => {}
@@ -292,6 +295,27 @@ impl App {
             ComposeAction::Cancel => self.mode = Mode::Browse,
             ComposeAction::Save => {
                 let body = self.compose.value().trim().to_owned();
+                if let Mode::AttachImage(id) = self.mode.clone() {
+                    if body.is_empty() {
+                        self.mode = Mode::Browse;
+                        self.status = Some("image attach cancelled: empty".into());
+                    } else {
+                        match self.attach_image_to_annotation(&id, &body) {
+                            Ok(true) => {
+                                self.mode = Mode::Browse;
+                                self.status = Some("image attached".into());
+                            }
+                            Ok(false) => {
+                                self.mode = Mode::Browse;
+                                self.status = Some("image already attached".into());
+                            }
+                            Err(err) => {
+                                self.status = Some(format!("could not attach image: {err:#}"));
+                            }
+                        }
+                    }
+                    return Ok(());
+                }
                 match std::mem::replace(&mut self.mode, Mode::Browse) {
                     Mode::Edit(id) => {
                         if body.is_empty() {
@@ -306,7 +330,8 @@ impl App {
                     | Mode::ConfirmQuit
                     | Mode::Pick
                     | Mode::Archive
-                    | Mode::ReviewMenu => {
+                    | Mode::ReviewMenu
+                    | Mode::AttachImage(_) => {
                         if !body.is_empty()
                             && let Some(pending) = self.pending.take()
                         {

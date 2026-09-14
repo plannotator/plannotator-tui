@@ -1,8 +1,8 @@
 //! Feedback export: annotations as numbered Markdown a coding agent reads without a schema.
 //!
 //! `# Annotations on <name>`, then one `## Annotation N (line X)` per annotation in document
-//! order: what kind of note it is, the quoted text, and the body as a blockquote. Deleted
-//! text is fenced so quoted markdown cannot escape.
+//! order: what kind of note it is, the quoted text, the body as a blockquote, and any image
+//! attachments as Markdown links. Deleted text is fenced so quoted markdown cannot escape.
 
 use std::fmt::Write as _;
 use std::ops::Range;
@@ -47,6 +47,7 @@ pub(crate) fn feedback(source: &str, name: &str, entries: &[Entry<'_>]) -> Strin
                 let _ = writeln!(out, "> {}", quote_lines(body));
             }
         }
+        write_attachments(&mut out, entry.annotation);
         for reply in &entry.annotation.replies {
             let who = reply.author.as_deref().unwrap_or("reply");
             let _ = writeln!(out, "- **Reply ({who}):** {}", reply.body.replace('\n', "\n  "));
@@ -69,6 +70,62 @@ fn single_line(text: &str) -> String {
 
 fn quote_lines(text: &str) -> String {
     text.replace('\n', "\n> ")
+}
+
+fn write_attachments(out: &mut String, annotation: &Annotation) {
+    let total = annotation.attachments.len()
+        + annotation.plannotator_tui.attachments.iter().filter(|a| a.is_local_image()).count();
+    if total == 0 {
+        return;
+    }
+    out.push_str("Attachments:\n");
+    let mut index = 1;
+    for url in &annotation.attachments {
+        let alt = format!("image {index}");
+        let _ = writeln!(out, "- Image {index}: {url}");
+        let _ = writeln!(out, "  ![{}]({})", markdown_alt(&alt), markdown_target(url));
+        index += 1;
+    }
+    for attachment in annotation.plannotator_tui.attachments.iter().filter(|a| a.is_local_image()) {
+        let alt = attachment.alt.as_deref().filter(|alt| !alt.trim().is_empty()).unwrap_or("attached image");
+        let target = file_uri(&attachment.path);
+        let _ = writeln!(out, "- Image {index}: `{}`", attachment.path);
+        let _ = writeln!(out, "  ![{}]({target})", markdown_alt(alt));
+        index += 1;
+    }
+}
+
+fn markdown_alt(text: &str) -> String {
+    text.replace(['[', ']'], "")
+}
+
+fn markdown_target(text: &str) -> String {
+    text.replace(' ', "%20")
+}
+
+fn file_uri(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    let path = if cfg!(windows) && normalized.as_bytes().get(1) == Some(&b':') {
+        format!("/{normalized}")
+    } else {
+        normalized
+    };
+    format!("file://{}", percent_encode_path(&path))
+}
+
+fn percent_encode_path(path: &str) -> String {
+    let mut out = String::new();
+    for byte in path.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
+                out.push(char::from(byte));
+            }
+            _ => {
+                let _ = write!(out, "%{byte:02X}");
+            }
+        }
+    }
+    out
 }
 
 /// 1-based line numbers of the first and last byte of `range`.
@@ -96,6 +153,7 @@ mod tests {
             author_name: None,
             state: State::Open,
             attachments: Vec::new(),
+            plannotator_tui: plannotator_tui_schema::AnnotationExtras::default(),
             created_at: String::new(),
             updated_at: String::new(),
             replies: Vec::new(),
@@ -120,6 +178,23 @@ mod tests {
              ## Annotation 1 (line 3)\nComment on: \"login page\"\n> Which page?\n> Be specific.\n\n\
              ## Annotation 2 (line 5)\nRemove this:\n```\nDrop the `legacy` path.\n```\n> I don't want this.\n\n"
         );
+    }
+
+    #[test]
+    fn images_are_rendered_as_clear_markdown_attachments() {
+        let source = "see screenshot\n";
+        let (mut note, range) = annotation(source, "screenshot", Kind::Comment, "Compare this.");
+        note.attachments.push("https://cdn.example.com/upload.png".into());
+        note.plannotator_tui.attachments.push(plannotator_tui_schema::LocalAttachment::image(
+            "/tmp/screen shot.png".into(),
+            Some("screen shot.png".into()),
+            Some("image/png".into()),
+        ));
+        let out = feedback(source, "reply", &[Entry { annotation: &note, lines: (1, 1), range }]);
+        assert!(out.contains("Attachments:\n- Image 1: https://cdn.example.com/upload.png"), "{out}");
+        assert!(out.contains("![image 1](https://cdn.example.com/upload.png)"), "{out}");
+        assert!(out.contains("- Image 2: `/tmp/screen shot.png`"), "{out}");
+        assert!(out.contains("![screen shot.png](file:///tmp/screen%20shot.png)"), "{out}");
     }
 
     #[test]

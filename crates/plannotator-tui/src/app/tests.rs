@@ -13,6 +13,7 @@ use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 
+use super::review_test_support::RecordingDelivery;
 use super::send::SendState;
 use super::{App, Mode};
 use crate::delivery::{Delivery, Discard, HerdrAgent};
@@ -250,6 +251,31 @@ fn previewing_away_and_back_keeps_annotations() {
 
     assert_eq!(app.open.doc.source, "# Third\n\nnewest message\n", "back where we started");
     assert_eq!(app.open.store.placed().len(), 1, "a reply review only holds annotations in memory");
+}
+
+#[test]
+fn a_message_review_sends_annotations_from_every_opened_candidate_together() {
+    let delivery = RecordingDelivery::default();
+    let mut app = message_app(None, Box::new(delivery.clone()));
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Esc))).expect("esc");
+    app.add_block_annotation(0, Kind::Comment, "newest note".to_owned()).expect("newest");
+
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('p')))).expect("p");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('j')))).expect("j");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Enter))).expect("open middle");
+    app.add_block_annotation(0, Kind::Comment, "middle note".to_owned()).expect("middle");
+
+    assert_eq!(app.send_count(), 2);
+    app.send_feedback().expect("send");
+    assert_eq!(app.send_state, SendState::Sent);
+    let calls = delivery.calls.borrow();
+    assert_eq!(calls.len(), 1);
+    let sent = &calls[0];
+    assert!(sent.contains("# Annotations on claude · message 1 of 3"), "{sent}");
+    assert!(sent.contains("> newest note"), "{sent}");
+    assert!(sent.contains("# Annotations on claude · message 2 of 3"), "{sent}");
+    assert!(sent.contains("> middle note"), "{sent}");
+    assert_eq!(app.send_count(), 2, "reply reviews keep the full sent review available");
 }
 
 /// A folder of `count` Markdown files named `f00.md`, `f01.md`, … in a fresh temp dir.

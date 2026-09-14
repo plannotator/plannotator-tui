@@ -15,7 +15,9 @@ pub mod source;
 pub mod version;
 
 pub use anchor::{Anchor, CONTEXT_CHARS, Extras, Kind, SourceRange};
-pub use annotation::{Annotation, ApiError, CreateAnnotation, PatchAnnotation, Reply, State};
+pub use annotation::{
+    Annotation, AnnotationExtras, ApiError, CreateAnnotation, LocalAttachment, PatchAnnotation, Reply, State,
+};
 pub use datadir::{annotations_dir, data_dir, history_slug, project_name, sanitize_tag};
 pub use resolve::{Resolution, resolve, web_will_match};
 pub use source::{DocumentSource, Provenance};

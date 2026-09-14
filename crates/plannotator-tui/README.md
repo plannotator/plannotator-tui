@@ -15,12 +15,14 @@ cargo build --release
 | anywhere | `Tab` cycle focus (tree · document · rail) · `E` send feedback (clipboard) · `t` show/hide tree · `r` reload · `q` quit |
 | document | drag with the mouse, or `v` then `hjkl` / `w` `b` / `0` `$` to select; `Enter` confirms · `j`/`k` or click selects a block · `c` comments on the block · `x` clears the block's annotations |
 | selection toolbar | `a` 👍 looks good · `c` 💬 comment (opens a box at the selection) · `d` ✗ delete · `Esc` clears |
-| rail | `j`/`k` move · `e` / `Enter` edit body · `x` remove · click a bubble to focus it |
+| rail | `j`/`k` move · `e` / `Enter` edit body · `i` attach local image · `x` remove · click a bubble to focus it |
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | tree | `j`/`k` move · `Enter` open · `E` send new feedback across files, including collapsed folders · counts show active notes per file |
 | archive | `j`/`k` or ↑/↓ select · `Enter` or click restore · `Esc` close |
 
-Selections and exports are copied to the terminal clipboard (OSC 52).
+Selections and exports are copied to the terminal clipboard (OSC 52). Attach screenshots or
+other local images from the rail with `i`; the saved annotation keeps a file reference and the
+feedback Markdown lists each image with a local path and `file://` image link.
 
 Sent notes remain visible. File reviews send only new or edited notes by default;
 `R` explicitly includes the sent ones too. `F` archives only sent notes that have not
@@ -41,8 +43,10 @@ Every annotation is saved the moment it is made, as JSON, in the Plannotator dat
 `<project>` and `<slug>` follow Plannotator's own rules (git repo name; basename + 8 hex of
 sha256 of the path), so one file maps to one directory in both tools. The records are in the
 Plannotator Workspaces wire shape (`plannotator-tui-schema`); any agent can read them. Nothing is
-written next to your files. `PLANNOTATOR_DATA_DIR` relocates the directory. Transient
-documents (an agent's last message, stdin) are never persisted.
+written next to your files. `PLANNOTATOR_DATA_DIR` relocates the directory. Local image
+attachments are stored under the annotation's `plannotator_tui.attachments`; the standard
+Workspaces `attachments` field remains only for uploaded HTTPS image URLs. Transient documents
+(an agent's last message, stdin) are never persisted.
 
 ## Headless tools
 

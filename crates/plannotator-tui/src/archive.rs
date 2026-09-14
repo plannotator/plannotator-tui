@@ -157,6 +157,7 @@ pub(crate) struct Submission<'a> {
     /// Per-annotation records; empty in folder mode, where `count` still carries the total.
     pub(crate) annotations: Vec<AnnotationRecord>,
     pub(crate) count: usize,
+    pub(crate) images: usize,
     /// Milliseconds since the epoch; tests pin it, callers pass `None` for now.
     pub(crate) now_ms: Option<u128>,
 }
@@ -188,7 +189,7 @@ fn try_append(submission: &Submission<'_>) -> std::io::Result<PathBuf> {
         target: (!submission.target.is_empty()).then_some(&submission.target),
         feedback: submission.feedback,
         annotations: &submission.annotations,
-        counts: Counts { annotations: submission.count, external: 0, images: 0 },
+        counts: Counts { annotations: submission.count, external: 0, images: submission.images },
         record_file: None,
     };
 
@@ -333,6 +334,7 @@ mod tests {
                 original_text: Some("the selected text".to_owned()),
             }],
             count: 1,
+            images: 0,
             now_ms: Some(1_788_242_400_123),
         }
     }

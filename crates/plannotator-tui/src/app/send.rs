@@ -87,17 +87,30 @@ impl App {
         self.clipboard && Clipboard.deliver(text).is_ok()
     }
 
-    /// Keep the ids from the body we delivered. Attempt every file even when one record
-    /// cannot be saved, and refresh counts from any intervening changes.
+    /// Keep the ids from the body we delivered. Attempt every file or message even when
+    /// one record cannot be saved, and refresh counts from any intervening changes.
     fn remember_delivery(&mut self, feedback: &mut Feedback, target: &str) -> Vec<String> {
         let mut errors = Vec::new();
         for mut part in feedback.parts.drain(..) {
             if let Err(err) = self.record_feedback_delivery(&mut part, target) {
-                let name = part
-                    .path
-                    .as_ref()
-                    .map_or_else(|| self.open.source.name.clone(), |p| self.review_file_name(p));
+                let name = part.path.as_ref().map_or_else(
+                    || {
+                        part.message.map_or_else(
+                            || self.open.source.name.clone(),
+                            |index| format!("{} message {}", self.message_host, index + 1),
+                        )
+                    },
+                    |p| self.review_file_name(p),
+                );
                 errors.push(format!("{name}: {err:#}"));
+            }
+            if let Some(index) = part.message {
+                if index == self.pick_open {
+                    self.open.store = part.store;
+                } else if let Some(open) = self.pick_cache.get_mut(&index) {
+                    open.store = part.store;
+                }
+                continue;
             }
             if self.tree.is_some()
                 && let Some(path) = &part.path
@@ -165,12 +178,33 @@ impl App {
             feedback: &feedback.text,
             annotations,
             count: feedback.count,
+            images: feedback.images,
             now_ms: None,
         });
     }
 
+    fn message_annotation_count(&self) -> usize {
+        let cached = self.pick_cache.values().map(|open| open.store.placed().len()).sum::<usize>();
+        self.open.store.placed().len() + cached
+    }
+
+    fn message_review_delivered(&self) -> bool {
+        self.message_annotation_count() > 0
+            && (self.open.store.placed().is_empty() || self.open.store.all_delivered())
+            && self
+                .pick_cache
+                .values()
+                .all(|open| open.store.placed().is_empty() || open.store.all_delivered())
+    }
+
     pub(super) fn send_count(&self) -> usize {
-        if self.is_file_review() { self.review_counts().pending } else { self.open.store.placed().len() }
+        if self.is_file_review() {
+            self.review_counts().pending
+        } else if self.is_message_review() {
+            self.message_annotation_count()
+        } else {
+            self.open.store.placed().len()
+        }
     }
 
     pub(super) fn send_label(&self) -> String {
@@ -218,6 +252,8 @@ impl App {
         let delivered = if self.is_file_review() {
             let counts = self.review_counts();
             counts.pending == 0 && counts.sent > 0
+        } else if self.is_message_review() {
+            self.message_review_delivered()
         } else {
             self.open.store.all_delivered()
         };
