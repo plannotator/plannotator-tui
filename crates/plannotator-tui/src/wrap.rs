@@ -145,6 +145,11 @@ pub(crate) fn wrap_table(lines: &[Line<'_>], offsets: &[Vec<Option<usize>>], wid
     };
 
     let column_widths = fit_table_columns(&original_widths, width.max(1));
+    let table_wraps = lines
+        .iter()
+        .zip(offsets)
+        .filter_map(|(line, map)| table_content_cells(line, map).map(|(cells, _)| cells))
+        .any(|cells| table_content_wraps(&cells, &column_widths));
     let mut out = Vec::new();
     for (line_index, (line, map)) in lines.iter().zip(offsets).enumerate() {
         if let Some((_, kind, style)) = table_border(line, map) {
@@ -157,13 +162,13 @@ pub(crate) fn wrap_table(lines: &[Line<'_>], offsets: &[Vec<Option<usize>>], wid
             };
             out.push(render_table_border(&column_widths, kind, style, border_style));
         } else if let Some((cells, style)) = table_content_cells(line, map) {
-            let (content_rows, wrapped) = render_table_content(&cells, &column_widths, style, border_style);
+            let content_rows = render_table_content(&cells, &column_widths, style, border_style);
             out.extend(content_rows);
             let next_is_content = lines
                 .get(line_index + 1)
                 .zip(offsets.get(line_index + 1))
                 .is_some_and(|(next_line, next_map)| table_content_cells(next_line, next_map).is_some());
-            if wrapped && next_is_content {
+            if table_wraps && next_is_content {
                 out.push(render_table_border(
                     &column_widths,
                     TableBorder::Middle,
@@ -283,7 +288,7 @@ fn render_table_content(
     widths: &[usize],
     cell_style: Style,
     border_style: Style,
-) -> (Vec<Row>, bool) {
+) -> Vec<Row> {
     let wrapped: Vec<Vec<Row>> = widths
         .iter()
         .enumerate()
@@ -315,7 +320,14 @@ fn render_table_content(
         }
         rows.push(finish_row(cells, Style::default()));
     }
-    (rows, height > 1)
+    rows
+}
+
+fn table_content_wraps(columns: &[Vec<Cell>], widths: &[usize]) -> bool {
+    widths.iter().enumerate().any(|(index, &width)| {
+        let line = finish_row(columns.get(index).cloned().unwrap_or_default(), Style::default());
+        wrap_line(&line.line, &line.cells, width.max(1)).len() > 1
+    })
 }
 
 fn cells_from_row(row: &Row) -> Vec<Cell> {
@@ -391,6 +403,7 @@ mod tests {
             Line::from("├────────────┼──────────────┤"),
             Line::from("│ item       │ TABLE_TAIL is a long value │"),
             Line::from("│ second     │ another long value         │"),
+            Line::from("│ third      │ short                      │"),
             Line::from("└────────────┴──────────────┘"),
         ];
         let offsets: Vec<Vec<Option<usize>>> =
@@ -404,6 +417,6 @@ mod tests {
             "rendered table was {rendered:?}"
         );
         assert!(rendered.contains("┌") && rendered.contains("└"));
-        assert_eq!(rendered.lines().filter(|line| line.starts_with("├")).count(), 2);
+        assert_eq!(rendered.lines().filter(|line| line.starts_with("├")).count(), 3);
     }
 }
