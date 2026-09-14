@@ -1,8 +1,8 @@
 //! Annotations, replies, and the request/response bodies, in the Workspaces wire shape.
 //!
-//! One type serves both the local sidecar and the server row: an annotation saved next to
-//! a file is exactly what `POST .../annotations` returns. Responses may grow fields;
-//! unknown keys are preserved rather than rejected.
+//! One type serves both local records and server rows, with additive TUI-owned fields for
+//! local references. Responses may grow fields; unknown keys are preserved rather than
+//! rejected.
 
 use std::collections::BTreeMap;
 

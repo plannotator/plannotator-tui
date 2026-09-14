@@ -12,8 +12,7 @@ Status: contract for phase 4, 2026-08-28. Detection and extraction rules are dec
 - `plannotator-tui last`: the CLI. Detects the host, finds the transcript, shows a picker of
   the newest messages, opens the chosen one as a transient document (`Provenance::AgentMessage`),
   and delivers feedback through the normal seam (clipboard standalone, the agent pane in Herdr).
-  Annotations on every opened picker candidate stay in memory, so one send can carry feedback on
-  multiple recent replies.
+  See [Agent replies](../README.md#agent-replies) for annotation lifetime and multi-reply send behavior.
 - Herdr: `plannotator-tui herdr last` resolves the agent's pid from `herdr pane process-info`
   and opens the pane with `PLANNOTATOR_TUI_MESSAGE_PID`; `plannotator-tui herdr pane` is the
   pane entrypoint that reads the env and opens either a file or a message.

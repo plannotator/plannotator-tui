@@ -53,7 +53,13 @@ Drag with the mouse (or `v` and move) to select, then `a` 👍 · `c` 💬 · `d
 notes rail, `i` attaches a local image file (PNG/JPEG/GIF/WebP/BMP/SVG) to the selected
 annotation. `E` copies the feedback to the clipboard as numbered annotations (`# Annotations on
 plan.md`, `## Annotation 1 (line 12)`, …), with attached images listed as Markdown image links
-and local file paths. Every annotation is saved as JSON the moment you make it; `q` closes.
+and local file paths. File annotations are saved as JSON the moment you make them; `q` closes.
+
+Enter or paste an existing image path, then press Enter to attach it (Esc cancels). Relative
+paths resolve from the app's working directory; symlinks are resolved before the reference is
+saved. Images are referenced, not copied or uploaded: keep the file available on the machine
+where the app runs, and ensure the receiving agent can access it. Pasting image bytes from the
+clipboard is not supported; paste a file path instead.
 
 Copies go to the clipboard as OSC 52, which is the terminal you are looking at, so on Herdr 0.9.0
 they reach your own machine even when the app runs on a remote server; Herdr Annotate's global
@@ -61,9 +67,9 @@ they reach your own machine even when the app runs on a remote server; Herdr Ann
 
 For file and folder reviews, `E` sends only new or edited annotations. Send A and B, then
 add C: the next send includes just C. Sent notes stay visible with a marker; editing one
-makes it pending again, including after a restart. `R` **Resend all** includes every active
-note. With nothing pending, `E` reports “nothing new to send”. A failed send keeps the notes
-pending for retry.
+or attaching an image makes it pending again, including after a restart. `R` **Resend all**
+includes every active note. With nothing pending, `E` reports “nothing new to send”. A failed
+send keeps the notes pending for retry.
 
 `F` **Finish review** archives sent, unchanged notes and leaves pending ones in place.
 `U` undoes the last finish during this session. `H` opens the archive, where Enter or a
@@ -144,10 +150,11 @@ status line.
 
 `<project>` is the git repo name, `<slug>` the file's basename plus 8 hex of the sha256 of
 its path: Plannotator's own layout, so both tools see one record per file. The JSON is the
-Plannotator Workspaces wire shape; any agent can read it. Workspaces image URLs stay in the
-standard top-level `attachments` list; local image file references live under
-`plannotator_tui.attachments` so they do not get sent to Workspaces as invalid URLs. Nothing is
-written next to your files. `PLANNOTATOR_DATA_DIR` relocates the directory.
+Plannotator Workspaces wire shape with additive local fields; any agent can read it. The
+[annotation schema](crates/plannotator-tui-schema/src/annotation.rs) owns the attachment fields;
+[decision 15](docs/decisions.md#15-image-attachments-are-local-references-until-uploaded-2026-09-14)
+explains the local-reference boundary. Nothing is written next to your files.
+`PLANNOTATOR_DATA_DIR` relocates the directory.
 
 ### Feedback archive
 
