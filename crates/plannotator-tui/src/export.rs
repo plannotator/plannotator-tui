@@ -100,11 +100,11 @@ fn markdown_alt(text: &str) -> String {
 }
 
 fn markdown_target(text: &str) -> String {
-    text.replace(' ', "%20")
+    text.replace(' ', "%20").replace('(', "%28").replace(')', "%29")
 }
 
 fn file_uri(path: &str) -> String {
-    let normalized = path.replace('\\', "/");
+    let normalized = if cfg!(windows) { path.replace('\\', "/") } else { path.to_owned() };
     let path = if cfg!(windows) && normalized.as_bytes().get(1) == Some(&b':') {
         format!("/{normalized}")
     } else {
@@ -195,6 +195,54 @@ mod tests {
         assert!(out.contains("![image 1](https://cdn.example.com/upload.png)"), "{out}");
         assert!(out.contains("- Image 2: `/tmp/screen shot.png`"), "{out}");
         assert!(out.contains("![screen shot.png](file:///tmp/screen%20shot.png)"), "{out}");
+    }
+
+    #[test]
+    fn remote_image_destinations_preserve_markdown_delimiters() {
+        let source = "screenshot";
+        let (mut note, range) = annotation(source, source, Kind::Comment, "Compare this.");
+        note.attachments = vec![
+            "https://cdn.example.com/screenshot).png".into(),
+            "https://cdn.example.com/screen(shot).png?q=a%20b".into(),
+        ];
+        let out = feedback(source, "reply", &[Entry { annotation: &note, lines: (1, 1), range }]);
+        let destinations: Vec<_> = pulldown_cmark::Parser::new(&out)
+            .filter_map(|event| match event {
+                pulldown_cmark::Event::Start(pulldown_cmark::Tag::Image { dest_url, .. }) => {
+                    Some(dest_url.into_string())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            destinations,
+            [
+                "https://cdn.example.com/screenshot%29.png",
+                "https://cdn.example.com/screen%28shot%29.png?q=a%20b",
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_image_destinations_preserve_unix_backslashes() {
+        let source = "screenshot";
+        let (mut note, range) = annotation(source, source, Kind::Comment, "Compare this.");
+        note.plannotator_tui.attachments.push(plannotator_tui_schema::LocalAttachment::image(
+            "/tmp/screen\\shot.png".into(),
+            None,
+            Some("image/png".into()),
+        ));
+        let out = feedback(source, "reply", &[Entry { annotation: &note, lines: (1, 1), range }]);
+        let destinations: Vec<_> = pulldown_cmark::Parser::new(&out)
+            .filter_map(|event| match event {
+                pulldown_cmark::Event::Start(pulldown_cmark::Tag::Image { dest_url, .. }) => {
+                    Some(dest_url.into_string())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(destinations, ["file:///tmp/screen%5Cshot.png"]);
     }
 
     #[test]
