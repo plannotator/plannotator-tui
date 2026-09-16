@@ -169,6 +169,9 @@ fn herdr_command(args: &[String]) -> Result<()> {
                 open.deliver_to = Some(rest.next().context("--deliver-to needs a value")?.clone());
             }
             "--newest" if sub == Some("last") => open.newest = true,
+            "--newest" => {
+                anyhow::bail!("--newest is only for `herdr last`; `herdr open` has no picker to skip")
+            }
             flag if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{USAGE}"),
             path if open.path.is_none() => open.path = Some(PathBuf::from(path)),
             extra => anyhow::bail!("unexpected argument {extra:?}\n{USAGE}"),

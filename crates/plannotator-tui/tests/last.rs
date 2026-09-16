@@ -283,3 +283,16 @@ fn hermes_reads_the_session_named_by_id_from_hermes_home() {
     assert!(String::from_utf8_lossy(&missing.stderr).contains("needs a session id"));
     std::fs::remove_dir_all(&home).expect("cleanup");
 }
+
+#[test]
+fn herdr_open_rejects_newest_by_name() {
+    let out = bin().args(["herdr", "open", "--newest"]).output().expect("runs");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("only for `herdr last`"), "{stderr}");
+    assert!(!stderr.contains("unknown flag"), "{stderr}");
+
+    let out = bin().args(["herdr", "open", "--bogus"]).output().expect("runs");
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unknown flag --bogus"));
+}
