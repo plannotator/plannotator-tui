@@ -76,14 +76,11 @@ impl Store {
         !self.annotations.is_empty() && self.annotations.iter().all(|a| !self.is_pending(a))
     }
 
-    /// Replace a body, advancing the existing timestamp beyond its last send even when
-    /// the clock has not ticked (or has moved backwards) since that send. One millisecond
-    /// is the smallest step the stored shape can represent.
-    pub(crate) fn edit_body(&mut self, id: &str, body: String) -> Result<bool> {
-        let Some(annotation) = self.annotations.iter().find(|a| a.id == id) else { return Ok(false) };
-        if annotation.body == body {
-            return Ok(false);
-        }
+    /// A mutation timestamp that is after the current annotation and its last delivery,
+    /// even when the clock has not ticked (or has moved backwards) since then. One
+    /// millisecond is the smallest step the stored shape can represent.
+    pub(super) fn next_updated_at(&self, id: &str) -> Result<Option<String>> {
+        let Some(annotation) = self.annotations.iter().find(|a| a.id == id) else { return Ok(None) };
         let previous =
             [parse_time(&annotation.updated_at), self.last_delivery(id).and_then(|d| parse_time(&d.at))]
                 .into_iter()
@@ -94,7 +91,16 @@ impl Store {
             now = now
                 .max(previous.checked_add(Duration::milliseconds(1)).context("advancing annotation time")?);
         }
-        let updated_at = format_millis(now)?;
+        Ok(Some(format_millis(now)?))
+    }
+
+    /// Replace a body, advancing the existing timestamp beyond its last send.
+    pub(crate) fn edit_body(&mut self, id: &str, body: String) -> Result<bool> {
+        let Some(annotation) = self.annotations.iter().find(|a| a.id == id) else { return Ok(false) };
+        if annotation.body == body {
+            return Ok(false);
+        }
+        let Some(updated_at) = self.next_updated_at(id)? else { return Ok(false) };
         let mut next = self.clone();
         if let Some(annotation) = next.annotations.iter_mut().find(|a| a.id == id) {
             annotation.body = body;

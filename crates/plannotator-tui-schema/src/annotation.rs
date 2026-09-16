@@ -1,8 +1,8 @@
 //! Annotations, replies, and the request/response bodies, in the Workspaces wire shape.
 //!
-//! One type serves both the local sidecar and the server row: an annotation saved next to
-//! a file is exactly what `POST .../annotations` returns. Responses may grow fields;
-//! unknown keys are preserved rather than rejected.
+//! One type serves both local records and server rows, with additive TUI-owned fields for
+//! local references. Responses may grow fields; unknown keys are preserved rather than
+//! rejected.
 
 use std::collections::BTreeMap;
 
@@ -35,6 +35,59 @@ pub struct Reply {
     pub other: BTreeMap<String, Value>,
 }
 
+/// A plannotator-tui-owned attachment. Workspaces still owns the top-level
+/// `attachments: string[]` field for uploaded `https://` image URLs; local files live here
+/// so a future Workspaces sync can omit or upload them rather than sending invalid URLs.
+/// Type-like fields are strings, not enums, so newer attachment kinds still round-trip.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalAttachment {
+    #[serde(rename = "type")]
+    pub attachment_type: String,
+    pub source: String,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    #[serde(flatten)]
+    pub other: BTreeMap<String, Value>,
+}
+
+impl LocalAttachment {
+    pub fn image(path: String, alt: Option<String>, media_type: Option<String>) -> Self {
+        Self {
+            attachment_type: "image".to_owned(),
+            source: "local_file".to_owned(),
+            path,
+            alt,
+            media_type,
+            other: BTreeMap::new(),
+        }
+    }
+
+    pub fn is_local_image(&self) -> bool {
+        self.attachment_type == "image" && self.source == "local_file" && !self.path.is_empty()
+    }
+}
+
+/// plannotator-tui-owned fields on a root annotation. Empty records serialize exactly like
+/// the Workspaces object, and older plannotator-tui builds preserve this object through
+/// their flattened `other` map.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnnotationExtras {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<LocalAttachment>,
+    #[serde(flatten)]
+    pub other: BTreeMap<String, Value>,
+}
+
+impl AnnotationExtras {
+    pub fn is_empty(&self) -> bool {
+        self.attachments.is_empty() && self.other.is_empty()
+    }
+}
+
 /// A root annotation: the server's `Annotation` object.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Annotation {
@@ -50,6 +103,8 @@ pub struct Annotation {
     pub state: State,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<String>,
+    #[serde(default, skip_serializing_if = "AnnotationExtras::is_empty")]
+    pub plannotator_tui: AnnotationExtras,
     pub created_at: String,
     pub updated_at: String,
     #[serde(default)]
@@ -103,3 +158,77 @@ impl std::fmt::Display for ApiError {
 }
 
 impl std::error::Error for ApiError {}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::indexing_slicing, reason = "tests assert by panicking")]
+mod tests {
+    use super::*;
+    use crate::{Anchor, Kind, SourceRange};
+
+    fn annotation() -> Annotation {
+        Annotation {
+            id: "a1".into(),
+            document_id: "d1".into(),
+            anchor: Anchor::new(
+                "hello",
+                "hello world",
+                SourceRange { start: 0, end: 5, version: "v".into() },
+                Kind::Comment,
+                Some(0),
+            ),
+            body: "see screenshot".into(),
+            author: None,
+            author_name: None,
+            state: State::Open,
+            attachments: Vec::new(),
+            plannotator_tui: AnnotationExtras::default(),
+            created_at: "2026-09-14T00:00:00.000Z".into(),
+            updated_at: "2026-09-14T00:00:00.000Z".into(),
+            replies: Vec::new(),
+            other: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn empty_local_extras_do_not_change_the_workspaces_shape() {
+        let json = serde_json::to_value(annotation()).expect("serializable");
+        assert!(json.get("plannotator_tui").is_none());
+        assert!(json.get("attachments").is_none());
+    }
+
+    #[test]
+    fn local_image_attachments_round_trip_under_the_tui_namespace() {
+        let mut annotation = annotation();
+        annotation.plannotator_tui.attachments.push(LocalAttachment::image(
+            "/tmp/screen.png".into(),
+            Some("screen.png".into()),
+            Some("image/png".into()),
+        ));
+        let json = serde_json::to_value(&annotation).expect("serializable");
+        assert_eq!(json["plannotator_tui"]["attachments"][0]["type"], "image");
+        assert_eq!(json["plannotator_tui"]["attachments"][0]["source"], "local_file");
+        assert_eq!(json["plannotator_tui"]["attachments"][0]["path"], "/tmp/screen.png");
+        assert!(json.get("attachments").is_none(), "local files must not leak into Workspaces URLs");
+        let parsed: Annotation = serde_json::from_value(json).expect("parses");
+        assert_eq!(parsed, annotation);
+        assert!(parsed.plannotator_tui.attachments[0].is_local_image());
+    }
+
+    #[test]
+    fn future_local_attachment_kinds_are_preserved() {
+        let json = serde_json::json!({
+            "id": "a1",
+            "document_id": "d1",
+            "anchor": {"originalText": "hello"},
+            "body": "body",
+            "author": null,
+            "state": "open",
+            "plannotator_tui": {"attachments": [{"type": "video", "source": "local_file", "path": "/tmp/cast.webm", "duration": 4}]},
+            "created_at": "2026-09-14T00:00:00.000Z",
+            "updated_at": "2026-09-14T00:00:00.000Z",
+            "replies": []
+        });
+        let parsed: Annotation = serde_json::from_value(json.clone()).expect("parses");
+        assert_eq!(serde_json::to_value(parsed).expect("serializable"), json);
+    }
+}

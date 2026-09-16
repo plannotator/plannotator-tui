@@ -115,6 +115,46 @@ fn unsuccessful_sends_leave_the_record_pending_and_offer_retry() {
 }
 
 #[test]
+fn a_rail_image_path_is_stored_rendered_and_counted_in_send_history() {
+    let (root, mut app, delivery) = file_app("image-attachment");
+    let image = root.join("screen shot.png");
+    std::fs::write(&image, b"not actually decoded by this layer").expect("image");
+    app.add_quote_annotation("one", Kind::Comment, "see screenshot".into()).expect("annotation");
+    app.focus = Focus::Rail;
+
+    press(&mut app, 'i');
+    assert!(matches!(app.mode, Mode::AttachImage(_)));
+    app.handle_event(&Event::Paste(image.display().to_string())).expect("paste path");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Enter))).expect("attach");
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.status.as_deref(), Some("image attached"));
+    let screen = draw(&mut app, 100, 24);
+    assert!(screen.contains("image: screen shot.png"), "{screen}");
+
+    let location = Location::for_file(&app.data_dir, &app.project, &root.join("docs/a.md"));
+    let record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&location.record).expect("record")).expect("JSON");
+    assert_eq!(
+        record["annotations"][0]["plannotator_tui"]["attachments"][0]["path"],
+        image.display().to_string()
+    );
+    assert_eq!(record["annotations"][0]["plannotator_tui"]["attachments"][0]["mediaType"], "image/png");
+    assert!(record["annotations"][0].get("attachments").is_none(), "local images do not use Workspaces URLs");
+
+    press(&mut app, 'E');
+    let sent = delivery.calls.borrow()[0].clone();
+    assert!(sent.contains("Attachments:\n- Image 1:"), "{sent}");
+    assert!(sent.contains(&format!("`{}`", image.display())), "{sent}");
+    assert!(sent.contains("screen%20shot.png"), "{sent}");
+    let history =
+        std::fs::read_to_string(app.data_dir.join("feedback").join(&app.project).join("index.jsonl"))
+            .expect("history");
+    let archived: serde_json::Value = serde_json::from_str(history.trim()).expect("history JSON");
+    assert_eq!(archived["counts"]["images"], 1);
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
 fn folder_counts_and_delivery_cover_collapsed_files_but_exclude_orphans_and_siblings() {
     let (root, mut app, delivery) = folder_app("folder-scope");
     app.add_quote_annotation("one", Kind::Comment, "already sent A".into()).expect("A");

@@ -64,6 +64,35 @@ fn an_edit_advances_past_a_delivery_even_if_the_clock_went_backwards() {
     assert!(!store.is_pending(&store.annotations[0]));
 }
 
+#[test]
+fn attaching_an_image_advances_past_delivery_and_survives_reopen() {
+    let (root, location, doc, mut store) = fixture("attach-image");
+    let id = add(&mut store, &doc, "one", "look here");
+    store.annotations[0].updated_at = "2099-01-01T00:00:00.000Z".into();
+    store.record_delivery("agent", std::slice::from_ref(&id)).expect("send");
+    assert!(!store.is_pending(&store.annotations[0]));
+
+    let attached = store
+        .add_image_attachment(
+            &id,
+            plannotator_tui_schema::LocalAttachment::image(
+                "/tmp/screenshot.png".into(),
+                Some("screenshot.png".into()),
+                Some("image/png".into()),
+            ),
+        )
+        .expect("attach image");
+    assert!(attached);
+    assert_eq!(store.annotations[0].updated_at, "2099-01-01T00:00:00.001Z");
+    assert!(store.is_pending(&store.annotations[0]));
+
+    let reloaded = Store::load(&location, &doc).expect("reopen");
+    assert_eq!(reloaded.annotations[0].plannotator_tui.attachments.len(), 1);
+    assert_eq!(reloaded.annotations[0].plannotator_tui.attachments[0].path, "/tmp/screenshot.png");
+    assert!(reloaded.is_pending(&reloaded.annotations[0]));
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
 /// `YYYY-MM-DDTHH:MM:SS.mmmZ`: exactly three fractional digits and a trailing `Z`.
 fn has_millis_shape(value: &str) -> bool {
     let bytes = value.as_bytes();

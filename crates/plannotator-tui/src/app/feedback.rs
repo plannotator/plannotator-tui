@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use plannotator_tui_schema::{Kind, Provenance};
+use plannotator_tui_schema::{Annotation, Kind, Provenance};
 
 use super::App;
 use crate::archive::AnnotationRecord;
@@ -40,6 +40,7 @@ impl ReviewCounts {
 #[derive(Debug)]
 pub(super) struct FeedbackPart {
     pub(super) path: Option<PathBuf>,
+    pub(super) message: Option<usize>,
     pub(super) store: Store,
     pub(super) ids: Vec<String>,
 }
@@ -48,13 +49,22 @@ pub(super) struct FeedbackPart {
 pub(super) struct Feedback {
     pub(super) text: String,
     pub(super) count: usize,
+    pub(super) images: usize,
     pub(super) parts: Vec<FeedbackPart>,
     pub(super) annotations: Vec<AnnotationRecord>,
     pub(super) counts: HashMap<PathBuf, ReviewCounts>,
 }
 
 impl Feedback {
-    fn add(&mut self, path: Option<PathBuf>, name: &str, doc: &Document, store: Store, scope: SendScope) {
+    fn add(
+        &mut self,
+        path: Option<PathBuf>,
+        message: Option<usize>,
+        name: &str,
+        doc: &Document,
+        store: Store,
+        scope: SendScope,
+    ) {
         if let Some(path) = &path {
             self.counts.insert(path.clone(), ReviewCounts::for_store(&store));
         }
@@ -77,6 +87,7 @@ impl Feedback {
         self.text.push_str(&export::feedback(&doc.source, name, &entries));
         let ids = entries.iter().map(|e| e.annotation.id.clone()).collect();
         self.count += entries.len();
+        self.images += entries.iter().map(|entry| image_count(entry.annotation)).sum::<usize>();
         self.annotations.extend(entries.iter().map(|entry| {
             let a = entry.annotation;
             AnnotationRecord {
@@ -93,7 +104,7 @@ impl Feedback {
                 original_text: (!a.anchor.original_text.is_empty()).then(|| a.anchor.original_text.clone()),
             }
         }));
-        self.parts.push(FeedbackPart { path, store, ids });
+        self.parts.push(FeedbackPart { path, message, store, ids });
     }
 
     fn exported_text(self) -> String {
@@ -101,10 +112,24 @@ impl Feedback {
     }
 }
 
+fn image_count(annotation: &Annotation) -> usize {
+    annotation.attachments.len()
+        + annotation
+            .plannotator_tui
+            .attachments
+            .iter()
+            .filter(|attachment| attachment.is_local_image())
+            .count()
+}
+
 impl App {
     pub(super) fn is_file_review(&self) -> bool {
         self.tree.is_some()
             || (!self.open.source.transient && matches!(self.open.source.provenance, Provenance::File { .. }))
+    }
+
+    pub(super) fn is_message_review(&self) -> bool {
+        !self.candidates.is_empty() && matches!(self.open.source.provenance, Provenance::AgentMessage { .. })
     }
 
     pub(super) fn review_counts(&self) -> ReviewCounts {
@@ -234,11 +259,34 @@ impl App {
             _ => None,
         };
         let mut feedback = Feedback::default();
-        feedback.add(path, &self.open.source.name, &self.open.doc, self.open.store.clone(), scope);
+        feedback.add(path, None, &self.open.source.name, &self.open.doc, self.open.store.clone(), scope);
+        feedback
+    }
+
+    fn message_feedback(&self, scope: SendScope) -> Feedback {
+        let mut feedback = Feedback::default();
+        for index in 0..self.candidates.len() {
+            let (doc, store) = if index == self.pick_open {
+                (&self.open.doc, self.open.store.clone())
+            } else if let Some(open) = self.pick_cache.get(&index) {
+                (&open.doc, open.store.clone())
+            } else {
+                continue;
+            };
+            let name = if self.candidates.len() == 1 {
+                self.open.source.name.clone()
+            } else {
+                format!("{} · message {} of {}", self.message_host, index + 1, self.candidates.len())
+            };
+            feedback.add(None, Some(index), &name, doc, store, scope);
+        }
         feedback
     }
 
     pub(super) fn prepare_feedback(&self, scope: SendScope) -> Result<Feedback> {
+        if self.is_message_review() {
+            return Ok(self.message_feedback(scope));
+        }
         let Some(tree) = &self.tree else { return Ok(self.file_feedback(scope)) };
         let mut feedback = Feedback::default();
         for path in self.review_files() {
@@ -249,10 +297,10 @@ impl App {
             }
             let name = path.strip_prefix(tree.root()).unwrap_or(&path).display().to_string();
             if self.is_open(&path) {
-                feedback.add(Some(path), &name, &self.open.doc, self.open.store.clone(), scope);
+                feedback.add(Some(path), None, &name, &self.open.doc, self.open.store.clone(), scope);
             } else {
                 let (doc, store) = self.load_review_file(&path)?;
-                feedback.add(Some(path), &name, &doc, store, scope);
+                feedback.add(Some(path), None, &name, &doc, store, scope);
             }
         }
         // Folder feedback has always ended each file's block with one extra newline, so

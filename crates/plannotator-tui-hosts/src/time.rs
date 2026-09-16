@@ -14,6 +14,7 @@ pub(crate) fn iso_from_unix_ms(ms: u64) -> String {
 }
 
 /// Howard Hinnant's days-to-civil.
+#[allow(clippy::similar_names, reason = "standard algorithm variable names")]
 fn civil_from_days(days: u64) -> (u64, u64, u64) {
     let z = days + 719_468;
     let era = z / 146_097;

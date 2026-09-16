@@ -363,3 +363,23 @@ looked up in whichever table holds it. Verified against the `beta` source
 (`packages/core/src/session/sql.ts`, `packages/schema/src/session-message.ts`,
 `packages/util/src/global-roots.ts`) and a mixed-schema fixture reproducing the report.
 
+
+## 15. Image attachments are local references until uploaded (2026-09-14)
+
+Workspaces already reserves `Annotation.attachments` for uploaded image URLs: absolute `https://`
+strings that the server stores verbatim. A local screenshot path is not valid in that field, so
+plannotator-tui uses an additive local namespace instead. The field contract and compatibility
+invariants live in the [annotation schema](../crates/plannotator-tui-schema/src/annotation.rs),
+with round-trip regression tests alongside it.
+
+The UI slice is deliberately file-backed. Clipboard image paste waits for a real terminal or
+Herdr binary-image path; the existing paste event is text-only. See the
+[usage guide](../README.md#use) for the attachment workflow and access limitations.
+
+Feedback export renders every image (Workspaces URL attachments and local files) inside the same
+numbered annotation block, listing the path/URL and a Markdown image link. That keeps Herdr agent
+send, OSC-52 copy, headless export, and feedback history sidecars byte-identical. The shared
+feedback archive increments `counts.images`; file annotations remain the durable structured
+record, while reply annotations stay transient. Aggregation reuses the message stores already
+kept in memory for preview navigation; see [Agent replies](../README.md#agent-replies) for send
+behavior and [Inside Herdr](../README.md#inside-herdr) for the selected-text capture workaround.

@@ -2,9 +2,9 @@
 //!
 //! The record is `annotations.json` under the Plannotator data directory, keyed the way
 //! Plannotator keys files (`plannotator_tui_schema::annotations_dir`). It holds
-//! `plannotator_tui_schema::Annotation` values — the Workspaces wire shape — so a local record
-//! and a server row are interchangeable. Resolution against the current source happens on
-//! load; an annotation whose text is gone is kept as an orphan.
+//! `plannotator_tui_schema::Annotation` values; that type owns the wire contract and local
+//! extensions. Resolution against the current source happens on load; an annotation whose
+//! text is gone is kept as an orphan.
 //!
 //! A phase-2 sidecar (`<file>.annotations.json` next to the document) is imported once and
 //! left alone; nothing is written next to the document any more.
@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use plannotator_tui_schema::{Anchor, Annotation, Kind, Resolution, State, resolve};
+use plannotator_tui_schema::{Anchor, Annotation, Kind, LocalAttachment, Resolution, State, resolve};
 use serde::{Deserialize, Serialize};
 
 use crate::doc::Document;
@@ -231,6 +231,7 @@ impl Store {
             author_name: None,
             state: State::Open,
             attachments: Vec::new(),
+            plannotator_tui: plannotator_tui_schema::AnnotationExtras::default(),
             created_at: now.clone(),
             updated_at: now,
             replies: Vec::new(),
@@ -260,6 +261,29 @@ impl Store {
         let removed = self.remove_unsaved(id);
         self.save()?;
         Ok(removed)
+    }
+
+    pub(crate) fn add_image_attachment(&mut self, id: &str, attachment: LocalAttachment) -> Result<bool> {
+        if !attachment.is_local_image() {
+            return Ok(false);
+        }
+        let Some(annotation) = self.annotations.iter().find(|a| a.id == id) else { return Ok(false) };
+        if annotation
+            .plannotator_tui
+            .attachments
+            .iter()
+            .any(|existing| existing.is_local_image() && existing.path == attachment.path)
+        {
+            return Ok(false);
+        }
+        let Some(updated_at) = self.next_updated_at(id)? else { return Ok(false) };
+        let mut next = self.clone();
+        let Some(annotation) = next.annotations.iter_mut().find(|a| a.id == id) else { return Ok(false) };
+        annotation.plannotator_tui.attachments.push(attachment);
+        annotation.updated_at = updated_at;
+        next.save()?;
+        *self = next;
+        Ok(true)
     }
 
     fn remove_unsaved(&mut self, id: &str) -> bool {
@@ -302,6 +326,7 @@ impl Store {
 }
 
 /// Howard Hinnant's days-to-civil, for a dependency-free UTC date.
+#[allow(clippy::similar_names, reason = "standard algorithm variable names")]
 pub(crate) fn civil_from_days(days: u64) -> (u64, u64, u64) {
     let z = days + 719_468;
     let era = z / 146_097;

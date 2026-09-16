@@ -2,7 +2,7 @@
 //! floating toolbar and compose box. Pure over `App` except for recording geometry for
 //! hit-testing.
 
-use plannotator_tui_schema::Kind;
+use plannotator_tui_schema::{Annotation, Kind};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
@@ -92,6 +92,7 @@ impl App {
         match &self.mode {
             Mode::Compose => self.draw_compose(frame, &self.compose_title("comment")),
             Mode::Edit(_) => self.draw_compose(frame, &self.compose_title("edit")),
+            Mode::AttachImage(_) => self.draw_compose(frame, " image path · enter attaches · esc cancels "),
             Mode::Browse if self.pending.is_some() => self.draw_toolbar(frame),
             Mode::Pick => self.draw_pick(frame),
             Mode::Archive => self.draw_archive(frame),
@@ -301,7 +302,9 @@ impl App {
     }
 
     fn edit_origin(&self, height: u16, width: u16) -> Option<Rect> {
-        let Mode::Edit(id) = &self.mode else { return None };
+        let (Mode::Edit(id) | Mode::AttachImage(id)) = &self.mode else {
+            return None;
+        };
         let (rect, _) = self.geometry.bubbles.iter().find(|(_, bubble_id)| bubble_id == id)?;
         let area = self.geometry.doc.union(*rect);
         let x = rect.right().saturating_sub(width).max(area.x);
@@ -328,14 +331,13 @@ impl App {
             let anchored_y = rail.y + anchor_row.saturating_sub(self.scroll) as u16;
             let y = anchored_y.max(next_y);
             let kind = placed.kind();
-            let body = if placed.annotation.body.is_empty() {
-                label(kind).to_owned()
-            } else {
-                placed.annotation.body.clone()
-            };
+            let body = rail_body(placed.annotation, kind);
             let inner_width = usize::from(rail.width.saturating_sub(4));
-            let lines: Vec<Line<'static>> =
-                wrap_line(&Line::from(body.as_str()), &[], inner_width).into_iter().map(|r| r.line).collect();
+            let lines: Vec<Line<'static>> = body
+                .lines()
+                .flat_map(|line| wrap_line(&Line::from(line.to_owned()), &[], inner_width))
+                .map(|r| r.line)
+                .collect();
             let height = (lines.len() as u16 + 2).min(rail.bottom().saturating_sub(y));
             if height < 3 {
                 break;
@@ -361,8 +363,12 @@ impl App {
             let rect = Rect { x: rail.x, y, width: rail.width, height };
             let inner = bubble.inner(rect);
             frame.render_widget(bubble, rect);
-            let body_style =
-                if placed.annotation.body.is_empty() { Style::new().dim().italic() } else { Style::new() };
+            let body_style = if placed.annotation.body.is_empty() && attachment_count(placed.annotation) == 0
+            {
+                Style::new().dim().italic()
+            } else {
+                Style::new()
+            };
             let text_area = Rect { x: inner.x + 1, width: inner.width.saturating_sub(1), ..inner };
             frame.render_widget(Paragraph::new(lines).style(body_style), text_area);
             bubbles.push((rect, placed.annotation.id.clone()));
@@ -415,7 +421,7 @@ impl App {
         let help = match self.focus {
             _ if self.pending.is_some() => "a looks good · c comment · d delete · esc clear ",
             Focus::Tree => "j/k · enter open · E send · t hide · q quit ",
-            Focus::Rail => "j/k · e edit · x remove · tab · q quit ",
+            Focus::Rail => "j/k · e edit · i image · x remove · tab · q quit ",
             Focus::Document => "drag or v select · c comment · E send · tab · q quit ",
         };
         // The status must stay readable at any width, so the key help yields columns to it
@@ -436,4 +442,30 @@ impl App {
 fn short_id(id: &str) -> String {
     let tail: Vec<char> = id.chars().rev().take(5).collect();
     tail.into_iter().rev().collect()
+}
+
+fn rail_body(annotation: &Annotation, kind: Kind) -> String {
+    let mut body = if annotation.body.is_empty() { label(kind).to_owned() } else { annotation.body.clone() };
+    for attachment in annotation.plannotator_tui.attachments.iter().filter(|a| a.is_local_image()) {
+        body.push('\n');
+        body.push_str("📎 image: ");
+        body.push_str(&attachment_label(&attachment.path));
+    }
+    for url in &annotation.attachments {
+        body.push('\n');
+        body.push_str("📎 image: ");
+        body.push_str(url);
+    }
+    body
+}
+
+fn attachment_count(annotation: &Annotation) -> usize {
+    annotation.plannotator_tui.attachments.iter().filter(|a| a.is_local_image()).count()
+        + annotation.attachments.len()
+}
+
+fn attachment_label(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .map_or_else(|| path.to_owned(), |name| name.to_string_lossy().into_owned())
 }
