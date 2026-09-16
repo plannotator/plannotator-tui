@@ -41,8 +41,13 @@ fn app(delivery: Box<dyn Delivery>) -> App {
 
 /// `App::open_message` on `candidates()`, isolated like `app`.
 fn message_app(session_id: Option<&str>, delivery: Box<dyn Delivery>) -> App {
+    opened_message_app(session_id, delivery, false)
+}
+
+/// `message_app`, with `newest` as `plannotator-tui last --newest` passes it.
+fn opened_message_app(session_id: Option<&str>, delivery: Box<dyn Delivery>, newest: bool) -> App {
     let mut app =
-        App::open_message("claude", "/tmp/transcript.jsonl", session_id, candidates(), 60, delivery)
+        App::open_message("claude", "/tmp/transcript.jsonl", session_id, candidates(), 60, delivery, newest)
             .expect("opens");
     app.data_dir = scratch_data_dir();
     app
@@ -224,6 +229,22 @@ fn escaping_the_picker_keeps_the_newest_message() {
     assert_eq!(app.open.source.name, "claude · last message");
     app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('p')))).expect("p");
     assert_eq!(app.mode, Mode::Pick, "p reopens the picker");
+}
+
+#[test]
+fn newest_opens_the_newest_reply_and_leaves_the_picker_on_p() {
+    let mut app = opened_message_app(None, Box::new(Discard), true);
+    assert_eq!(app.mode, Mode::Browse, "--newest has nothing to ask");
+    assert_eq!(app.open.doc.source, "# Third\n\nnewest message\n");
+    assert_eq!(app.candidates.len(), 3, "the other replies are still there to pick from");
+
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('p')))).expect("p");
+    assert_eq!(app.mode, Mode::Pick, "p opens the picker that was never shown");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('j')))).expect("j");
+    assert_eq!(app.open.doc.source, "# Second\n\nmiddle message\n");
+    app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Esc))).expect("esc");
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.doc.source, "# Third\n\nnewest message\n", "esc returns to what was open");
 }
 
 #[test]

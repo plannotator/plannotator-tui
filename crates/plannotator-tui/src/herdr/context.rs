@@ -53,6 +53,8 @@ pub(crate) struct HerdrEnv {
     pub(crate) session: Option<PathBuf>,
     /// `PLANNOTATOR_TUI_SESSION_ID`: the agent's session id, for hosts without transcript files.
     pub(crate) session_id: Option<String>,
+    /// `PLANNOTATOR_TUI_NEWEST=1`: open the newest reply straight away, no picker.
+    pub(crate) newest: bool,
 }
 
 impl HerdrEnv {
@@ -78,6 +80,7 @@ impl HerdrEnv {
             host: non_empty("PLANNOTATOR_TUI_HOST"),
             session: non_empty("PLANNOTATOR_TUI_SESSION").map(PathBuf::from),
             session_id: non_empty("PLANNOTATOR_TUI_SESSION_ID"),
+            newest: env("PLANNOTATOR_TUI_NEWEST").as_deref() == Some("1"),
         }
     }
 
@@ -193,5 +196,13 @@ mod tests {
             assert!(env(&vars).has_message_source());
         }
         assert!(!env(&[]).has_message_source());
+    }
+
+    #[test]
+    fn only_an_exact_newest_flag_skips_the_picker() {
+        assert!(env(&[("PLANNOTATOR_TUI_NEWEST", "1")]).newest);
+        assert!(!env(&[]).newest);
+        assert!(!env(&[("PLANNOTATOR_TUI_NEWEST", "")]).newest);
+        assert!(!env(&[("PLANNOTATOR_TUI_NEWEST", "0")]).newest);
     }
 }

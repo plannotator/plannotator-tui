@@ -34,10 +34,10 @@ const USAGE: &str = "usage:
   plannotator-tui config
   plannotator-tui --version
   plannotator-tui herdr open [file.md | folder] [--placement overlay|split|popup] [--deliver-to <pane>]
-  plannotator-tui herdr last [--placement P] [--deliver-to <pane>]
+  plannotator-tui herdr last [--placement P] [--deliver-to <pane>] [--newest]
   plannotator-tui herdr pane
   plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes|opencode] [--pid N] [--session <transcript>]
-                       [--session-id <id>] [--stdin] [--print] [--pick N]";
+                       [--session-id <id>] [--stdin] [--print] [--pick N] [--newest]";
 
 /// Width the document gets when nothing else is known: gutter + rail + gap subtracted.
 fn doc_width(cols: u16) -> usize {
@@ -146,7 +146,8 @@ fn show_config() -> Result<()> {
     Ok(())
 }
 
-/// `plannotator-tui herdr open [PATH] [--placement P] [--deliver-to PANE]`.
+/// `plannotator-tui herdr open [PATH] [--placement P] [--deliver-to PANE]`;
+/// `herdr last` takes `--newest` on top, which `open` has nothing to skip.
 fn herdr_command(args: &[String]) -> Result<()> {
     use crate::herdr::launch::{OpenArgs, agent_get, agent_identity, plan, plan_last, process_info, run};
     let sub = args.first().map(String::as_str);
@@ -167,6 +168,7 @@ fn herdr_command(args: &[String]) -> Result<()> {
             "--deliver-to" => {
                 open.deliver_to = Some(rest.next().context("--deliver-to needs a value")?.clone());
             }
+            "--newest" if sub == Some("last") => open.newest = true,
             flag if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{USAGE}"),
             path if open.path.is_none() => open.path = Some(PathBuf::from(path)),
             extra => anyhow::bail!("unexpected argument {extra:?}\n{USAGE}"),
@@ -201,6 +203,7 @@ fn herdr_pane() -> Result<()> {
             session: env.session.clone(),
             session_id: env.session_id.clone(),
             pick: 25,
+            newest: env.newest,
             ..crate::last::LastOptions::default()
         })
     } else {
@@ -219,7 +222,8 @@ fn herdr_pane() -> Result<()> {
     result
 }
 
-/// `plannotator-tui last [--host H] [--pid N] [--session PATH] [--stdin] [--print] [--pick N]`.
+/// `plannotator-tui last [--host H] [--pid N] [--session PATH] [--stdin] [--print] [--pick N]
+/// [--newest]`.
 fn last_command(args: &[String]) -> Result<()> {
     use crate::last::LastOptions;
     let mut options = LastOptions { pick: 25, ..LastOptions::default() };
@@ -237,6 +241,7 @@ fn last_command(args: &[String]) -> Result<()> {
             "--stdin" => options.stdin = true,
             "--print" => options.print = true,
             "--pick" => options.pick = rest.next().context("--pick needs a value")?.parse()?,
+            "--newest" => options.newest = true,
             other => anyhow::bail!("unknown argument {other}\n{USAGE}"),
         }
     }

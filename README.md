@@ -95,6 +95,9 @@ the agent as its next message: `Send 3 new ▸ claude in w1:p2 (E)`. Folder revi
 placement = "overlay"   # overlay (full tab, default) | split | popup
 ```
 
+`plannotator-tui herdr last --newest` opens the agent's newest reply without asking which
+one; without the flag the picker comes first, as it always has.
+
 `plannotator-tui config` prints the file's path and the values in effect. The `herdr/`
 directory in this repo is the development manifest; users should install Herdr Annotate.
 
@@ -109,7 +112,8 @@ An explicit `--placement` or `PLANNOTATOR_TUI_PLACEMENT` still takes precedence.
 picker of its recent replies. Hosts: Claude Code, Codex, pi, Oh My Pi, GitHub Copilot CLI,
 Droid, Hermes CLI, OpenCode (1 and 2). `--host`, `--pid`, `--session <transcript>` (format sniffed when
 no host is named) and `--session-id <id>` (Hermes, OpenCode) override detection; `--stdin`
-reads a document;
+reads a document; `--newest` skips the picker and opens the newest reply straight away, with
+`p` still opening the picker on the rest;
 `--print` writes the newest reply to stdout and always exits 0 (for hooks and scripts).
 A reply review keeps its annotations in memory only; nothing about it survives the run, but
 the feedback you send or copy is archived like any other (see Feedback archive below).

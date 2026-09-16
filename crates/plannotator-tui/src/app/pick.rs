@@ -23,6 +23,9 @@ impl App {
     /// Open with `messages` (newest first) as candidates; the picker shows when there is a
     /// choice to make. `transcript` is the path shown and archived; `session_id` is the
     /// host's own id for the session, when known.
+    ///
+    /// `newest` asks for the newest message and nothing in the way: the candidates are
+    /// still kept, so `p` opens the picker on them exactly as escaping it would have.
     pub(crate) fn open_message(
         host: &str,
         transcript: &str,
@@ -30,14 +33,15 @@ impl App {
         messages: Vec<Message>,
         width: usize,
         delivery: Box<dyn crate::delivery::Delivery>,
+        newest: bool,
     ) -> Result<Self> {
-        let Some(newest) = messages.first() else { anyhow::bail!("no message to open") };
-        let mut app = Self::open(message_source(host, session_id, newest), width, delivery)?;
+        let Some(first) = messages.first() else { anyhow::bail!("no message to open") };
+        let mut app = Self::open(message_source(host, session_id, first), width, delivery)?;
         host.clone_into(&mut app.message_host);
         transcript.clone_into(&mut app.message_transcript);
         app.message_session = session_id.map(str::to_owned);
         app.candidates = messages;
-        if app.candidates.len() > 1 {
+        if app.candidates.len() > 1 && !newest {
             app.mode = Mode::Pick;
         }
         Ok(app)

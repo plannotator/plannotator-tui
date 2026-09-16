@@ -72,6 +72,7 @@ user entry, an `isSidechain` entry, bookkeeping entries without uuids written la
 PLANNOTATOR_TUI_MESSAGE_PID   open the last message of the agent with this pid (launcher → pane)
 PLANNOTATOR_TUI_HOST          claude | codex; overrides detection (any context)
 PLANNOTATOR_TUI_SESSION       explicit transcript path; skips detection (any context)
+PLANNOTATOR_TUI_NEWEST        `1`: open the newest reply, no picker (launcher → pane)
 ```
 
 `plannotator-tui herdr pane` precedence: `PLANNOTATOR_TUI_MESSAGE_PID` → `PLANNOTATOR_TUI_FILE`
@@ -80,9 +81,11 @@ PLANNOTATOR_TUI_SESSION       explicit transcript path; skips detection (any con
 ## CLI
 
 ```
-plannotator-tui last [--host H] [--pid N] [--session PATH] [--stdin] [--print] [--pick N]
+plannotator-tui last [--host H] [--pid N] [--session PATH] [--stdin] [--print] [--pick N] [--newest]
 ```
 - default: detect → find → picker of the newest 25 assistant messages → annotate → send.
+- `--newest`: open the newest message instead of the picker. The other candidates are kept,
+  so `p` opens the picker on them exactly as escaping it would have.
 - `--print`: newest message text on stdout, exit 0 (the delivery contract from decision 9).
 - `--stdin`: the document is stdin; no detection.
 - Errors name what was searched: "no Claude Code transcript for pid 1234 (looked in …)".
@@ -94,5 +97,7 @@ plannotator-tui last [--host H] [--pid N] [--session PATH] [--stdin] [--print] [
   name identifies the agent (`claude`, `codex`; else the foreground group leader) → pid; host
   from that name; then `plugin pane open` as `herdr open` does, with
   `PLANNOTATOR_TUI_MESSAGE_PID`, `PLANNOTATOR_TUI_HOST`, `PLANNOTATOR_TUI_DELIVER_TO`.
+- `herdr last --newest` adds `PLANNOTATOR_TUI_NEWEST=1`, which the pane reads as `--newest`.
+  `herdr open` has no picker to skip and rejects the flag.
 - In the pane, `find_transcript` starts at that pid (`sessions/<pid>.json` is a direct hit).
 - Manifest pane command becomes `plannotator-tui herdr pane`.

@@ -17,6 +17,8 @@ pub(crate) struct OpenArgs {
     pub(crate) path: Option<PathBuf>,
     pub(crate) placement: Option<Placement>,
     pub(crate) deliver_to: Option<String>,
+    /// `last` only: open the newest reply without offering the picker first.
+    pub(crate) newest: bool,
 }
 
 /// A fully resolved launch.
@@ -39,6 +41,8 @@ pub(crate) struct Launch {
     pub(crate) message: Option<AgentMessage>,
     /// The agent's session as Herdr reports it: a transcript path or a host-specific id.
     pub(crate) session: Option<AgentSession>,
+    /// Open the newest reply straight away instead of showing the picker.
+    pub(crate) newest: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,7 +130,9 @@ pub(crate) fn plan_last(
     process_info_json: Option<&str>,
     agent_get_json: Option<&str>,
 ) -> Result<Launch> {
+    let newest = args.newest;
     let mut launch = plan(env, config, OpenArgs { path: None, ..args }, cwd)?;
+    launch.newest = newest;
     let pane = launch.deliver.as_ref().map(|t| t.pane.clone()).or_else(|| launch.target_pane.clone());
     let Some(pane) = pane else {
         anyhow::bail!("no agent pane to read: not focused on one and no --deliver-to")
@@ -244,6 +250,7 @@ pub(crate) fn plan(env: &HerdrEnv, config: &Config, args: OpenArgs, cwd: &Path) 
         plugin: env.plugin_id.clone().unwrap_or_else(|| "plannotator-tui".to_owned()),
         message: None,
         session: None,
+        newest: false,
     })
 }
 
@@ -275,6 +282,9 @@ pub(crate) fn argv(launch: &Launch) -> Vec<String> {
                 out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_MESSAGE_PID={pid}")]);
             }
             out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_HOST={}", message.host)]);
+            if launch.newest {
+                out.extend(["--env".to_owned(), "PLANNOTATOR_TUI_NEWEST=1".to_owned()]);
+            }
             out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_CWD={}", launch.cwd.display())]);
             match &launch.session {
                 Some(AgentSession::Path(p)) => {

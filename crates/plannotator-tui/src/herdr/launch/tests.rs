@@ -145,7 +145,11 @@ fn only_file_urls_are_opened() {
 #[test]
 fn popup_placement_emits_size_and_no_target_pane() {
     let config = Config::parse("[herdr]\npopup_width = \"100%\"\npopup_height = \"100%\"\n").expect("config");
-    let args = OpenArgs { placement: Some(Placement::Popup), deliver_to: Some("w1:p1".into()), path: None };
+    let args = OpenArgs {
+        placement: Some(Placement::Popup),
+        deliver_to: Some("w1:p1".into()),
+        ..OpenArgs::default()
+    };
     let launch = plan(&env(Some("w1:p9"), None), &config, args, Path::new("/tmp")).expect("plans");
     assert_eq!(launch.deliver, Some(Target { pane: "w1:p1".into(), agent: None }), "--deliver-to wins");
     let args = argv(&launch);
@@ -298,4 +302,33 @@ fn herdrs_agent_session_is_passed_to_the_pane_as_a_path_or_an_id() {
     .expect("plans");
     let args = argv(&launch);
     assert!(args.contains(&"PLANNOTATOR_TUI_SESSION_ID=sess_abc123".to_owned()), "{args:?}");
+}
+
+#[test]
+fn newest_reaches_the_pane_only_when_last_was_asked_for_it() {
+    let context = HerdrContext {
+        focused_pane_id: Some("w1:p1".into()),
+        focused_pane_agent: Some("claude".into()),
+        focused_pane_cwd: Some("/w".into()),
+        ..HerdrContext::default()
+    };
+    let last = |args| {
+        plan_last(
+            &env(None, Some(context.clone())),
+            &Config::default(),
+            args,
+            Path::new("/"),
+            None,
+            Some(AGENT_GET_PI),
+        )
+        .expect("plans")
+    };
+    let asked = OpenArgs { newest: true, ..OpenArgs::default() };
+    assert!(argv(&last(asked)).contains(&"PLANNOTATOR_TUI_NEWEST=1".to_owned()));
+    assert!(!argv(&last(OpenArgs::default())).iter().any(|a| a.starts_with("PLANNOTATOR_TUI_NEWEST")));
+
+    // `herdr open` has no picker to skip, so a document launch never carries the flag.
+    let open = plan(&env(None, Some(context)), &Config::default(), OpenArgs::default(), Path::new("/"))
+        .expect("plans");
+    assert!(!argv(&open).iter().any(|a| a.starts_with("PLANNOTATOR_TUI_NEWEST")));
 }

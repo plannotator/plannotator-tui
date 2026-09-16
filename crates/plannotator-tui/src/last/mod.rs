@@ -39,6 +39,8 @@ pub(crate) struct LastOptions {
     pub(crate) print: bool,
     /// How many recent messages the picker offers.
     pub(crate) pick: usize,
+    /// Open the newest message straight away; the picker waits behind `p`.
+    pub(crate) newest: bool,
 }
 
 pub(crate) fn run(options: &LastOptions) -> Result<()> {
@@ -83,6 +85,7 @@ pub(crate) fn run(options: &LastOptions) -> Result<()> {
     let session_id = located.session_id;
     let messages = located.messages;
     let note = discovery_note(located.discovery, crate::herdr::context::HerdrEnv::from_env().in_herdr);
+    let newest = options.newest;
     cli::run_ui(|width| {
         let mut app = App::open_message(
             label,
@@ -91,6 +94,7 @@ pub(crate) fn run(options: &LastOptions) -> Result<()> {
             messages,
             width,
             cli::delivery(true),
+            newest,
         )?;
         if let Some(note) = note {
             app.set_status(note);
