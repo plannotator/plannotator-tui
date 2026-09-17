@@ -262,6 +262,15 @@ impl Store {
         Ok(removed)
     }
 
+    /// Remove every annotation belonging to the open document. Returns how many were removed.
+    pub(crate) fn clear_all(&mut self) -> Result<usize> {
+        let removed = self.annotations.len();
+        self.annotations.clear();
+        self.resolved.clear();
+        self.save()?;
+        Ok(removed)
+    }
+
     fn remove_unsaved(&mut self, id: &str) -> bool {
         let Some(index) = self.annotations.iter().position(|a| a.id == id) else { return false };
         self.annotations.remove(index);

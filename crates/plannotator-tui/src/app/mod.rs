@@ -53,6 +53,8 @@ enum Mode {
     Edit(String),
     /// Quit was asked for while feedback is unsent; the footer asks first.
     ConfirmQuit,
+    /// Clearing every annotation on the current document was requested; the footer asks first.
+    ConfirmClearDocument,
     /// Choosing which of the agent's recent messages to review.
     Pick,
     /// Restoring annotations from finished file reviews.

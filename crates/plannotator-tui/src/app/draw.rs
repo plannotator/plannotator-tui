@@ -96,7 +96,7 @@ impl App {
             Mode::Pick => self.draw_pick(frame),
             Mode::Archive => self.draw_archive(frame),
             Mode::ReviewMenu => self.draw_review_menu(frame),
-            Mode::Browse | Mode::ConfirmQuit => {}
+            Mode::Browse | Mode::ConfirmQuit | Mode::ConfirmClearDocument => {}
         }
     }
 
@@ -372,6 +372,14 @@ impl App {
     }
 
     fn draw_footer(&mut self, frame: &mut Frame, mut area: Rect) {
+        if self.mode == Mode::ConfirmClearDocument {
+            let question = format!(
+                " clear all {} annotation(s) on current document? y clear · n cancel",
+                self.open.store.len()
+            );
+            frame.render_widget(Paragraph::new(Line::from(Span::raw(question).bold())), area);
+            return;
+        }
         if self.mode == Mode::ConfirmQuit {
             // The question owns the footer: the browse help would name keys that are not
             // live while it is up.

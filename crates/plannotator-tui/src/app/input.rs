@@ -19,6 +19,7 @@ impl App {
             Event::Key(key) if key.kind != KeyEventKind::Release => match &self.mode {
                 Mode::Browse => self.browse_key(*key),
                 Mode::ConfirmQuit => self.confirm_quit_key(*key),
+                Mode::ConfirmClearDocument => self.confirm_clear_document_key(*key),
                 Mode::Pick => self.pick_key(*key),
                 Mode::Archive => {
                     self.archive_key(*key);
@@ -56,6 +57,10 @@ impl App {
                 return Ok(());
             }
             (KeyCode::Char('E'), _) => return self.send_feedback(),
+            (KeyCode::Char('C'), _) => {
+                self.request_clear_document();
+                return Ok(());
+            }
             (KeyCode::Char('m'), _) if self.is_file_review() => {
                 self.open_review_menu();
                 return Ok(());
@@ -104,6 +109,36 @@ impl App {
                 self.quit = true;
             }
             KeyCode::Esc => self.mode = Mode::Browse,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Ask before deleting every annotation on the current document.
+    fn request_clear_document(&mut self) {
+        if self.open.store.len() == 0 {
+            self.status = Some("no annotations on current document".into());
+        } else {
+            self.mode = Mode::ConfirmClearDocument;
+        }
+    }
+
+    /// Confirm or cancel the current-document clear operation.
+    fn confirm_clear_document_key(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
+                let removed = self.open.store.clear_all()?;
+                self.mark_unsent();
+                self.clear_selection();
+                self.rail_cursor = 0;
+                self.sync_tree_counts();
+                self.mode = Mode::Browse;
+                self.status = Some(format!("cleared {removed} annotation(s) on current document"));
+            }
+            KeyCode::Char('n' | 'N') | KeyCode::Esc => {
+                self.mode = Mode::Browse;
+                self.status = Some("clear cancelled".into());
+            }
             _ => {}
         }
         Ok(())
@@ -304,6 +339,7 @@ impl App {
                     Mode::Compose
                     | Mode::Browse
                     | Mode::ConfirmQuit
+                    | Mode::ConfirmClearDocument
                     | Mode::Pick
                     | Mode::Archive
                     | Mode::ReviewMenu => {

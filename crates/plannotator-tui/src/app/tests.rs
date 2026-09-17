@@ -151,6 +151,25 @@ fn quitting_with_unsent_feedback_asks_before_it_quits() {
     assert_eq!(app.send_state, SendState::Ready, "nothing was sent");
 }
 
+#[test]
+fn uppercase_c_clears_all_annotations_on_the_current_document_after_confirmation() {
+    let mut app = app(Box::new(Discard));
+    app.add_block_annotation(0, Kind::Comment, "first".to_owned()).expect("annotation");
+    app.add_block_annotation(1, Kind::LooksGood, String::new()).expect("annotation");
+    assert_eq!(app.open.store.len(), 2);
+
+    app.handle_event(&key(KeyCode::Char('C'), KeyModifiers::NONE)).expect("clear request");
+    assert_eq!(app.mode, Mode::ConfirmClearDocument);
+    app.handle_event(&key(KeyCode::Char('n'), KeyModifiers::NONE)).expect("cancel clear");
+    assert_eq!(app.open.store.len(), 2);
+
+    app.handle_event(&key(KeyCode::Char('C'), KeyModifiers::NONE)).expect("clear request");
+    app.handle_event(&key(KeyCode::Char('y'), KeyModifiers::NONE)).expect("confirm clear");
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.store.len(), 0);
+    assert!(app.status.as_deref().is_some_and(|status| status.starts_with("cleared 2")));
+}
+
 fn candidates() -> Vec<plannotator_tui_hosts::Message> {
     use plannotator_tui_hosts::{Message, Role};
     let message = |id: &str, text: &str, at: &str| Message {

@@ -12,7 +12,7 @@ use tui_markdown::{Options, StyleSheet};
 
 use crate::doc::{BlockKind, Document};
 use crate::srcmap::{LineOffsets, align};
-use crate::wrap::{Row, clip_line, wrap_line};
+use crate::wrap::{Row, clip_line, wrap_line, wrap_table};
 
 /// Rows of vertical space between blocks.
 const BLOCK_GAP: usize = 1;
@@ -111,7 +111,9 @@ impl DocLayout {
         for block in &mut self.blocks {
             block.first_row = row;
             let lines = block.text.lines.iter().zip(&block.offsets);
-            block.rows = if block.kind.preserves_columns() {
+            block.rows = if block.kind == BlockKind::Table {
+                wrap_table(&block.text.lines, &block.offsets, width)
+            } else if block.kind.preserves_columns() {
                 lines.map(|(l, o)| clip_line(l, o, width)).collect()
             } else {
                 lines.flat_map(|(l, o)| wrap_line(l, o, width)).collect()
