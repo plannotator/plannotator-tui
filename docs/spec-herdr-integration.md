@@ -97,7 +97,7 @@ command = ["bash", "herdr/last.sh"]
 ```
 
 `open.sh` is ~20 lines: read the context JSON, pick the file per the precedence above, then
-`exec "$HERDR_BIN_PATH" plugin pane open --plugin plannotator-tui --entrypoint doc --focus
+`exec "$HERDR_BIN_PATH" plugin pane open --plugin annotate --entrypoint doc --focus
 --cwd "$folder" --env PLANNOTATOR_TUI_FILE="$file" --env PLANNOTATOR_TUI_DELIVER_TO="$pane"`.
 
 Keybindings the user adds (Herdr has no manifest keybindings):
@@ -119,7 +119,7 @@ command = "plannotator-tui.last"
 `skills/plannotator-tui/SKILL.md`, installed like Herdr's own skill. The whole instruction:
 
 > When you want the human to review a plan or document: write it to a file, then run
-> `herdr plugin pane open --plugin plannotator-tui --entrypoint doc --placement split
+> `herdr plugin pane open --plugin annotate --entrypoint doc --placement split
 > --direction right --target-pane "$HERDR_PANE_ID" --focus --env PLANNOTATOR_TUI_FILE=<path>
 > --env PLANNOTATOR_TUI_DELIVER_TO="$HERDR_PANE_ID"`, and **end your turn**. The review arrives
 > as your next user message, as numbered annotations (`# Annotations on <file>`, `## Annotation 1 (line 12)`).

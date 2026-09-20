@@ -247,7 +247,7 @@ pub(crate) fn plan(env: &HerdrEnv, config: &Config, args: OpenArgs, cwd: &Path) 
         popup: (config.herdr.popup_width.clone(), config.herdr.popup_height.clone()),
         target_pane,
         deliver,
-        plugin: env.plugin_id.clone().unwrap_or_else(|| "plannotator-tui".to_owned()),
+        plugin: env.plugin_id.clone().unwrap_or_else(|| "annotate".to_owned()),
         message: None,
         session: None,
         newest: false,

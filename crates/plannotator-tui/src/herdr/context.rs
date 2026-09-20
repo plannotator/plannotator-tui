@@ -43,7 +43,9 @@ pub(crate) struct HerdrEnv {
     pub(crate) deliver_to: Option<String>,
     pub(crate) deliver_agent: Option<String>,
     pub(crate) placement: Option<String>,
-    /// `HERDR_PLUGIN_ID`: the plugin this binary ships in; `plannotator-tui` when unset.
+    /// `HERDR_PLUGIN_ID`: the plugin this binary ships in. Herdr sets it for plugin actions;
+    /// unset (an agent's shell, a script) it is `annotate`, the id Herdr Annotate installs
+    /// under, so `plannotator-tui herdr open` reaches the shipped plugin.
     pub(crate) plugin_id: Option<String>,
     /// `PLANNOTATOR_TUI_MESSAGE_PID`: open this agent's last message instead of a file.
     pub(crate) message_pid: Option<u32>,

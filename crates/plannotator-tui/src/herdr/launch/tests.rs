@@ -40,7 +40,7 @@ fn human_keybind_opens_the_focused_folder_and_delivers_to_its_agent() {
             "pane",
             "open",
             "--plugin",
-            "plannotator-tui",
+            "annotate",
             "--entrypoint",
             "doc",
             "--placement",
