@@ -194,15 +194,15 @@ impl App {
                 self.selection = Some(Selection::start(self.cursor));
                 self.status = Some("visual: move to extend, enter to select, esc to cancel".into());
             }
-            (KeyCode::Char('i'), _) => {
-                self.clear_selection();
-                self.roam = true;
-                self.status = Some("move: hjkl w b 0 $ · v select · esc back to blocks".into());
-            }
+            (KeyCode::Char('i'), _) => self.start_roaming(),
             (KeyCode::Char('j') | KeyCode::Down, _) => self.select_block(self.selected + 1),
             (KeyCode::Char('k') | KeyCode::Up, _) => self.select_block(self.selected.saturating_sub(1)),
-            (KeyCode::Char('h') | KeyCode::Left, _) => self.move_cursor(0, -1),
-            (KeyCode::Char('l') | KeyCode::Right, _) => self.move_cursor(0, 1),
+            // A cursor that moves must be visible, so a column move in block mode is a
+            // roaming move: the same key, with the cursor drawn.
+            (KeyCode::Char('h' | 'l') | KeyCode::Left | KeyCode::Right, _) => {
+                self.start_roaming();
+                self.motion_key(key);
+            }
             (KeyCode::Char('d'), KeyModifiers::CONTROL) | (KeyCode::PageDown, _) => self.scroll_by(page / 2),
             (KeyCode::Char('u'), KeyModifiers::CONTROL) | (KeyCode::PageUp, _) => self.scroll_by(-page / 2),
             (KeyCode::Char('g') | KeyCode::Home, _) => self.select_block(0),
@@ -243,6 +243,13 @@ impl App {
         if let Some(sel) = self.selection.as_mut() {
             sel.set_head(self.cursor);
         }
+    }
+
+    /// Enter roaming: the visual-mode motions move the cursor with nothing selected.
+    fn start_roaming(&mut self) {
+        self.clear_selection();
+        self.roam = true;
+        self.status = Some("move: hjkl w b 0 $ · v select · esc back to blocks".into());
     }
 
     /// The cursor motions shared by visual and roaming modes. True when `key` was one.
