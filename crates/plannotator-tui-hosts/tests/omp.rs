@@ -21,3 +21,42 @@ fn omp_sessions_resolve_and_parse_with_pis_rules() {
     assert!(messages.iter().any(|m| m.role == Role::Assistant));
     assert_eq!(omp::DEFAULT_AGENT_DIR, ".omp/agent");
 }
+
+/// OMP discovery is pi's function, so the last-written session wins here too.
+#[test]
+fn omp_ranks_candidates_by_last_write_like_pi() {
+    let root = std::env::temp_dir().join(format!("plannotator-tui-omp-mtime-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let bucket = root.join(pi::encoded_dir(Path::new("/work/project")));
+    std::fs::create_dir_all(&bucket).expect("bucket");
+    let session = |id: &str| {
+        format!(
+            concat!(
+                r#"{{"type":"session","version":3,"id":"{0}","cwd":"/work/project"}}"#,
+                "\n",
+                r#"{{"type":"message","id":"m-{0}","parentId":null,"#,
+                r#""message":{{"role":"assistant","content":[{{"type":"text","text":"{0}"}}]}}}}"#,
+                "\n",
+            ),
+            id
+        )
+    };
+    let resumed = bucket.join("2026-08-28T10-00-00-000Z_01a00000-0000-7000-8000-00000000000a.jsonl");
+    let idle = bucket.join("2026-08-29T10-00-00-000Z_01a00000-0000-7000-8000-00000000000b.jsonl");
+    std::fs::write(&resumed, session("a")).expect("write");
+    std::fs::write(&idle, session("b")).expect("write");
+    let at = |seconds: u64| std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds);
+    let set = |path: &PathBuf, seconds: u64| {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .expect("open")
+            .set_modified(at(seconds))
+            .expect("mtime");
+    };
+    set(&idle, 1_000_000);
+    set(&resumed, 1_000_060);
+
+    assert_eq!(omp::find_transcript(&root, Path::new("/work/project")).expect("found"), resumed);
+    std::fs::remove_dir_all(&root).expect("cleanup");
+}

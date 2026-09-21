@@ -5,6 +5,10 @@
 //! custom entries) forming a tree. There is no pid registry, so a running pi is found by
 //! its cwd. Verified against pi's `session-manager`/`migrations.ts` encoding and the
 //! `harness/session/types.ts` entry set.
+//!
+//! Which session a cwd is *in* is a question pi answers for itself the same way: its
+//! `findMostRecentSession` (`core/session-manager.ts`, behind `pi --continue`) ranks the
+//! bucket's files by `mtimeMs`, not by name.
 
 use std::path::{Path, PathBuf};
 
@@ -79,7 +83,9 @@ pub fn encoded_dir(cwd: &Path) -> String {
 
 /// The newest session for `cwd` that holds at least one message: its encoded directory
 /// first, then legacy flat files whose header names the cwd, else the newest session
-/// anywhere under `sessions_dir`. Newest is by the timestamp in the filename.
+/// anywhere under `sessions_dir`. Newest is by last write, not by the timestamp in the
+/// filename: pi appends to the session it is resuming, so a session started days ago and
+/// still in use outranks one created since and left idle.
 pub fn find_transcript(sessions_dir: &Path, cwd: &Path) -> Option<PathBuf> {
     let mut for_cwd: Vec<PathBuf> = jsonl_files(&sessions_dir.join(encoded_dir(cwd)));
     for_cwd.extend(
@@ -95,12 +101,26 @@ pub fn find_transcript(sessions_dir: &Path, cwd: &Path) -> Option<PathBuf> {
     newest_with_messages(all)
 }
 
+/// The last-written candidate that holds at least one message. Ranked by modification
+/// time, newest first; a file whose metadata cannot be read ranks after every file that
+/// has one, and ties fall back to the timestamp in the filename, so a directory whose
+/// files all share an mtime keeps the old ordering.
 fn newest_with_messages(mut files: Vec<PathBuf>) -> Option<PathBuf> {
-    files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    files.sort();
     files.dedup();
-    files
+    let mut ranked: Vec<(Option<std::time::SystemTime>, PathBuf)> =
+        files.into_iter().map(|path| (modified(&path), path)).collect();
+    ranked.sort_by(|(a_time, a), (b_time, b)| {
+        b_time.cmp(a_time).then_with(|| b.file_name().cmp(&a.file_name()))
+    });
+    ranked
         .into_iter()
+        .map(|(_, path)| path)
         .find(|p| std::fs::read_to_string(p).is_ok_and(|text| !parse_messages(&text, 1).is_empty()))
+}
+
+fn modified(path: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|data| data.modified()).ok()
 }
 
 fn jsonl_files(dir: &Path) -> Vec<PathBuf> {

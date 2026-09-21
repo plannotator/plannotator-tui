@@ -17,6 +17,50 @@ fn sessions() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/pi-sessions"))
 }
 
+fn temp(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("plannotator-tui-pi-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    dir
+}
+
+/// A writable copy of the session fixtures whose modification times rank in filename
+/// order, one minute apart. A checkout leaves every fixture the same age in whatever
+/// order git wrote them, which says nothing about which session was last used.
+fn staged_sessions(name: &str) -> std::path::PathBuf {
+    let root = temp(name);
+    let mut copied = Vec::new();
+    for entry in walk(sessions()) {
+        let relative = entry.strip_prefix(sessions()).expect("under the fixtures");
+        let target = root.join(relative);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).expect("bucket");
+        }
+        std::fs::copy(&entry, &target).expect("copy");
+        copied.push(target);
+    }
+    copied.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    for (index, path) in copied.iter().enumerate() {
+        touch(path, 1_000_000 + index as u64 * 60);
+    }
+    root
+}
+
+fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).expect("fixtures").flatten() {
+        let path = entry.path();
+        if path.is_dir() { out.extend(walk(&path)) } else { out.push(path) }
+    }
+    out
+}
+
+/// Set `path`'s modification time to `seconds` after the Unix epoch.
+fn touch(path: &Path, seconds: u64) {
+    let time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds);
+    std::fs::File::options().write(true).open(path).expect("open").set_modified(time).expect("mtime");
+}
+
 #[test]
 fn the_newest_assistant_message_comes_first_and_the_later_rewind_branch_wins() {
     let messages = parse_messages(&fixture("pi.jsonl"), 25);
@@ -70,20 +114,55 @@ fn the_encoded_dir_matches_pis_session_manager() {
 
 #[test]
 fn the_newest_session_for_the_cwd_wins_over_a_newer_one_elsewhere_and_over_empty_ones() {
-    let found = find_transcript(sessions(), Path::new("/work/project")).expect("found");
+    let root = staged_sessions("cwd");
+    let found = find_transcript(&root, Path::new("/work/project")).expect("found");
     assert!(
         found.ends_with(
             "--work-project--/2026-08-28T10-00-00-000Z_01a00000-0000-7000-8000-000000000001.jsonl"
         ),
         "{found:?}"
     );
+    std::fs::remove_dir_all(&root).expect("cleanup");
+}
+
+/// A resumed session is written to; a session created after it and left alone is not. Pi
+/// names a file once, at creation, so only the modification time says which one the pane
+/// is actually in.
+#[test]
+fn a_session_written_to_more_recently_wins_over_one_with_a_newer_name() {
+    let root = temp("mtime");
+    let bucket = root.join(encoded_dir(Path::new("/work/project")));
+    std::fs::create_dir_all(&bucket).expect("bucket");
+    let session = |id: &str, text: &str| {
+        format!(
+            concat!(
+                r#"{{"type":"session","version":3,"id":"{0}","cwd":"/work/project"}}"#,
+                "\n",
+                r#"{{"type":"message","id":"m-{0}","parentId":null,"timestamp":"2026-08-28T10:00:00.000Z","#,
+                r#""message":{{"role":"assistant","content":[{{"type":"text","text":"{1}"}}]}}}}"#,
+                "\n",
+            ),
+            id, text
+        )
+    };
+    let resumed = bucket.join("2026-08-28T10-00-00-000Z_01a00000-0000-7000-8000-00000000000a.jsonl");
+    let idle = bucket.join("2026-08-29T10-00-00-000Z_01a00000-0000-7000-8000-00000000000b.jsonl");
+    std::fs::write(&resumed, session("a", "resumed")).expect("write");
+    std::fs::write(&idle, session("b", "idle")).expect("write");
+    touch(&idle, 1_000_000);
+    touch(&resumed, 1_000_060);
+
+    let found = find_transcript(&root, Path::new("/work/project")).expect("found");
+
+    assert_eq!(found, resumed, "the last-written session is the one the pane is in");
+    let text = std::fs::read_to_string(&found).expect("session");
+    assert_eq!(parse_messages(&text, 1).first().map(|m| m.text.as_str()), Some("resumed"));
+    std::fs::remove_dir_all(&root).expect("cleanup");
 }
 
 #[test]
 fn a_legacy_flat_file_counts_for_its_cwd_when_the_encoded_dir_has_nothing() {
-    let root = std::env::temp_dir().join(format!("plannotator-tui-pi-flat-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(&root).expect("dir");
+    let root = temp("flat");
     let flat = sessions().join("2026-08-27T09-00-00-000Z_01a00000-0000-7000-8000-000000000003.jsonl");
     std::fs::copy(&flat, root.join(flat.file_name().expect("name"))).expect("copy");
     let found = find_transcript(&root, Path::new("/work/project")).expect("found");
@@ -93,11 +172,13 @@ fn a_legacy_flat_file_counts_for_its_cwd_when_the_encoded_dir_has_nothing() {
 
 #[test]
 fn an_unknown_cwd_falls_back_to_the_newest_session_anywhere() {
-    let found = find_transcript(sessions(), Path::new("/nowhere")).expect("found");
+    let root = staged_sessions("anywhere");
+    let found = find_transcript(&root, Path::new("/nowhere")).expect("found");
     assert!(
         found.ends_with("--work-other--/2026-08-28T11-00-00-000Z_01a00000-0000-7000-8000-000000000004.jsonl"),
         "{found:?}"
     );
+    std::fs::remove_dir_all(&root).expect("cleanup");
 }
 
 #[test]
