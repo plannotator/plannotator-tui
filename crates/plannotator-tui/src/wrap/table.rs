@@ -8,7 +8,9 @@
 use ratatui::style::Style;
 use ratatui::text::Line;
 
-use super::{Cell, Row, cells_of, cells_width, clip_cells, clip_line, finish_row, wrap_cells};
+use super::{
+    Cell, Row, cells_of, cells_width, clip_cells, clip_line, finish_row, trim_trailing_space, wrap_cells,
+};
 
 /// Room a column gets for its longest word before it is asked to share. One very long
 /// token (a path, a URL) would otherwise starve every other column of the budget.
@@ -40,6 +42,12 @@ pub(crate) fn wrap_table(lines: &[Line<'_>], offsets: &[Vec<Option<usize>>], wid
     };
     let (original_widths, border_style) = (original_widths.clone(), *border_style);
 
+    // Below four cells per column the box itself is wider than the window; reflowing would
+    // only draw a border the window cannot show. Clip, as the table was before it could reflow.
+    if width < original_widths.len().saturating_mul(4).saturating_add(1) {
+        return clip_table(lines, offsets, width);
+    }
+
     // A `│` in cell text splits that line into more columns than the border has, and the
     // surplus would be dropped. One unreadable line disqualifies the whole block.
     let ragged = parsed.iter().any(|line| match line {
@@ -59,19 +67,28 @@ pub(crate) fn wrap_table(lines: &[Line<'_>], offsets: &[Vec<Option<usize>>], wid
         }
     }
     let column_widths = fit_table_columns(&original_widths, &longest_word, width.max(1));
-    let table_wraps = parsed.iter().any(|line| match line {
-        TableLine::Content(columns, _) => table_content_wraps(columns, &column_widths),
-        _ => false,
-    });
+    // Wrap every cell exactly once; rendering and the "does anything wrap" question both
+    // read these pieces.
+    let wrapped: Vec<Option<Vec<Vec<Vec<Cell>>>>> = parsed
+        .iter()
+        .map(|line| match line {
+            TableLine::Content(columns, _) => Some(wrap_columns(columns, &column_widths)),
+            _ => None,
+        })
+        .collect();
+    let table_wraps = wrapped.iter().flatten().any(|columns| columns.iter().any(|pieces| pieces.len() > 1));
 
     let mut out = Vec::new();
     for (index, parsed_line) in parsed.iter().enumerate() {
         match parsed_line {
             TableLine::Border(_, kind, style) => {
+                // A border the renderer left unstyled borrows the top border's style, so the
+                // box is drawn in one colour.
                 let style = if *style == Style::default() { border_style } else { *style };
                 out.push(render_table_border(&column_widths, *kind, style));
             }
-            TableLine::Content(columns, line_border_style) => {
+            TableLine::Content(_, line_border_style) => {
+                let columns = wrapped.get(index).and_then(Option::as_deref).unwrap_or(&[]);
                 out.extend(render_table_content(columns, &column_widths, *line_border_style, border_style));
                 // Wrapped rows run together without a rule between them.
                 let next_is_content = matches!(parsed.get(index + 1), Some(TableLine::Content(..)));
@@ -247,28 +264,32 @@ fn render_table_border(widths: &[usize], kind: TableBorder, style: Style) -> Row
     finish_row(cells, Style::default())
 }
 
-/// Wrap every cell of one source row and stack the results into as many screen rows as the
-/// tallest cell needs. `line_border_style` is the style of this row's own `│` characters;
-/// it dresses the padding of a column that has run out of content.
-fn render_table_content(
-    columns: &[Vec<Cell>],
-    widths: &[usize],
-    line_border_style: Style,
-    border_style: Style,
-) -> Vec<Row> {
-    let wrapped: Vec<Vec<Vec<Cell>>> = widths
+/// Wrap every cell of one source row to its column, each piece trimmed and clipped so it
+/// stays inside the column even when a single wide char is wider than it.
+fn wrap_columns(columns: &[Vec<Cell>], widths: &[usize]) -> Vec<Vec<Vec<Cell>>> {
+    widths
         .iter()
         .enumerate()
         .map(|(index, &width)| {
             let width = width.max(1);
             wrap_cells(columns.get(index).map_or(&[][..], Vec::as_slice), width)
                 .into_iter()
-                // A cell narrower than one char still has to stay inside its column.
-                .map(|piece| clip_cells(super::trim_trailing_space(piece), width))
+                .map(|piece| clip_cells(trim_trailing_space(piece), width))
                 .collect()
         })
-        .collect();
-    let height = wrapped.iter().map(Vec::len).max().unwrap_or(1);
+        .collect()
+}
+
+/// Stack one source row's wrapped cells into as many screen rows as the tallest cell needs.
+/// `line_border_style` is the style of this row's own `│` characters; it dresses the padding
+/// of a column that has run out of content.
+fn render_table_content(
+    wrapped: &[Vec<Vec<Cell>>],
+    widths: &[usize],
+    line_border_style: Style,
+    border_style: Style,
+) -> Vec<Row> {
+    let height = wrapped.iter().map(Vec::len).max().unwrap_or(1).max(1);
     let mut rows = Vec::with_capacity(height);
     for row_index in 0..height {
         let mut cells = vec![Cell { ch: '│', width: 1, offset: None, style: border_style }];
@@ -288,12 +309,6 @@ fn render_table_content(
         rows.push(finish_row(cells, Style::default()));
     }
     rows
-}
-
-fn table_content_wraps(columns: &[Vec<Cell>], widths: &[usize]) -> bool {
-    widths.iter().enumerate().any(|(index, &width)| {
-        wrap_cells(columns.get(index).map_or(&[][..], Vec::as_slice), width.max(1)).len() > 1
-    })
 }
 
 #[cfg(test)]
@@ -340,6 +355,29 @@ mod tests {
             }
             assert_eq!(column, row.cells.len(), "row width disagrees with its cell map");
         }
+    }
+
+    #[test]
+    fn a_window_narrower_than_the_box_gets_the_clipped_table() {
+        let lines = [
+            Line::from("┌─────┬─────┬───────┬──────┐"),
+            Line::from("│ a   │ b   │ c     │ d    │"),
+            Line::from("├─────┼─────┼───────┼──────┤"),
+            Line::from("│ one │ two │ three │ four │"),
+            Line::from("└─────┴─────┴───────┴──────┘"),
+        ];
+        let offsets: Vec<Vec<Option<usize>>> =
+            lines.iter().map(|line| (0..line.to_string().chars().count()).map(Some).collect()).collect();
+        for width in 5..=16 {
+            let rows = wrap_table(&lines, &offsets, width);
+            assert_eq!(rows.len(), lines.len(), "width {width}: clipped, one row per line");
+            assert!(
+                rows.iter().all(|row| row.cells.len() <= width),
+                "width {width}: no row wider than the window"
+            );
+        }
+        let rows = wrap_table(&lines, &offsets, 17);
+        assert!(rows.iter().all(|row| row.cells.len() <= 17), "at four cells per column the box fits");
     }
 
     #[test]

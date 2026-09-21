@@ -110,13 +110,13 @@ impl DocLayout {
         let mut row = 0usize;
         for block in &mut self.blocks {
             block.first_row = row;
-            let lines = block.text.lines.iter().zip(&block.offsets);
+            let lines = || block.text.lines.iter().zip(&block.offsets);
             block.rows = if block.kind == BlockKind::Table {
                 wrap_table(&block.text.lines, &block.offsets, width)
             } else if block.kind.preserves_columns() {
-                lines.map(|(l, o)| clip_line(l, o, width)).collect()
+                lines().map(|(l, o)| clip_line(l, o, width)).collect()
             } else {
-                lines.flat_map(|(l, o)| wrap_line(l, o, width)).collect()
+                lines().flat_map(|(l, o)| wrap_line(l, o, width)).collect()
             };
             row += block.rows.len() + BLOCK_GAP;
         }
