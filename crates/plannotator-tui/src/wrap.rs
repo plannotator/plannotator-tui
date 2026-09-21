@@ -138,13 +138,21 @@ pub(crate) fn clip_line(line: &Line<'_>, offsets: &[Option<usize>], width: usize
 /// The Markdown renderer emits a complete table before this layer sees it, so the table is
 /// identified from its box-drawing borders and each rendered cell is wrapped independently.
 pub(crate) fn wrap_table(lines: &[Line<'_>], offsets: &[Vec<Option<usize>>], width: usize) -> Vec<Row> {
-    let Some((original_widths, border_kind, border_style)) =
+    let Some((original_widths, _, border_style)) =
         lines.first().zip(offsets.first()).and_then(|(line, map)| table_border(line, map))
     else {
         return lines.iter().zip(offsets).flat_map(|(line, map)| wrap_line(line, map, width)).collect();
     };
 
-    let column_widths = fit_table_columns(&original_widths, width.max(1));
+    let mut longest_word = vec![0usize; original_widths.len()];
+    for (line, map) in lines.iter().zip(offsets) {
+        if let Some((cells, _)) = table_content_cells(line, map) {
+            for (column, longest) in cells.iter().zip(longest_word.iter_mut()) {
+                *longest = (*longest).max(longest_word_width(column));
+            }
+        }
+    }
+    let column_widths = fit_table_columns(&original_widths, &longest_word, width.max(1));
     let table_wraps = lines
         .iter()
         .zip(offsets)
@@ -153,13 +161,6 @@ pub(crate) fn wrap_table(lines: &[Line<'_>], offsets: &[Vec<Option<usize>>], wid
     let mut out = Vec::new();
     for (line_index, (line, map)) in lines.iter().zip(offsets).enumerate() {
         if let Some((_, kind, style)) = table_border(line, map) {
-            // Keep the detected border kind for each row; the first line's kind only supplies
-            // the style fallback when a renderer emits an unusual border sequence.
-            let kind = if matches!(kind, TableBorder::Top | TableBorder::Middle | TableBorder::Bottom) {
-                kind
-            } else {
-                border_kind
-            };
             out.push(render_table_border(&column_widths, kind, style, border_style));
         } else if let Some((cells, style)) = table_content_cells(line, map) {
             let content_rows = render_table_content(&cells, &column_widths, style, border_style);
@@ -241,28 +242,77 @@ fn table_content_cells(line: &Line<'_>, offsets: &[Option<usize>]) -> Option<(Ve
     Some((columns, cells.first().map_or(Style::default(), |c| c.style)))
 }
 
-fn fit_table_columns(original: &[usize], width: usize) -> Vec<usize> {
+/// Column widths for a table that does not fit. Every column first gets room for its
+/// longest word (capped, so one huge token cannot starve the rest); the space left over is
+/// shared in proportion to how much each column asked for beyond that, so a column of short
+/// words stays narrow and the long one takes the room. A column never grows past its own
+/// content. Only when the words alone exceed the budget do columns shrink below them.
+fn fit_table_columns(original: &[usize], longest_word: &[usize], width: usize) -> Vec<usize> {
+    const WORD_CAP: usize = 20;
     let columns = original.len();
     let overhead = columns.saturating_mul(3).saturating_add(1);
-    let content_budget = width.saturating_sub(overhead).max(columns);
-    let original_total: usize = original.iter().sum();
-    if original_total <= content_budget {
+    let budget = width.saturating_sub(overhead).max(columns);
+    let total: usize = original.iter().sum();
+    if total == 0 || total <= budget {
         return original.to_vec();
     }
-    let mut fitted = vec![1; columns];
-    let mut remaining = content_budget.saturating_sub(columns);
-    let mut order: Vec<usize> = (0..columns).collect();
-    order.sort_by_key(|&index| std::cmp::Reverse(original.get(index).copied().unwrap_or(0)));
-    let mut cursor = 0usize;
-    while remaining > 0 && !order.is_empty() {
-        let Some(&index) = order.get(cursor % order.len()) else { break };
+    let minimum: Vec<usize> = original
+        .iter()
+        .enumerate()
+        .map(|(i, &w)| longest_word.get(i).copied().unwrap_or(1).clamp(1, WORD_CAP).min(w).max(1))
+        .collect();
+    let floor: usize = minimum.iter().sum();
+    if floor >= budget {
+        // Even the words do not fit: scale them down, keeping every column at least one cell.
+        let mut fitted: Vec<usize> =
+            minimum.iter().map(|&m| (m.saturating_mul(budget) / floor).max(1)).collect();
+        while fitted.iter().sum::<usize>() > budget {
+            let Some((index, _)) =
+                fitted.iter().enumerate().filter(|(_, w)| **w > 1).max_by_key(|(_, w)| **w)
+            else {
+                break;
+            };
+            if let Some(slot) = fitted.get_mut(index) {
+                *slot -= 1;
+            }
+        }
+        return fitted;
+    }
+    let spare = budget - floor;
+    let wants: Vec<usize> = original.iter().zip(&minimum).map(|(&o, &m)| o.saturating_sub(m)).collect();
+    let wanted: usize = wants.iter().sum::<usize>().max(1);
+    let mut fitted: Vec<usize> =
+        minimum.iter().zip(&wants).map(|(&m, &w)| m + w.saturating_mul(spare) / wanted).collect();
+    // Rounding leaves a few cells over: give them to whichever column is squeezed the most.
+    while fitted.iter().sum::<usize>() < budget {
+        let deficit = |i: usize| {
+            original.get(i).copied().unwrap_or(0).saturating_sub(fitted.get(i).copied().unwrap_or(0))
+        };
+        let Some((index, _)) =
+            (0..columns).map(|i| (i, deficit(i))).filter(|(_, d)| *d > 0).max_by_key(|(_, d)| *d)
+        else {
+            break;
+        };
         if let Some(slot) = fitted.get_mut(index) {
             *slot += 1;
         }
-        cursor += 1;
-        remaining -= 1;
     }
     fitted
+}
+
+/// The widest run of non-whitespace cells in a rendered cell's content.
+fn longest_word_width(cells: &[Cell]) -> usize {
+    let mut longest = 0;
+    let mut run = 0;
+    for cell in cells {
+        if cell.ch.is_whitespace() {
+            longest = longest.max(run);
+            run = 0;
+        } else {
+            run += cell.width;
+        }
+    }
+    longest.max(run)
 }
 
 fn render_table_border(widths: &[usize], kind: TableBorder, style: Style, fallback_style: Style) -> Row {
@@ -396,6 +446,49 @@ mod tests {
     }
 
     #[test]
+    fn columns_keep_their_longest_word_and_share_the_rest_in_proportion() {
+        // Step 37, Owner 8, Risk 6, Notes 60 at a 68-cell document: budget is 68 - 13 = 55.
+        // Longest words: "accounts" 8, "platform" 8, "medium" 6, "config/flags.toml," 18.
+        let widths = fit_table_columns(&[37, 8, 6, 60], &[8, 8, 6, 18], 68);
+        assert_eq!(widths.iter().sum::<usize>(), 55, "{widths:?}");
+        assert_eq!(
+            (widths[1], widths[2]),
+            (8, 6),
+            "short columns get exactly their longest word: {widths:?}"
+        );
+        assert!(widths[3] > widths[0], "the long column takes most of the spare room: {widths:?}");
+        assert!(widths.iter().zip([37, 8, 6, 60]).all(|(w, o)| *w <= o), "never wider than the content");
+        assert_eq!(
+            fit_table_columns(&[10, 20], &[4, 7], 80),
+            vec![10, 20],
+            "a table that fits keeps its widths"
+        );
+        let tiny = fit_table_columns(&[30, 30, 30], &[12, 12, 12], 12);
+        assert_eq!(tiny.iter().sum::<usize>(), 3, "a tiny budget still gives every column a cell: {tiny:?}");
+    }
+
+    #[test]
+    fn words_stay_whole_when_a_wrapped_table_has_room_for_them() {
+        let lines = [
+            Line::from("┌──────────────────────────────────┬──────────┬────────┐"),
+            Line::from("│ Step                             │ Owner    │ Risk   │"),
+            Line::from("├──────────────────────────────────┼──────────┼────────┤"),
+            Line::from("│ Enable the flag for everyone now │ platform │ medium │"),
+            Line::from("└──────────────────────────────────┴──────────┴────────┘"),
+        ];
+        let offsets: Vec<Vec<Option<usize>>> =
+            lines.iter().map(|line| (0..line.to_string().chars().count()).map(Some).collect()).collect();
+        let rendered = wrap_table(&lines, &offsets, 40)
+            .iter()
+            .map(|row| row.line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for word in ["Owner", "platform", "medium", "Risk"] {
+            assert!(rendered.contains(word), "{word} was split: {rendered}");
+        }
+    }
+
+    #[test]
     fn table_cells_wrap_without_breaking_the_box() {
         let lines = [
             Line::from("┌────────────┬──────────────┐"),
@@ -412,10 +505,9 @@ mod tests {
         let rendered = rows.iter().map(|row| row.line.to_string()).collect::<Vec<_>>().join("\n");
 
         assert!(rows.iter().all(|row| row.cells.len() <= 24));
-        assert!(
-            rendered.contains("TABLE_TAI") && rendered.contains("L is a"),
-            "rendered table was {rendered:?}"
-        );
+        // The long cell wraps, but its text survives intact and in order.
+        let squashed: String = rendered.chars().filter(|c| c.is_alphanumeric() || *c == '_').collect();
+        assert!(squashed.contains("TABLE_TAILisalongvalue"), "rendered table was {rendered:?}");
         assert!(rendered.contains("┌") && rendered.contains("└"));
         assert_eq!(rendered.lines().filter(|line| line.starts_with("├")).count(), 3);
     }
