@@ -79,7 +79,13 @@ dimmed. The keys also work without opening the menu.
 | toolbar | `a` looks good · `c` comment · `d` delete · `Esc` |
 | notes | `j`/`k`; `e` edit; `x` remove; click a bubble |
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
-| tree | `j`/`k`; `Enter` open; `E` sends new notes across all reviewed files, including collapsed folders |
+| tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
+
+Hidden folders are out of the tree until `.` asks for them, and `.git`, `.hg`, `.svn`,
+`.jj`, `.cache`, `.direnv`, `.venv`, `venv`, `__pycache__`, `node_modules`, `vendor`,
+`target`, `build`, `dist` and `out` stay out either way — none of them is read at all.
+Showing or hiding is a view choice: notes recorded for a file inside a hidden folder are
+part of the review and are sent whether or not its folder is listed.
 
 ## Inside Herdr
 
