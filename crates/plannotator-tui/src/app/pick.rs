@@ -1,6 +1,7 @@
 //! The message picker: which of the agent's recent messages to review. Newest first, the
 //! newest already open behind it.
 
+#[cfg(unix)]
 use std::process::Command;
 use std::sync::OnceLock;
 
@@ -196,22 +197,32 @@ fn clock(at: &str, offset_minutes: i32) -> Option<String> {
 
 /// Minutes east of UTC for this machine, resolved once.
 ///
-/// `std` has no local-time API and this crate carries no date dependency, so the offset
-/// comes from `date +%z` - the same shell-out `last::locate` already uses. Anything
-/// unexpected leaves the clock in UTC, which is what it showed before.
+/// `std` has no local-time API. On Unix the offset comes from `date +%z`, the same
+/// shell-out `last::locate` already uses; on Windows, from the time zone the OS reports,
+/// which `time` reads without touching the environment. Anything unexpected leaves the
+/// clock in UTC, which is what it showed before.
 pub(super) fn local_offset_minutes() -> i32 {
     static OFFSET: OnceLock<i32> = OnceLock::new();
     *OFFSET.get_or_init(|| {
-        if !cfg!(unix) {
-            return 0;
+        #[cfg(unix)]
+        {
+            let Ok(output) = Command::new("date").arg("+%z").output() else { return 0 };
+            let Ok(text) = String::from_utf8(output.stdout) else { return 0 };
+            parse_utc_offset(text.trim()).unwrap_or(0)
         }
-        let Ok(output) = Command::new("date").arg("+%z").output() else { return 0 };
-        let Ok(text) = String::from_utf8(output.stdout) else { return 0 };
-        parse_utc_offset(text.trim()).unwrap_or(0)
+        #[cfg(windows)]
+        {
+            time::UtcOffset::current_local_offset().map_or(0, |offset| i32::from(offset.whole_minutes()))
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            0
+        }
     })
 }
 
 /// `+0530` or `-0800` as minutes east of UTC.
+#[cfg(unix)]
 fn parse_utc_offset(zone: &str) -> Option<i32> {
     let sign = match zone.as_bytes().first()? {
         b'+' => 1,
@@ -240,7 +251,9 @@ fn fit(text: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{clock, parse_utc_offset};
+    #[cfg(unix)]
+    use super::parse_utc_offset;
+    use super::{clock, local_offset_minutes};
 
     #[test]
     fn a_utc_stamp_is_shown_on_the_local_clock() {
@@ -254,6 +267,13 @@ mod tests {
         assert_eq!(clock("2026-08-31T19:53:52+05:30", 330).as_deref(), Some("19:53"));
     }
 
+    #[test]
+    fn the_local_offset_is_a_real_time_zone_on_every_platform() {
+        let minutes = local_offset_minutes();
+        assert!((-14 * 60..=14 * 60).contains(&minutes), "{minutes}");
+    }
+
+    #[cfg(unix)]
     #[test]
     fn a_zone_string_reads_as_minutes_east_of_utc() {
         assert_eq!(parse_utc_offset("+0530"), Some(330));
