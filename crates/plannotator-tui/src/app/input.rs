@@ -127,6 +127,7 @@ impl App {
             }
             KeyCode::Char('k') | KeyCode::Up => self.tree_cursor = self.tree_cursor.saturating_sub(1),
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.open_tree_selection()?,
+            KeyCode::Char('.') => self.toggle_tree_hidden()?,
             KeyCode::Esc => self.focus = Focus::Document,
             _ => {}
         }

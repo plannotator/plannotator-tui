@@ -498,3 +498,49 @@ fn a_column_move_in_block_mode_starts_roaming_so_the_cursor_is_drawn() {
     app.handle_event(&key(KeyCode::Char('v'), KeyModifiers::NONE)).expect("v");
     assert_eq!(app.selection.map(|s| s.anchor()), Some((0, 2)), "v anchors where the cursor is shown");
 }
+
+/// A folder whose only Markdown lives beside a hidden folder and a `.git` full of it.
+fn folder_with_hidden() -> PathBuf {
+    let root = std::env::temp_dir().join(format!("plannotator-tui-hidden-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join(".agents/drafts")).expect("mkdir");
+    std::fs::create_dir_all(root.join(".git")).expect("mkdir");
+    std::fs::write(root.join("plan.md"), "# Plan\n\nfirst thing\n").expect("write");
+    std::fs::write(root.join(".agents/drafts/draft.md"), "# Draft\n\nnotes\n").expect("write");
+    std::fs::write(root.join(".git/COMMIT_EDITMSG.md"), "# Commit\n").expect("write");
+    root
+}
+
+#[test]
+fn dot_in_the_tree_shows_hidden_folders_but_never_the_skipped_ones() {
+    let root = folder_with_hidden();
+    let mut app = App::open_folder(&root, 100, Box::new(Discard)).expect("folder opens");
+    app.data_dir = scratch_data_dir();
+    draw_sized(&mut app, 140, 20);
+    let names = |app: &App| -> Vec<String> {
+        app.tree.as_ref().expect("tree").rows.iter().map(|r| r.name.clone()).collect()
+    };
+    assert_eq!(names(&app), ["plan.md"], "hidden folders stay out of the default view");
+
+    app.handle_event(&key(KeyCode::Tab, KeyModifiers::NONE)).expect("tab");
+    app.handle_event(&key(KeyCode::Char('.'), KeyModifiers::NONE)).expect("dot");
+    assert_eq!(names(&app), ["plan.md", ".agents"], "the toggle lists .agents, never .git");
+    assert_eq!(app.status.as_deref(), Some("hidden entries shown"));
+
+    // The hidden folder opens like any other: expand down to its Markdown and read it.
+    app.handle_event(&key(KeyCode::Char('j'), KeyModifiers::NONE)).expect("j");
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("expand .agents");
+    app.handle_event(&key(KeyCode::Char('j'), KeyModifiers::NONE)).expect("j");
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("expand drafts");
+    app.handle_event(&key(KeyCode::Char('j'), KeyModifiers::NONE)).expect("j");
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("open draft");
+    assert_eq!(open_path(&app), "draft.md");
+
+    // Hiding again leaves the default view, with the document it opened still open.
+    app.handle_event(&key(KeyCode::Tab, KeyModifiers::NONE)).expect("tab");
+    app.handle_event(&key(KeyCode::Char('.'), KeyModifiers::NONE)).expect("dot");
+    assert_eq!(names(&app), ["plan.md"]);
+    assert_eq!(app.status.as_deref(), Some("hidden entries hidden"));
+    assert_eq!(open_path(&app), "draft.md", "hiding a folder does not close its open file");
+    std::fs::remove_dir_all(&root).expect("cleanup");
+}

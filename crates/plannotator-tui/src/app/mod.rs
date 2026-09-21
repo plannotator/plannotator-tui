@@ -314,6 +314,29 @@ impl App {
         }
     }
 
+    /// Show or hide dot-prefixed entries in the tree. A view choice only: annotations
+    /// recorded for a file inside a hidden folder are part of the review either way, so
+    /// what `E` sends and what the review counts add up to do not change here.
+    fn toggle_tree_hidden(&mut self) -> Result<()> {
+        let Some(mut tree) = self.tree.take() else { return Ok(()) };
+        let selected = tree.rows.get(self.tree_cursor).map(|r| r.path.clone());
+        let result = tree.set_show_hidden(!tree.show_hidden());
+        self.refresh_counts(&mut tree);
+        self.status = Some(
+            if tree.show_hidden() { "hidden entries shown" } else { "hidden entries hidden" }.to_owned(),
+        );
+        // Keep the cursor on the same row where the relist still lists it.
+        self.tree_cursor = selected
+            .and_then(|path| tree.position(&path))
+            .unwrap_or_else(|| self.tree_cursor.min(tree.rows.len().saturating_sub(1)));
+        self.tree = Some(tree);
+        result?;
+        self.refresh_review_counts();
+        self.derive_send_state();
+        self.keep_tree_cursor_visible(usize::from(self.geometry.tree.height));
+        Ok(())
+    }
+
     /// Open the file under the tree cursor, or expand/collapse a directory.
     fn open_tree_selection(&mut self) -> Result<()> {
         let Some(row) = self.tree.as_ref().and_then(|t| t.rows.get(self.tree_cursor)) else { return Ok(()) };

@@ -417,7 +417,7 @@ impl App {
         }
         let help = match self.focus {
             _ if self.pending.is_some() => "a looks good · c comment · d delete · esc clear ",
-            Focus::Tree => "j/k · enter open · E send · t hide · q quit ",
+            Focus::Tree => "j/k · enter open · . hidden · E send · t hide · q quit ",
             Focus::Rail => "j/k · e edit · x remove · tab · q quit ",
             Focus::Document if self.roam => "hjkl move · v select · c comment · esc blocks · q quit ",
             Focus::Document => "i move · v select · c comment · E send · tab · q quit ",
