@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr as _;
 
 use super::{App, Mode};
+use crate::theme::palette;
 
 #[cfg(test)]
 mod tests;
@@ -190,7 +191,7 @@ impl App {
                 let style = if !self.action_applies(action) {
                     Style::new().dim()
                 } else if index == self.menu_cursor {
-                    Style::new().reversed()
+                    palette().selection
                 } else {
                     Style::new()
                 };

@@ -16,6 +16,7 @@ use unicode_width::UnicodeWidthStr as _;
 
 use super::{App, Mode, Open};
 use crate::last::message_source;
+use crate::theme::palette;
 
 const PICK_MAX_WIDTH: u16 = 90;
 
@@ -160,7 +161,7 @@ impl App {
                 pick_rows.push((row, index));
                 let text =
                     fit(&pick_label(message, self.clock_offset), usize::from(inner.width).saturating_sub(1));
-                let style = if index == self.pick_cursor { Style::new().reversed() } else { Style::new() };
+                let style = if index == self.pick_cursor { palette().selection } else { Style::new() };
                 Line::from(Span::styled(format!(" {text}"), style))
             })
             .collect();

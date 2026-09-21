@@ -9,9 +9,11 @@ use unicode_width::UnicodeWidthStr;
 
 use super::App;
 use super::send::SendState;
+use crate::theme::palette;
 
+// These three set their own foreground as well as their background, so they read the same
+// on a light terminal as on a dark one; only the idle button borrows the theme's grey.
 const SEND_BG: Color = Color::Indexed(30);
-const IDLE_BG: Color = Color::Indexed(238);
 const SENT_BG: Color = Color::Indexed(22);
 const BLOCKED_BG: Color = Color::Indexed(58);
 
@@ -70,7 +72,7 @@ impl App {
                 }
                 Button::Review => {
                     self.geometry.review_button = Some(rect);
-                    Style::new().fg(Color::Cyan).bg(IDLE_BG)
+                    Style::new().fg(Color::Cyan).bg(palette().toolbar_bg)
                 }
             };
             frame.buffer_mut().set_span(rect.x, rect.y, &Span::styled(label, style), rect.width);
@@ -81,7 +83,7 @@ impl App {
     fn button_style(&self) -> Style {
         match &self.send_state {
             SendState::Ready if self.send_count() == 0 => {
-                Style::new().fg(Color::Gray).bg(IDLE_BG).add_modifier(Modifier::DIM)
+                Style::new().fg(palette().idle_fg).bg(palette().toolbar_bg).add_modifier(Modifier::DIM)
             }
             SendState::Ready => Style::new().fg(Color::Black).bg(SEND_BG).bold(),
             SendState::Sent => Style::new().fg(Color::Black).bg(SENT_BG).bold(),

@@ -13,6 +13,7 @@ mod last;
 mod layout;
 mod srcmap;
 mod store;
+mod theme;
 mod tree;
 mod workspace_paths;
 mod wrap;

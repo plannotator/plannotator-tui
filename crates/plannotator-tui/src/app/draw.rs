@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::{App, Focus, GUTTER, Geometry, Mode, TOOLBAR, glyph, label};
+use crate::theme::palette;
 use crate::wrap::wrap_line;
 
 const RAIL_WIDTH: u16 = 36;
@@ -21,12 +22,6 @@ const TREE_WIDTH: u16 = 28;
 /// Below this the tree is hidden unless toggled on; Tab still reaches it.
 pub(super) const TREE_MIN_TOTAL_WIDTH: u16 = 120;
 const COMPOSE_WIDTH: u16 = 48;
-
-pub(crate) const COMMENT_BG: Color = Color::Indexed(58);
-pub(crate) const APPROVE_BG: Color = Color::Indexed(22);
-const BLOCK_BG: Color = Color::Indexed(236);
-const TOOLBAR_BG: Color = Color::Indexed(238);
-const CURSOR_BG: Color = Color::Indexed(240);
 
 fn accent(kind: Kind) -> Color {
     match kind {
@@ -129,7 +124,7 @@ impl App {
                 if open_path == Some(row.path.as_path()) {
                     style = style.bold().fg(Color::Cyan);
                 }
-                let row_bg = (focused && i == self.tree_cursor).then_some(BLOCK_BG);
+                let row_bg = (focused && i == self.tree_cursor).then(|| palette().block_bg);
                 if let Some(bg) = row_bg {
                     style = style.bg(bg);
                 }
@@ -165,7 +160,7 @@ impl App {
             if block == self.selected && !text_selection_active && self.pending.is_none() && doc_focused {
                 buf.set_style(
                     Rect { x: doc.x, y: screen_y, width: doc.width, height: 1 },
-                    Style::new().bg(BLOCK_BG),
+                    Style::new().bg(palette().block_bg),
                 );
             }
 
@@ -180,8 +175,8 @@ impl App {
                 let Some(kind) = kind else { continue };
                 row_has_annotation = true;
                 let style = match kind {
-                    Kind::Comment => Style::new().bg(COMMENT_BG),
-                    Kind::LooksGood => Style::new().bg(APPROVE_BG),
+                    Kind::Comment => Style::new().bg(palette().comment_bg),
+                    Kind::LooksGood => Style::new().bg(palette().approve_bg),
                     Kind::Delete => {
                         Style::new().fg(Color::Red).add_modifier(Modifier::CROSSED_OUT | Modifier::DIM)
                     }
@@ -194,7 +189,7 @@ impl App {
                 let end = cols.end.min(usize::from(doc.width)) as u16;
                 if end > start {
                     let rect = Rect { x: doc.x + start, y: screen_y, width: end - start, height: 1 };
-                    buf.set_style(rect, Style::new().add_modifier(Modifier::REVERSED));
+                    buf.set_style(rect, palette().selection);
                 }
             }
 
@@ -204,7 +199,7 @@ impl App {
                 && row_index == self.cursor.0
             {
                 let x = doc.x + (self.cursor.1.min(usize::from(doc.width).saturating_sub(1))) as u16;
-                buf.set_style(Rect { x, y: screen_y, width: 1, height: 1 }, Style::new().bg(CURSOR_BG));
+                buf.set_style(Rect { x, y: screen_y, width: 1, height: 1 }, palette().cursor);
             }
 
             let marker = match (block == self.selected, row_has_annotation) {
@@ -244,12 +239,12 @@ impl App {
         let Some(rect) = self.float_origin(1, width) else { return };
         frame.render_widget(Clear, rect);
         let buf = frame.buffer_mut();
-        buf.set_style(rect, Style::new().bg(TOOLBAR_BG));
+        buf.set_style(rect, Style::new().bg(palette().toolbar_bg));
         let mut x = rect.x + 1;
         let mut spans = [0..0, 0..0, 0..0];
         for ((label, item), span) in labels.iter().zip(TOOLBAR.iter()).zip(spans.iter_mut()) {
             let w = label.width() as u16;
-            let style = Style::new().fg(accent(item.3)).bg(TOOLBAR_BG).bold();
+            let style = Style::new().fg(accent(item.3)).bg(palette().toolbar_bg).bold();
             buf.set_span(x, rect.y, &Span::styled(label.as_str(), style), w);
             *span = x..x + w;
             x += w;

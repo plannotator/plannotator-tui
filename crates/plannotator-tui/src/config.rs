@@ -11,10 +11,22 @@ use std::str::FromStr;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::theme::ThemeSetting;
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Config {
     pub(crate) herdr: HerdrConfig,
+    pub(crate) ui: UiConfig,
+}
+
+/// How the app looks. One key so far; the colours themselves are not configurable yet.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct UiConfig {
+    /// `auto` asks the terminal for its background colour; `light` and `dark` skip the
+    /// question. `PLANNOTATOR_TUI_THEME` overrides whatever is written here.
+    pub(crate) theme: ThemeSetting,
 }
 
 /// How plannotator-tui opens inside Herdr.
@@ -211,6 +223,25 @@ mod tests {
             config_path(lookup(&[]), home),
             PathBuf::from("/home/u/.config/plannotator-tui/config.toml")
         );
+    }
+
+    #[test]
+    fn the_theme_defaults_to_asking_the_terminal() {
+        assert_eq!(Config::default().ui.theme, ThemeSetting::Auto);
+        assert_eq!(Config::parse("").expect("parses").ui.theme, ThemeSetting::Auto);
+    }
+
+    #[test]
+    fn a_configured_theme_is_read_and_leaves_the_rest_alone() {
+        let config = Config::parse("[ui]\ntheme = \"light\"\n").expect("parses");
+        assert_eq!(config.ui.theme, ThemeSetting::Light);
+        assert_eq!(config.herdr.placement, Placement::Overlay);
+    }
+
+    #[test]
+    fn an_unknown_theme_error_names_the_value() {
+        let err = Config::parse("[ui]\ntheme = \"solarized\"\n").expect_err("rejected");
+        assert!(err.to_string().contains("solarized"), "{err}");
     }
 
     #[test]

@@ -139,7 +139,9 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
 fn show_config() -> Result<()> {
     let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("/"));
     let path = crate::config::config_path(|k| std::env::var(k).ok(), &home);
-    let config = Config::load_from(&path)?;
+    let mut config = Config::load_from(&path)?;
+    // `PLANNOTATOR_TUI_THEME` overrides the file, so the file's value is not the effective one.
+    config.ui.theme = crate::theme::effective_setting(|key| std::env::var(key).ok(), config.ui.theme)?;
     let state = if path.is_file() { "" } else { " (not present; defaults)" };
     println!("# {}{state}", path.display());
     print!("{}", config.to_toml()?);
@@ -257,6 +259,13 @@ fn interactive(path: &PathBuf) -> Result<()> {
 
 /// Own the terminal for one app: `build` gets the document width the screen allows.
 pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
+    // Settle the palette before the screen is ours: the background-colour query talks to
+    // the terminal directly, and it must not race the alternate screen or the event loop.
+    crate::theme::install(crate::theme::resolve(
+        |key| std::env::var(key).ok(),
+        Config::load()?.ui.theme,
+        crate::theme::detect,
+    )?);
     let mut terminal = ratatui::init();
     execute!(stdout(), EnableMouseCapture)?;
     let _ = execute!(stdout(), EnableBracketedPaste);
@@ -355,7 +364,7 @@ fn snapshot(
     menu: bool,
 ) -> Result<()> {
     use ratatui::backend::TestBackend;
-    use ratatui::style::{Color, Modifier};
+    use ratatui::style::Modifier;
     let mut terminal = ratatui::Terminal::new(TestBackend::new(cols, rows))?;
     let mut app = open_app(path, doc_width(cols), false)?;
     terminal.draw(|frame| app.draw(frame))?;
@@ -380,9 +389,9 @@ fn snapshot(
                 '%'
             } else if style.add_modifier.contains(Modifier::CROSSED_OUT) {
                 '-'
-            } else if style.bg == Some(Color::Indexed(22)) {
+            } else if style.bg == Some(crate::theme::palette().approve_bg) {
                 '+'
-            } else if style.bg == Some(Color::Indexed(58)) {
+            } else if style.bg == Some(crate::theme::palette().comment_bg) {
                 '#'
             } else {
                 ' '
