@@ -157,8 +157,18 @@ pub(crate) fn wrap_table(lines: &[Line<'_>], offsets: &[Vec<Option<usize>>], wid
     let Some((original_widths, _, border_style)) =
         lines.first().zip(offsets.first()).and_then(|(line, map)| table_border(line, map))
     else {
-        return lines.iter().zip(offsets).flat_map(|(line, map)| wrap_line(line, map, width)).collect();
+        return clip_table(lines, offsets, width);
     };
+    // A `│` in cell text splits that line into more columns than the border has, and the
+    // surplus would be dropped. One unreadable line disqualifies the whole block.
+    let ragged = lines
+        .iter()
+        .zip(offsets)
+        .filter_map(|(line, map)| table_content_cells(line, map))
+        .any(|(cells, _)| cells.len() != original_widths.len());
+    if ragged {
+        return clip_table(lines, offsets, width);
+    }
 
     let mut longest_word = vec![0usize; original_widths.len()];
     for (line, map) in lines.iter().zip(offsets) {
@@ -194,10 +204,15 @@ pub(crate) fn wrap_table(lines: &[Line<'_>], offsets: &[Vec<Option<usize>>], wid
                 ));
             }
         } else {
-            out.extend(wrap_line(line, map, width));
+            out.push(clip_line(line, map, width));
         }
     }
     out
+}
+
+/// The pre-reflow behaviour: a table keeps its columns and loses what does not fit.
+fn clip_table(lines: &[Line<'_>], offsets: &[Vec<Option<usize>>], width: usize) -> Vec<Row> {
+    lines.iter().zip(offsets).map(|(line, map)| clip_line(line, map, width)).collect()
 }
 
 fn table_border(line: &Line<'_>, offsets: &[Option<usize>]) -> Option<(Vec<usize>, TableBorder, Style)> {
@@ -546,6 +561,42 @@ mod tests {
         assert!(squashed.contains("TABLE_TAILisalongvalue"), "rendered table was {rendered:?}");
         assert!(rendered.contains("┌") && rendered.contains("└"));
         assert_eq!(rendered.lines().filter(|line| line.starts_with("├")).count(), 3);
+    }
+
+    #[test]
+    fn a_pipe_inside_a_cell_falls_back_to_clipping_instead_of_dropping_it() {
+        // Splitting on every `│` gives this row three columns for a two-column border; the
+        // surplus used to be zipped away, taking its text with it.
+        let lines = [
+            Line::from("┌────────────┬──────────────┐"),
+            Line::from("│ Header     │ Description  │"),
+            Line::from("├────────────┼──────────────┤"),
+            Line::from("│ a │ b      │ pipe inside  │"),
+            Line::from("└────────────┴──────────────┘"),
+        ];
+        let (_, offsets) = unique_offsets(&lines);
+        let rendered = plain(&wrap_table(&lines, &offsets, 60)).join("\n");
+        assert!(rendered.contains("│ a │ b      │ pipe inside  │"), "cell text was lost: {rendered}");
+    }
+
+    #[test]
+    fn a_row_the_reflow_cannot_read_is_clipped_not_word_wrapped() {
+        // The trailing space stops this line looking like a table row; wrapping it would
+        // word-wrap a box-drawing row into the middle of the table.
+        let lines = [
+            Line::from("┌────────────┬──────────────┐"),
+            Line::from("│ Header     │ Description  │"),
+            Line::from("├────────────┼──────────────┤"),
+            Line::from("│ CLIPME     │ a fairly long value here │ "),
+            Line::from("└────────────┴──────────────┘"),
+        ];
+        let (_, offsets) = unique_offsets(&lines);
+        let rows = wrap_table(&lines, &offsets, 24);
+        let clipped: Vec<String> = plain(&rows).into_iter().filter(|row| row.contains("CLIPME")).collect();
+        assert_eq!(clipped.len(), 1, "the unreadable row was wrapped: {clipped:?}");
+        let row = clipped.first().expect("one row");
+        assert!(lines[3].to_string().starts_with(row.as_str()), "not a prefix of the source: {row:?}");
+        assert!(row.chars().count() <= 24);
     }
 
     #[test]
