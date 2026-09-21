@@ -2,17 +2,36 @@
 //!
 //! Scanning eagerly held a blank pane for minutes on big trees (plannotator-tui#44 review),
 //! so the tree lists only the root's entries at open, and a directory's children when it is
-//! expanded. Hidden entries, non-Markdown files, dependency/build directories and symlinked
-//! directories are skipped. Rows carry their depth and expansion state; the vec stays the
+//! expanded. Non-Markdown files, dependency/build directories and symlinked directories are
+//! skipped. Hidden (dot-prefixed) entries are skipped too until the view asks for them; a
+//! hidden directory is read only once it is both shown and expanded, so the default path
+//! never touches one. Rows carry their depth and expansion state; the vec stays the
 //! flattened visible list, so the view and hit-testing stay a plain slice.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-/// Directories that hold dependencies or build output, never docs worth listing.
-const SKIPPED_DIRS: [&str; 8] =
-    ["node_modules", "target", "vendor", "dist", "build", "out", "__pycache__", "venv"];
+/// Directories that hold dependencies, build output or version-control internals: never
+/// listed and never read, not even when hidden entries are shown. A repository's `.git`
+/// alone is large enough to stall the pane, and none of these hold docs worth reviewing.
+const SKIPPED_DIRS: [&str; 15] = [
+    ".cache",
+    ".direnv",
+    ".git",
+    ".hg",
+    ".jj",
+    ".svn",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+    "out",
+    "target",
+    "vendor",
+    "venv",
+];
 
 #[derive(Debug, Clone)]
 pub(crate) struct Row {
@@ -29,6 +48,9 @@ pub(crate) struct Row {
 #[derive(Debug)]
 pub(crate) struct Tree {
     root: PathBuf,
+    /// Whether dot-prefixed entries are listed. A view choice: the annotations recorded for
+    /// a file inside a hidden folder belong to the review either way.
+    show_hidden: bool,
     pub(crate) rows: Vec<Row>,
 }
 
@@ -49,12 +71,13 @@ fn is_walkable_dir(path: &Path) -> bool {
 }
 
 /// One directory's rows at `depth`: markdown files first, then subdirectories, both sorted.
-fn list(dir: &Path, depth: usize) -> Result<Vec<Row>> {
+/// Dot-prefixed entries are listed only when `show_hidden`; `SKIPPED_DIRS` never are.
+fn list(dir: &Path, depth: usize, show_hidden: bool) -> Result<Vec<Row>> {
     let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
         .with_context(|| format!("reading {}", dir.display()))?
         .filter_map(Result::ok)
         .map(|e| e.path())
-        .filter(|p| !is_hidden(p))
+        .filter(|p| show_hidden || !is_hidden(p))
         .collect();
     entries.sort();
     let mut rows = Vec::new();
@@ -84,7 +107,29 @@ fn list(dir: &Path, depth: usize) -> Result<Vec<Row>> {
 impl Tree {
     /// The root's own entries; nothing beneath is touched until a directory is expanded.
     pub(crate) fn scan(root: &Path) -> Result<Self> {
-        Ok(Self { root: root.to_path_buf(), rows: list(root, 0)? })
+        Ok(Self { root: root.to_path_buf(), show_hidden: false, rows: list(root, 0, false)? })
+    }
+
+    pub(crate) fn show_hidden(&self) -> bool {
+        self.show_hidden
+    }
+
+    /// Show or hide dot-prefixed entries, relisting what is currently open. Directories that
+    /// were expanded stay expanded; one that can no longer be read is left collapsed rather
+    /// than failing the whole relist.
+    pub(crate) fn set_show_hidden(&mut self, show_hidden: bool) -> Result<()> {
+        self.show_hidden = show_hidden;
+        let expanded: Vec<PathBuf> =
+            self.rows.iter().filter(|r| r.is_dir && r.expanded).map(|r| r.path.clone()).collect();
+        self.rows = list(&self.root, 0, show_hidden)?;
+        let mut index = 0;
+        while let Some(row) = self.rows.get(index) {
+            if row.is_dir && expanded.contains(&row.path) {
+                let _ = self.toggle(index);
+            }
+            index += 1;
+        }
+        Ok(())
     }
 
     pub(crate) fn root(&self) -> &Path {
@@ -114,7 +159,7 @@ impl Tree {
             let end = self.end_of_subtree(index);
             self.rows.drain(index + 1..end);
         } else {
-            let children = list(&path, depth + 1)?;
+            let children = list(&path, depth + 1, self.show_hidden)?;
             let at = index + 1;
             self.rows.splice(at..at, children);
         }
@@ -158,14 +203,14 @@ impl Tree {
     }
 }
 
-/// The first markdown file at or near the top of `root`: the shallowest match, found by a
-/// breadth-first look that gives up after `budget` entries. Big trees stay fast; the caller
+/// The first markdown file at or near the top of `root`, hidden entries excluded: the
+/// shallowest match, found by a breadth-first look that gives up after `budget` entries. Big trees stay fast; the caller
 /// shows a placeholder when nothing shallow exists.
 pub(crate) fn first_file_shallow(root: &Path, budget: usize) -> Option<PathBuf> {
     let mut queue = std::collections::VecDeque::from([root.to_path_buf()]);
     let mut seen = 0usize;
     while let Some(dir) = queue.pop_front() {
-        let Ok(rows) = list(&dir, 0) else { continue };
+        let Ok(rows) = list(&dir, 0, false) else { continue };
         seen += rows.len();
         if let Some(file) = rows.iter().find(|r| !r.is_dir) {
             return Some(file.path.clone());
@@ -193,12 +238,17 @@ mod tests {
         std::fs::create_dir_all(root.join("docs/deep")).expect("mkdir");
         std::fs::create_dir_all(root.join("empty")).expect("mkdir");
         std::fs::create_dir_all(root.join(".hidden")).expect("mkdir");
+        std::fs::create_dir_all(root.join(".agents/drafts")).expect("mkdir");
+        std::fs::create_dir_all(root.join(".git/objects")).expect("mkdir");
         std::fs::create_dir_all(root.join("node_modules/pkg")).expect("mkdir");
         std::fs::write(root.join("b.md"), "").expect("write");
         std::fs::write(root.join("a.MD"), "").expect("write");
         std::fs::write(root.join("notes.txt"), "").expect("write");
         std::fs::write(root.join("docs/deep/plan.md"), "").expect("write");
         std::fs::write(root.join(".hidden/x.md"), "").expect("write");
+        std::fs::write(root.join(".agents/drafts/draft.md"), "").expect("write");
+        std::fs::write(root.join(".git/objects/pack.md"), "").expect("write");
+        std::fs::write(root.join(".git/config.md"), "").expect("write");
         std::fs::write(root.join("node_modules/pkg/readme.md"), "").expect("write");
         #[cfg(unix)]
         std::os::unix::fs::symlink(&root, root.join("loop")).expect("symlink");
@@ -253,6 +303,66 @@ mod tests {
         let before = shape(&tree);
         assert!(!tree.toggle(0).expect("file"));
         assert_eq!(shape(&tree), before);
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn hidden_entries_appear_only_once_they_are_asked_for() {
+        let root = fixture("hidden");
+        let mut tree = Tree::scan(&root).expect("scan");
+        assert!(!tree.show_hidden());
+        let visible_only = shape(&tree);
+        tree.set_show_hidden(true).expect("show hidden");
+        assert_eq!(
+            shape(&tree),
+            [
+                row("a.MD", 0, false),
+                row("b.md", 0, false),
+                row(".agents", 0, true),
+                row(".hidden", 0, true),
+                row("docs", 0, true),
+                row("empty", 0, true),
+            ]
+        );
+        // A hidden directory still lists lazily: its markdown shows once it is expanded.
+        let agents = tree.position(root.join(".agents").as_path()).expect(".agents row");
+        assert!(tree.toggle(agents).expect("expand .agents"));
+        let drafts = tree.position(root.join(".agents/drafts").as_path()).expect("drafts row");
+        assert!(tree.toggle(drafts).expect("expand drafts"));
+        assert_eq!(tree.position(root.join(".agents/drafts/draft.md").as_path()), Some(drafts + 1));
+        // Hiding again restores exactly the default view, expansions and all.
+        tree.set_show_hidden(false).expect("hide hidden");
+        assert_eq!(shape(&tree), visible_only);
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn skipped_directories_are_never_listed_or_read() {
+        let root = fixture("skipped");
+        let mut tree = Tree::scan(&root).expect("scan");
+        tree.set_show_hidden(true).expect("show hidden");
+        let names: Vec<String> = tree.rows.iter().map(|r| r.name.clone()).collect();
+        for skipped in SKIPPED_DIRS {
+            assert!(!names.iter().any(|n| n == skipped), "{skipped} must stay out of the tree");
+        }
+        // `.git` has markdown at both levels and is the row the cursor could expand; with no
+        // row for it there is no way to read it, so neither file can reach the tree.
+        assert_eq!(tree.position(root.join(".git").as_path()), None);
+        assert_eq!(tree.position(root.join(".git/config.md").as_path()), None);
+        // An expanded `.git` cannot even be reconstructed by relisting.
+        tree.set_show_hidden(false).expect("hide");
+        tree.set_show_hidden(true).expect("show again");
+        assert!(!tree.rows.iter().any(|r| r.path.starts_with(root.join(".git"))));
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn the_shallowest_markdown_ignores_hidden_folders() {
+        let root = fixture("shallow-hidden");
+        std::fs::remove_file(root.join("a.MD")).expect("rm");
+        std::fs::remove_file(root.join("b.md")).expect("rm");
+        std::fs::remove_dir_all(root.join("docs")).expect("rm docs");
+        assert_eq!(first_file_shallow(&root, 2000), None);
         std::fs::remove_dir_all(&root).expect("cleanup");
     }
 
