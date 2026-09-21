@@ -263,7 +263,9 @@ pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
     // the terminal directly, and it must not race the alternate screen or the event loop.
     crate::theme::install(crate::theme::resolve(
         |key| std::env::var(key).ok(),
-        Config::load()?.ui.theme,
+        // A config that fails to parse never kept the plain TUI from starting; it still does
+        // not. `plannotator-tui config` is where the error is reported.
+        Config::load().map(|config| config.ui.theme).unwrap_or_default(),
         crate::theme::detect,
     )?);
     let mut terminal = ratatui::init();

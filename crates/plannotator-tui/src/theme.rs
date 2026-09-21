@@ -20,11 +20,12 @@ use serde::{Deserialize, Serialize};
 
 /// How long the terminal gets to answer the background-colour query.
 ///
-/// A terminal that does not implement the query still answers the `DA1` sent behind it, and
-/// is recognised as unsupported at round-trip speed; this only bounds the wait on something
-/// that answers nothing at all, which is a pty with no emulator behind it rather than a
-/// terminal anybody is looking at.
-const DETECT_TIMEOUT: Duration = Duration::from_millis(100);
+/// Most terminals answer the query itself, or the `DA1` sent behind it, within a few
+/// milliseconds, so the answer arrives long before this. Herdr answers the colour query for
+/// its panes but not `DA1`, so inside a pane the wait always runs to this deadline, and a key
+/// pressed during it is lost: keep it short. A terminal that answers nothing at all is
+/// treated as dark.
+const DETECT_TIMEOUT: Duration = Duration::from_millis(30);
 
 /// What the user asked for, as written in `[ui] theme` or `PLANNOTATOR_TUI_THEME`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -125,8 +126,8 @@ pub(crate) static LIGHT: Palette = Palette {
     block_bg: Color::Indexed(254),
     toolbar_bg: Color::Indexed(252),
     idle_fg: Color::DarkGray,
-    comment_bg: Color::Indexed(229),
-    approve_bg: Color::Indexed(194),
+    comment_bg: Color::Indexed(222),
+    approve_bg: Color::Indexed(157),
     // A dark cell with its own light foreground, so the glyph under the cursor stays legible.
     cursor: Style::new().bg(Color::Indexed(238)).fg(Color::White),
     selection: Style::new().bg(Color::Indexed(153)),
