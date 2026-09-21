@@ -101,6 +101,23 @@ one; without the flag the picker comes first, as it always has.
 `plannotator-tui config` prints the file's path and the values in effect. The `herdr/`
 directory in this repo is the development manifest; users should install Herdr Annotate.
 
+The same file chooses the theme:
+
+```toml
+[ui]
+theme = "auto"   # auto (ask the terminal, default) | light | dark
+```
+
+On `auto` the viewer asks the terminal for its background colour once at startup and uses a
+light palette when it finds one; a terminal that does not answer keeps the dark palette it
+has always used. The question costs one round trip before the screen is drawn, and a key
+pressed into that window is read along with the reply and lost, so set the theme outright if
+you habitually type ahead. `light` and `dark` skip the
+question, and `PLANNOTATOR_TUI_THEME=light|dark` does the same for one run — the variable
+wins over the file, and `plannotator-tui config` prints whichever is in effect. Only the
+backgrounds plannotator-tui paints itself change; the document keeps your terminal's own
+colours either way.
+
 Actions forwarded by Herdr Mirror default to a split beside the invoking remote
 pane. Mirror does not preserve overlay presentation, and Herdr 0.8.2 opens an
 overlay in its server's active tab, which can differ from the tab you are viewing.
