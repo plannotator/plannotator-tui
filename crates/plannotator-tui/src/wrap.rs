@@ -46,11 +46,17 @@ fn cells_of(line: &Line<'_>, offsets: &[Option<usize>]) -> Vec<Cell> {
         .collect()
 }
 
-/// Turn accumulated cells into a row, merging same-style runs into spans.
-fn finish_row(mut cells: Vec<Cell>, line_style: Style) -> Row {
+/// Drop trailing whitespace: a wrapped piece can end on the space it broke at.
+fn trim_trailing_space(mut cells: Vec<Cell>) -> Vec<Cell> {
     while cells.last().is_some_and(|c| c.ch.is_whitespace()) {
         cells.pop();
     }
+    cells
+}
+
+/// Turn accumulated cells into a row, merging same-style runs into spans.
+fn finish_row(cells: Vec<Cell>, line_style: Style) -> Row {
+    let cells = trim_trailing_space(cells);
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut columns: Vec<Option<usize>> = Vec::new();
     for cell in &cells {
@@ -63,17 +69,18 @@ fn finish_row(mut cells: Vec<Cell>, line_style: Style) -> Row {
     Row { line: Line::from(spans).style(line_style), cells: columns }
 }
 
-/// Wrap one logical line into as many rows as needed for `width` columns.
-/// `offsets` has one entry per char of the line. An empty line yields one empty row.
-pub(crate) fn wrap_line(line: &Line<'_>, offsets: &[Option<usize>], width: usize) -> Vec<Row> {
+/// Split cells into the runs that fit `width` columns each. One empty piece for no cells.
+///
+/// Cells, not `Row`s: a `Row` records one offset per *column*, so reading offsets back out
+/// of one would mis-pair them after any wide or zero-width char.
+fn wrap_cells(cells: &[Cell], width: usize) -> Vec<Vec<Cell>> {
     let width = width.max(1);
-    let cells = cells_of(line, offsets);
-    let mut rows: Vec<Row> = Vec::new();
+    let mut pieces: Vec<Vec<Cell>> = Vec::new();
     let mut current: Vec<Cell> = Vec::new();
     let mut current_width = 0usize;
 
     // Tokens are unbreakable runs: a word, or a run of whitespace.
-    let mut rest = cells.as_slice();
+    let mut rest = cells;
     while let Some(first) = rest.first() {
         let is_space = first.ch.is_whitespace();
         let len = rest.iter().take_while(|c| c.ch.is_whitespace() == is_space).count();
@@ -82,7 +89,7 @@ pub(crate) fn wrap_line(line: &Line<'_>, offsets: &[Option<usize>], width: usize
         let token_width: usize = token.iter().map(|c| c.width).sum();
 
         // Whitespace at a row start is dropped, except leading indentation on the first row.
-        if is_space && current.is_empty() && !rows.is_empty() {
+        if is_space && current.is_empty() && !pieces.is_empty() {
             continue;
         }
         if current_width + token_width <= width {
@@ -91,7 +98,7 @@ pub(crate) fn wrap_line(line: &Line<'_>, offsets: &[Option<usize>], width: usize
             continue;
         }
         if !current.is_empty() {
-            rows.push(finish_row(std::mem::take(&mut current), line.style));
+            pieces.push(std::mem::take(&mut current));
             current_width = 0;
             if is_space {
                 continue;
@@ -104,7 +111,7 @@ pub(crate) fn wrap_line(line: &Line<'_>, offsets: &[Option<usize>], width: usize
             // Token wider than a row: hard-split by cells.
             for cell in token {
                 if current_width + cell.width > width && !current.is_empty() {
-                    rows.push(finish_row(std::mem::take(&mut current), line.style));
+                    pieces.push(std::mem::take(&mut current));
                     current_width = 0;
                 }
                 current.push(*cell);
@@ -112,10 +119,19 @@ pub(crate) fn wrap_line(line: &Line<'_>, offsets: &[Option<usize>], width: usize
             }
         }
     }
-    if !current.is_empty() || rows.is_empty() {
-        rows.push(finish_row(current, line.style));
+    if !current.is_empty() || pieces.is_empty() {
+        pieces.push(current);
     }
-    rows
+    pieces
+}
+
+/// Wrap one logical line into as many rows as needed for `width` columns.
+/// `offsets` has one entry per char of the line. An empty line yields one empty row.
+pub(crate) fn wrap_line(line: &Line<'_>, offsets: &[Option<usize>], width: usize) -> Vec<Row> {
+    wrap_cells(&cells_of(line, offsets), width)
+        .into_iter()
+        .map(|piece| finish_row(piece, line.style))
+        .collect()
 }
 
 /// Keep one row; clip anything past `width` (code and tables keep their columns).
@@ -339,12 +355,14 @@ fn render_table_content(
     cell_style: Style,
     border_style: Style,
 ) -> Vec<Row> {
-    let wrapped: Vec<Vec<Row>> = widths
+    let wrapped: Vec<Vec<Vec<Cell>>> = widths
         .iter()
         .enumerate()
         .map(|(index, &width)| {
-            let line = finish_row(columns.get(index).cloned().unwrap_or_default(), cell_style);
-            wrap_line(&line.line, &line.cells, width.max(1))
+            wrap_cells(columns.get(index).map_or(&[][..], Vec::as_slice), width.max(1))
+                .into_iter()
+                .map(trim_trailing_space)
+                .collect()
         })
         .collect();
     let height = wrapped.iter().map(Vec::len).max().unwrap_or(1);
@@ -352,14 +370,13 @@ fn render_table_content(
     for row_index in 0..height {
         let mut cells = vec![Cell { ch: '│', width: 1, offset: None, style: border_style }];
         for (column_index, &width) in widths.iter().enumerate() {
-            let row = wrapped.get(column_index).and_then(|rows| rows.get(row_index));
-            let row_style =
-                row.and_then(|value| value.line.spans.first().map(|span| span.style)).unwrap_or(cell_style);
+            let piece = wrapped.get(column_index).and_then(|pieces| pieces.get(row_index));
+            let row_style = piece.and_then(|p| p.first().map(|c| c.style)).unwrap_or(cell_style);
             cells.push(Cell { ch: ' ', width: 1, offset: None, style: row_style });
-            if let Some(row) = row {
-                cells.extend(cells_from_row(row));
+            let used = piece.map_or(0, |p| p.iter().map(|c| c.width).sum());
+            if let Some(piece) = piece {
+                cells.extend_from_slice(piece);
             }
-            let used = row.map_or(0, |value| value.cells.len());
             cells.extend((0..=width.saturating_sub(used)).map(|_| Cell {
                 ch: ' ',
                 width: 1,
@@ -375,25 +392,8 @@ fn render_table_content(
 
 fn table_content_wraps(columns: &[Vec<Cell>], widths: &[usize]) -> bool {
     widths.iter().enumerate().any(|(index, &width)| {
-        let line = finish_row(columns.get(index).cloned().unwrap_or_default(), Style::default());
-        wrap_line(&line.line, &line.cells, width.max(1)).len() > 1
+        wrap_cells(columns.get(index).map_or(&[][..], Vec::as_slice), width.max(1)).len() > 1
     })
-}
-
-fn cells_from_row(row: &Row) -> Vec<Cell> {
-    let mut offsets = row.cells.iter();
-    row.line
-        .spans
-        .iter()
-        .flat_map(|span| span.content.chars().map(move |ch| (ch, span.style)))
-        .map(|(ch, style)| {
-            let offset = offsets.next().copied().flatten();
-            for _ in 1..ch.width().unwrap_or(0) {
-                let _ = offsets.next();
-            }
-            Cell { ch, width: ch.width().unwrap_or(0), offset, style }
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -408,6 +408,42 @@ mod tests {
 
     fn identity(n: usize) -> Vec<Option<usize>> {
         (0..n).map(Some).collect()
+    }
+
+    /// Offsets that are unique across the whole table, so a cell offset names exactly one
+    /// source char. Returns the flat source and one offset per char of each line.
+    fn unique_offsets(lines: &[Line<'static>]) -> (Vec<char>, Vec<Vec<Option<usize>>>) {
+        let mut source = Vec::new();
+        let mut offsets = Vec::new();
+        for line in lines {
+            let chars: Vec<char> = line.to_string().chars().collect();
+            offsets.push((source.len()..source.len() + chars.len()).map(Some).collect());
+            source.extend(chars);
+        }
+        (source, offsets)
+    }
+
+    /// Every mapped column of every row points at the char actually drawn there.
+    fn assert_cells_name_their_char(rows: &[Row], source: &[char]) {
+        for row in rows {
+            let mut column = 0usize;
+            for ch in row.line.spans.iter().flat_map(|span| span.content.chars()) {
+                let width = ch.width().unwrap_or(0);
+                for slot in column..column + width {
+                    if let Some(offset) = row.cells[slot] {
+                        assert_eq!(
+                            source.get(offset).copied(),
+                            Some(ch),
+                            "column {slot} of {:?} claims offset {offset} ({:?})",
+                            row.line.to_string(),
+                            source.get(offset)
+                        );
+                    }
+                }
+                column += width;
+            }
+            assert_eq!(column, row.cells.len(), "row width disagrees with its cell map");
+        }
     }
 
     #[test]
@@ -510,5 +546,23 @@ mod tests {
         assert!(squashed.contains("TABLE_TAILisalongvalue"), "rendered table was {rendered:?}");
         assert!(rendered.contains("┌") && rendered.contains("└"));
         assert_eq!(rendered.lines().filter(|line| line.starts_with("├")).count(), 3);
+    }
+
+    #[test]
+    fn wrapped_table_cells_still_name_the_source_char_under_them() {
+        // Wide chars take two columns and variation selectors and ZWJ take none, so a cell
+        // map built by counting columns per char drifts after the first of either.
+        let lines = [
+            Line::from("┌──────────────────────┬──────────────────────┐"),
+            Line::from("│ Head                 │ Detail               │"),
+            Line::from("├──────────────────────┼──────────────────────┤"),
+            Line::from("│ alpha beta gamma del │ 中文 漢字 表格 内容 説明 │"),
+            Line::from("│ ⚠️ caution ⚠️ severe │ 👨‍👩‍👧 family 👍 fine │"),
+            Line::from("└──────────────────────┴──────────────────────┘"),
+        ];
+        let (source, offsets) = unique_offsets(&lines);
+        let rows = wrap_table(&lines, &offsets, 30);
+        assert!(rows.len() > lines.len(), "the fixture must actually wrap: {}", rows.len());
+        assert_cells_name_their_char(&rows, &source);
     }
 }
