@@ -43,7 +43,7 @@ HERDR_BIN_PATH          the herdr binary (fallback: `herdr` on PATH)
 ```
 
 `plannotator-tui` resolves: `PLANNOTATOR_TUI_FILE` → `clicked_url` (as a path) → `workspace_cwd`. Delivery: `PLANNOTATOR_TUI_DELIVER_TO` → `focused_pane_id` →
-clipboard. The footer always names the target before the user presses `E`.
+clipboard. The footer always names the target before the user presses `E` or `S`.
 
 ## Manifest
 
@@ -141,8 +141,9 @@ no annotations yet        →  button shown dimmed, does nothing
 
 After a click the button reads `Sent ▸ claude` for a few seconds, then returns. On
 `agent_blocked` it reads `claude is at a dialog — copied instead` and stays clickable so
-a second click retries. The button and `E` call the same `App::send`; there is no second
-path. Dropped: #2 (selection), it was a worse #4 and a worse #5.
+a second click retries. The button, `E` and `S` call the same `App::send`; there is no second
+path. In a reply review, `S` then quits unless something is still unsent. Dropped: #2
+(selection), it was a worse #4 and a worse #5.
 
 ## Delivery
 
@@ -151,11 +152,13 @@ semantics: the text is one argument; Herdr encodes it with the pane's live brack
 mode and sends Enter 300 ms later, so multi-line feedback is safe. Outcomes the app shows:
 
 - `ok` → `sent 3 annotations → claude in w1:p2`.
-- `agent_blocked` (the agent is at a dialog) → not sent; status says so; `E` again retries;
+- `agent_blocked` (the agent is at a dialog) → not sent; status says so; `E` or `S` again retries,
+  and `S` leaves the window open;
   feedback is also copied to the clipboard so nothing is lost.
 - `agent_not_found` / pane closed → clipboard, status names it.
 
-`q` with unsent annotations asks once: `send to claude in w1:p2? (y/n/esc)`.
+`q` with unsent annotations asks once: `send to claude in w1:p2? (y/n/esc)`. In a reply
+review `S` is `q` then `y` on one key; both call one helper, so they close on the same rule.
 
 ## Placement: full screen or beside the agent
 

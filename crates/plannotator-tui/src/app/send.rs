@@ -214,6 +214,14 @@ impl App {
         }
     }
 
+    /// Send, then quit unless something is still unsent. A refused send keeps the app open
+    /// so the footer can say why; an empty review or a clipboard copy has nothing to wait for.
+    pub(super) fn send_and_quit(&mut self) -> Result<()> {
+        self.send_feedback()?;
+        self.quit = !self.has_unsent();
+        Ok(())
+    }
+
     pub(super) fn derive_send_state(&mut self) {
         let delivered = if self.is_file_review() {
             let counts = self.review_counts();

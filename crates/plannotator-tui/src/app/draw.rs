@@ -410,12 +410,14 @@ impl App {
         if frame.area().width < RAIL_MIN_TOTAL_WIDTH {
             parts.push("rail hidden: widen to ≥80 cols".into());
         }
+        // `S` is bound only in a reply review, so only a reply review names it.
+        let quit = if self.is_file_review() { "q quit " } else { "S send+quit · q quit " };
         let help = match self.focus {
-            _ if self.pending.is_some() => "a looks good · c comment · d delete · esc clear ",
-            Focus::Tree => "j/k · enter open · . hidden · E send · t hide · q quit ",
-            Focus::Rail => "j/k · e edit · x remove · tab · q quit ",
-            Focus::Document if self.roam => "hjkl move · v select · c comment · esc blocks · q quit ",
-            Focus::Document => "i move · v select · c comment · E send · tab · q quit ",
+            _ if self.pending.is_some() => "a looks good · c comment · d delete · esc clear ".to_owned(),
+            Focus::Tree => "j/k · enter open · . hidden · E send · t hide · q quit ".to_owned(),
+            Focus::Rail => format!("j/k · e edit · x remove · tab · {quit}"),
+            Focus::Document if self.roam => format!("hjkl move · v select · c comment · esc blocks · {quit}"),
+            Focus::Document => format!("i move · v select · c comment · E send · tab · {quit}"),
         };
         // The status must stay readable at any width, so the key help yields columns to it
         // (and is clipped) rather than the other way round.

@@ -57,6 +57,12 @@ Copies go to the clipboard as OSC 52, which is the terminal you are looking at, 
 they reach your own machine even when the app runs on a remote server; Herdr Annotate's global
 `copy-context` and `copy-archive` actions do not, because they run outside a pane.
 
+On an agent's reply, `S` sends the feedback and closes the window in one key, the same as
+`q` then `y`. `E` still sends and leaves the window open. When the agent is at a dialog the
+window stays open and the footer says why; press `S` again to retry. With nothing to send,
+or with a review the agent already has, `S` closes like `q`. File and folder reviews have
+no `S`; they finish with `F`.
+
 For file and folder reviews, `E` sends only new or edited annotations. Send A and B, then
 add C: the next send includes just C. Sent notes stay visible with a marker; editing one
 makes it pending again, including after a restart. `R` **Resend all** includes every active
@@ -75,6 +81,7 @@ dimmed. The keys also work without opening the menu.
 | Where | Keys |
 |---|---|
 | anywhere | `Tab` cycle tree · document · notes; `E` send; `t` tree; `r` reload; `q` quit |
+| reply review | `S` send and close |
 | document | `j`/`k` block; `c` comment on the block; `x` clear its annotations; `v` select with `hjkl` `w` `b` `0` `$`; `i` move the cursor with those keys first, then `v` to select from there |
 | toolbar | `a` looks good · `c` comment · `d` delete · `Esc` |
 | notes | `j`/`k`; `e` edit; `x` remove; click a bubble |

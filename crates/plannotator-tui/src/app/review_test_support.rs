@@ -73,6 +73,23 @@ pub(super) fn file_app(tag: &str) -> (PathBuf, App, RecordingDelivery) {
     (root, app, delivery)
 }
 
+/// `file_app`, reviewing an agent's reply instead of a file.
+pub(super) fn reply_app(tag: &str) -> (PathBuf, App, RecordingDelivery) {
+    let (root, mut app, delivery) = file_app(tag);
+    let source = DocumentSource::new(
+        "one\n\ntwo\n".into(),
+        "agent reply",
+        true,
+        Provenance::AgentMessage {
+            host: "claude".into(),
+            session: None,
+            message_id: Some("message-1".into()),
+        },
+    );
+    app.open = Open::new(source, 100, &app.data_dir, &app.project).expect("reply");
+    (root, app, delivery)
+}
+
 pub(super) fn folder_app(tag: &str) -> (PathBuf, App, RecordingDelivery) {
     let (root, mut app, delivery) = file_app(tag);
     app.tree = Some(Tree::scan(&root.join("docs")).expect("tree"));

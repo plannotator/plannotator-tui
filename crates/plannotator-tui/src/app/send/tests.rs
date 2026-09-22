@@ -5,10 +5,12 @@ use std::rc::Rc;
 
 use plannotator_tui_schema::{DocumentSource, Kind, Provenance};
 
-use crate::app::review_test_support::{RecordingDelivery, file_app, folder_app, press};
+use crate::app::review_test_support::{
+    Outcome, RecordingDelivery, draw, file_app, folder_app, press, reply_app,
+};
 use crate::app::send::SendState;
 use crate::app::{Focus, Mode, Open};
-use crate::delivery::{Delivery, DeliveryError};
+use crate::delivery::{Delivery, DeliveryError, Discard};
 use crate::doc::Document;
 use crate::store::{Location, Store};
 
@@ -140,6 +142,98 @@ fn removing_a_sent_annotation_leaves_the_review_sent() {
         assert!(app.quit, "reply={reply}: nothing to send, so no confirmation");
         assert_eq!(app.mode, Mode::Browse, "reply={reply}");
         assert_eq!(delivery.calls.borrow().len(), 1, "reply={reply}: no send was triggered");
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+}
+
+#[test]
+fn s_sends_a_reply_review_and_closes() {
+    let (root, mut app, delivery) = reply_app("s-sends");
+    app.add_quote_annotation("one", Kind::Comment, "A".into()).expect("A");
+    press(&mut app, 'S');
+    assert_eq!(delivery.calls.borrow().len(), 1);
+    assert!(app.quit);
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn s_keeps_the_window_open_while_the_agent_is_at_a_dialog() {
+    let (root, mut app, delivery) = reply_app("s-blocked");
+    app.add_quote_annotation("one", Kind::Comment, "A".into()).expect("A");
+    delivery.outcome.set(Outcome::Blocked);
+    press(&mut app, 'S');
+    assert!(!app.quit, "the footer stays up to say why");
+    let status = app.status.as_deref().expect("status");
+    assert!(status.contains("at a dialog"), "{status}");
+
+    delivery.outcome.set(Outcome::Success);
+    press(&mut app, 'S');
+    assert_eq!(delivery.calls.borrow().len(), 2, "a blocked send is retried");
+    assert!(app.quit);
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn s_closes_a_reply_review_with_nothing_to_send() {
+    let (root, mut app, delivery) = reply_app("s-empty");
+    press(&mut app, 'S');
+    assert!(app.quit, "an empty review closes like q");
+    assert!(delivery.calls.borrow().is_empty());
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// A reply review sends every note, so `S` after `E` would repeat the whole review.
+#[test]
+fn s_after_a_send_closes_without_sending_again() {
+    let (root, mut app, delivery) = reply_app("s-after-e");
+    app.add_quote_annotation("one", Kind::Comment, "A".into()).expect("A");
+    press(&mut app, 'E');
+    press(&mut app, 'S');
+    assert_eq!(delivery.calls.borrow().len(), 1, "the agent already has it");
+    assert!(app.quit);
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn s_copies_then_closes_when_the_target_is_not_an_agent() {
+    let (root, mut app, _) = reply_app("s-copy");
+    app.delivery = Box::new(Discard);
+    app.add_quote_annotation("one", Kind::Comment, "A".into()).expect("A");
+    press(&mut app, 'S');
+    let status = app.status.as_deref().expect("status");
+    assert!(status.starts_with("copied 1 annotation(s)"), "{status}");
+    assert!(app.quit);
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// File and folder reviews finish with `F`; `S` is not theirs.
+#[test]
+fn s_does_nothing_in_a_file_review() {
+    for folder in [false, true] {
+        let (root, mut app, delivery) = if folder { folder_app("s-folder") } else { file_app("s-file") };
+        app.add_quote_annotation("one", Kind::Comment, "A".into()).expect("A");
+        press(&mut app, 'S');
+        assert!(!app.quit, "folder={folder}");
+        assert_eq!(app.mode, Mode::Browse, "folder={folder}");
+        assert!(delivery.calls.borrow().is_empty(), "folder={folder}");
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+}
+
+/// The longest key help still fits at 80 columns, and names `S` only where it works.
+#[test]
+fn the_footer_names_s_only_in_a_reply_review_and_fits_at_80_columns() {
+    for reply in [true, false] {
+        let (root, mut app, _) = if reply { reply_app("s-footer") } else { file_app("s-footer-file") };
+        app.roam = true;
+        let screen = draw(&mut app, 80, 24);
+        let footer = screen.lines().last().expect("footer");
+        let help = if reply {
+            "hjkl move · v select · c comment · esc blocks · S send+quit · q quit"
+        } else {
+            "hjkl move · v select · c comment · esc blocks · q quit"
+        };
+        assert!(footer.contains(help), "reply={reply}: {footer:?}");
         std::fs::remove_dir_all(root).expect("cleanup");
     }
 }

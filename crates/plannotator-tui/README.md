@@ -16,6 +16,7 @@ cargo build --release
 | document | drag with the mouse, or `v` then `hjkl` / `w` `b` / `0` `$` to select; `Enter` confirms · `i` moves the cursor with those keys first, so `v` can start mid-block · `j`/`k` or click selects a block · `c` comments on the block · `x` clears the block's annotations · wide Markdown tables wrap by cell |
 | selection toolbar | `a` 👍 looks good · `c` 💬 comment (opens a box at the selection) · `d` ✗ delete · `Esc` clears |
 | rail | `j`/`k` move · `e` / `Enter` edit body · `x` remove · click a bubble to focus it |
+| reply review | `S` send feedback and quit; stays open if the agent is at a dialog |
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | tree | `j`/`k` move · `Enter` open · `.` show/hide hidden (dot-prefixed) entries · `E` send new feedback across files, including collapsed folders · counts show active notes per file |
 | archive | `j`/`k` or ↑/↓ select · `Enter` or click restore · `Esc` close |

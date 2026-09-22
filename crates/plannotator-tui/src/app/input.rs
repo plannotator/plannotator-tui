@@ -56,6 +56,14 @@ impl App {
                 return Ok(());
             }
             (KeyCode::Char('E'), _) => return self.send_feedback(),
+            // A reply review sends every note, so one the agent already has closes like `q`.
+            (KeyCode::Char('S'), _) if !self.is_file_review() => {
+                if self.send_state == SendState::Sent {
+                    self.request_quit();
+                    return Ok(());
+                }
+                return self.send_and_quit();
+            }
             (KeyCode::Char('m'), _) if self.is_file_review() => {
                 self.open_review_menu();
                 return Ok(());
@@ -95,9 +103,7 @@ impl App {
         match key.code {
             KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
                 self.mode = Mode::Browse;
-                self.send_feedback()?;
-                // A refused send keeps the app open so the footer can say why.
-                self.quit = self.send_state == SendState::Sent;
+                self.send_and_quit()?;
             }
             KeyCode::Char('n' | 'N') => {
                 self.mode = Mode::Browse;
