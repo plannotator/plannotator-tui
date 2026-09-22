@@ -111,7 +111,9 @@ jobs:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "no HOMEBREW_TAP_TOKEN; skipping homebrew tap update"
+            # A missing token used to pass silently, and the tap fell three releases behind
+            # before a user noticed. Warn where the run summary shows it, and say what to do.
+            echo "::warning title=Homebrew tap not updated::HOMEBREW_TAP_TOKEN is not set, so plannotator/homebrew-tap was not told about ${GITHUB_REF_NAME}. Run its 'Update formula' workflow by hand with version=${GITHUB_REF_NAME#v}, and add the secret (fine-grained PAT, Contents read/write on the tap) to make this automatic."
             exit 0
           fi
           version="${GITHUB_REF_NAME#v}"
