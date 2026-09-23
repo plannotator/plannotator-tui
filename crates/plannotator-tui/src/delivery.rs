@@ -7,7 +7,9 @@
 
 use std::io::Write as _;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
+
+use crate::herdr::context::herdr_command;
 
 /// Why a send did not land. The app reacts differently to each.
 #[derive(Debug)]
@@ -98,11 +100,22 @@ pub(crate) struct HerdrAgent {
     bin: PathBuf,
     pane: String,
     agent: Option<String>,
+    session_name: Option<String>,
 }
 
 impl HerdrAgent {
+    #[cfg(test)]
     pub(crate) fn new(bin: PathBuf, pane: String, agent: Option<String>) -> Self {
-        Self { bin, pane, agent }
+        Self { bin, pane, agent, session_name: None }
+    }
+
+    pub(crate) fn with_session(
+        bin: PathBuf,
+        pane: String,
+        agent: Option<String>,
+        session_name: Option<String>,
+    ) -> Self {
+        Self { bin, pane, agent, session_name }
     }
 }
 
@@ -123,7 +136,7 @@ impl Delivery for HerdrAgent {
     }
 
     fn deliver(&self, feedback: &str) -> Result<(), DeliveryError> {
-        let output = Command::new(&self.bin)
+        let output = herdr_command(&self.bin, self.session_name.as_deref())
             .args(["agent", "prompt", &self.pane, feedback])
             .stdin(Stdio::null())
             .output()
@@ -244,6 +257,30 @@ mod tests {
             "claude in w1:p1"
         );
         assert_eq!(HerdrAgent::new(bin, "w1:p1".into(), None).describe(), "w1:p1");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn named_herdr_session_is_passed_to_agent_prompt() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!("plannotator-delivery-session-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("temp root");
+        let fake = root.join("fake-herdr");
+        let log = root.join("argv");
+        std::fs::write(&fake, format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\n", log.display()))
+            .expect("fake herdr");
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700)).expect("chmod");
+
+        HerdrAgent::with_session(fake, "w1:p1".into(), Some("codex".into()), Some("personal".into()))
+            .deliver("feedback")
+            .expect("delivered");
+        assert_eq!(
+            std::fs::read_to_string(&log).expect("log"),
+            "--session\npersonal\nagent\nprompt\nw1:p1\nfeedback\n"
+        );
+        std::fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[cfg(windows)]

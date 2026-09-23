@@ -84,6 +84,8 @@ fn clicked_file_and_exact_session_launches_preserve_argv_without_process_info() 
     let open = bin()
         .env("HERDR_ENV", "1")
         .env("HERDR_BIN_PATH", &fake)
+        .env("HERDR_SESSION", "personal")
+        .env("HERDR_SOCKET_PATH", r"C:\wrong\default.sock")
         .env("HERDR_PLUGIN_ID", "annotate")
         .env("HERDR_PLUGIN_ROOT", &plugin_root)
         .env("HERDR_PLUGIN_CONTEXT_JSON", context(&clicked_root, Some(&clicked_url)))
@@ -95,6 +97,8 @@ fn clicked_file_and_exact_session_launches_preserve_argv_without_process_info() 
     let last = bin()
         .env("HERDR_ENV", "1")
         .env("HERDR_BIN_PATH", &fake)
+        .env("HERDR_SESSION", "personal")
+        .env("HERDR_SOCKET_PATH", r"C:\wrong\default.sock")
         .env("HERDR_PLUGIN_ID", "annotate")
         .env("HERDR_PLUGIN_ROOT", &plugin_root)
         .env("HERDR_PLUGIN_CONTEXT_JSON", context(&clicked_root, None))
@@ -107,6 +111,8 @@ fn clicked_file_and_exact_session_launches_preserve_argv_without_process_info() 
     assert_eq!(
         calls[0]["argv"],
         json!([
+            "--session",
+            "personal",
             "plugin",
             "pane",
             "open",
@@ -127,10 +133,12 @@ fn clicked_file_and_exact_session_launches_preserve_argv_without_process_info() 
             "PLANNOTATOR_TUI_DELIVER_AGENT=codex",
         ])
     );
-    assert_eq!(calls[1]["argv"], json!(["agent", "get", "w1:p1"]));
+    assert_eq!(calls[1]["argv"], json!(["--session", "personal", "agent", "get", "w1:p1"]));
     assert_eq!(
         calls[2]["argv"],
         json!([
+            "--session",
+            "personal",
             "plugin",
             "pane",
             "open",
