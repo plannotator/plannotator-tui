@@ -53,8 +53,13 @@ impl App {
                 let errors = self.remember_delivery(&mut feedback, &target);
                 self.derive_send_state();
                 let verb = if self.delivery.is_agent() { "sent" } else { "copied" };
-                let across =
-                    if self.tree.is_some() { format!(" across {files} files") } else { String::new() };
+                let across = if self.tree.is_some() {
+                    format!(" across {files} files")
+                } else if files > 1 {
+                    format!(" across {files} replies")
+                } else {
+                    String::new()
+                };
                 let mut status = format!("{verb} {} annotation(s){across} → {target}", feedback.count);
                 if !errors.is_empty() {
                     let _ = write!(
@@ -104,7 +109,11 @@ impl App {
             {
                 self.folder_counts.insert(path.clone(), ReviewCounts::for_store(&part.store));
             }
-            if part.path.as_deref().is_none_or(|p| self.is_open(p)) {
+            if let Some(index) = part.reply {
+                if let Some(store) = self.reply_store_mut(index) {
+                    *store = part.store;
+                }
+            } else if part.path.as_deref().is_none_or(|p| self.is_open(p)) {
                 self.open.store = part.store;
             }
         }
@@ -170,7 +179,11 @@ impl App {
     }
 
     pub(super) fn send_count(&self) -> usize {
-        if self.is_file_review() { self.review_counts().pending } else { self.open.store.placed().len() }
+        if self.is_file_review() {
+            self.review_counts().pending
+        } else {
+            self.replies().iter().map(|(_, open)| open.store.placed().len()).sum()
+        }
     }
 
     pub(super) fn send_label(&self) -> String {
@@ -227,7 +240,15 @@ impl App {
             let counts = self.review_counts();
             counts.pending == 0 && counts.sent > 0
         } else {
-            self.open.store.all_delivered()
+            // Every reply with notes has had them delivered; a reply without notes has
+            // nothing to send and does not hold the review back.
+            let annotated: Vec<&Store> = self
+                .replies()
+                .into_iter()
+                .map(|(_, open)| &open.store)
+                .filter(|store| store.len() > 0)
+                .collect();
+            !annotated.is_empty() && annotated.iter().all(|store| store.all_delivered())
         };
         self.send_state = if delivered { SendState::Sent } else { SendState::Ready };
     }

@@ -629,3 +629,110 @@ fn paging_a_one_row_pane_keeps_the_selection() {
     app.handle_event(&key(KeyCode::Char('d'), KeyModifiers::CONTROL)).expect("ctrl+d");
     assert_eq!(app.selected, selected, "a page of zero rows does not jump to the top");
 }
+
+/// A reply review over `candidates()` that records what it sends, isolated like `app`.
+fn recorded_message_app() -> (App, super::review_test_support::RecordingDelivery) {
+    let delivery = super::review_test_support::RecordingDelivery::default();
+    let app = message_app(None, Box::new(delivery.clone()));
+    (app, delivery)
+}
+
+fn keys(app: &mut App, codes: &[KeyCode]) {
+    for code in codes {
+        app.handle_event(&Event::Key(KeyEvent::from(*code))).expect("key");
+    }
+}
+
+/// Annotate the newest reply, then open the middle one from the picker.
+fn note_newest_then_open_middle(app: &mut App) {
+    keys(app, &[KeyCode::Esc]);
+    app.add_block_annotation(0, Kind::Comment, "on the newest".to_owned()).expect("annotate");
+    keys(app, &[KeyCode::Char('p'), KeyCode::Char('j'), KeyCode::Enter]);
+    assert_eq!(app.open.doc.source, "# Second\n\nmiddle message\n");
+}
+
+#[test]
+fn notes_on_every_reply_are_sent_together_each_under_its_own_reply() {
+    let (mut app, delivery) = recorded_message_app();
+    note_newest_then_open_middle(&mut app);
+    app.add_block_annotation(1, Kind::Comment, "on the middle".to_owned()).expect("annotate");
+    assert_eq!(app.send_count(), 2, "both replies' notes are waiting");
+
+    keys(&mut app, &[KeyCode::Char('E')]);
+    let calls = delivery.calls.borrow();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0],
+        "# Annotations on claude · message 1 of 3 (\"Third\")\n\n\
+         ## Annotation 1 (line 1)\nComment on: \"# Third\"\n> on the newest\n\n\
+         \n# Annotations on claude · message 2 of 3 (\"Second\")\n\n\
+         ## Annotation 1 (line 3)\nComment on: \"middle message\"\n> on the middle\n\n"
+    );
+    assert_eq!(app.send_state, SendState::Sent);
+    assert!(!app.has_unsent(), "every reply's notes were delivered");
+    let status = app.status.clone().expect("status");
+    assert!(status.starts_with("sent 2 annotation(s) across 2 replies"), "{status}");
+
+    let index = app.data_dir.join("feedback").join(&app.project).join("index.jsonl");
+    let text = std::fs::read_to_string(&index).expect("archived");
+    let record: serde_json::Value = serde_json::from_str(text.trim()).expect("one json record");
+    assert_eq!(record["surface"], "annotate-last");
+    assert_eq!(record["feedback"], calls[0].as_str());
+    assert_eq!(record["annotations"].as_array().expect("annotations").len(), 2);
+    drop(calls);
+
+    keys(&mut app, &[KeyCode::Char('p'), KeyCode::Char('k'), KeyCode::Enter]);
+    assert!(app.open.store.all_delivered(), "the newest reply's note was marked sent too");
+    keys(&mut app, &[KeyCode::Char('S')]);
+    assert!(app.quit, "nothing left to send, so S closes");
+    assert_eq!(delivery.calls.borrow().len(), 1, "and does not send again");
+}
+
+#[test]
+fn quitting_with_notes_only_on_a_reply_that_is_not_open_asks_first() {
+    let (mut app, delivery) = recorded_message_app();
+    note_newest_then_open_middle(&mut app);
+    assert!(app.has_unsent(), "the newest reply's note is unsent");
+    keys(&mut app, &[KeyCode::Char('q')]);
+    assert_eq!(app.mode, Mode::ConfirmQuit);
+    assert!(!app.quit);
+    keys(&mut app, &[KeyCode::Char('y')]);
+    assert!(app.quit);
+    let calls = delivery.calls.borrow();
+    assert_eq!(calls.len(), 1, "y sends the note on the reply that is not open");
+    assert!(calls[0].contains("on the newest"), "{}", calls[0]);
+}
+
+/// One reply with notes sends exactly what a review that never used the picker sends,
+/// whichever reply happens to be open.
+#[test]
+fn a_single_annotated_reply_sends_the_same_body_as_before() {
+    let expected = "# Annotations on claude · last message\n\n\
+                    ## Annotation 1 (line 1)\nComment on: \"# Third\"\n> on the newest\n\n";
+    let (mut app, delivery) = recorded_message_app();
+    keys(&mut app, &[KeyCode::Esc]);
+    app.add_block_annotation(0, Kind::Comment, "on the newest".to_owned()).expect("annotate");
+    keys(&mut app, &[KeyCode::Char('E')]);
+    assert_eq!(delivery.calls.borrow().as_slice(), [expected]);
+
+    let (mut app, delivery) = recorded_message_app();
+    note_newest_then_open_middle(&mut app);
+    keys(&mut app, &[KeyCode::Char('E')]);
+    assert_eq!(delivery.calls.borrow().as_slice(), [expected]);
+    assert_eq!(app.status.as_deref(), Some("sent 1 annotation(s) → test agent"));
+}
+
+#[test]
+fn a_reply_already_sent_is_not_sent_again_from_another_reply() {
+    let (mut app, delivery) = recorded_message_app();
+    keys(&mut app, &[KeyCode::Esc]);
+    app.add_block_annotation(0, Kind::Comment, "on the newest".to_owned()).expect("annotate");
+    keys(&mut app, &[KeyCode::Char('E')]);
+    keys(&mut app, &[KeyCode::Char('p'), KeyCode::Char('j'), KeyCode::Enter]);
+    app.add_block_annotation(1, Kind::Comment, "on the middle".to_owned()).expect("annotate");
+    keys(&mut app, &[KeyCode::Char('E')]);
+    let calls = delivery.calls.borrow();
+    assert_eq!(calls.len(), 2);
+    assert!(calls[1].contains("on the middle"), "{}", calls[1]);
+    assert!(!calls[1].contains("on the newest"), "the newest reply was sent already: {}", calls[1]);
+}

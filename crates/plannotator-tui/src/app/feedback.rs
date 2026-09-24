@@ -40,6 +40,8 @@ impl ReviewCounts {
 #[derive(Debug)]
 pub(super) struct FeedbackPart {
     pub(super) path: Option<PathBuf>,
+    /// The reply these notes belong to, in a reply review; `None` for files.
+    pub(super) reply: Option<usize>,
     pub(super) store: Store,
     pub(super) ids: Vec<String>,
 }
@@ -54,7 +56,15 @@ pub(super) struct Feedback {
 }
 
 impl Feedback {
-    fn add(&mut self, path: Option<PathBuf>, name: &str, doc: &Document, store: Store, scope: SendScope) {
+    pub(super) fn add(
+        &mut self,
+        path: Option<PathBuf>,
+        reply: Option<usize>,
+        name: &str,
+        doc: &Document,
+        store: Store,
+        scope: SendScope,
+    ) {
         if let Some(path) = &path {
             self.counts.insert(path.clone(), ReviewCounts::for_store(&store));
         }
@@ -93,7 +103,7 @@ impl Feedback {
                 original_text: (!a.anchor.original_text.is_empty()).then(|| a.anchor.original_text.clone()),
             }
         }));
-        self.parts.push(FeedbackPart { path, store, ids });
+        self.parts.push(FeedbackPart { path, reply, store, ids });
     }
 
     fn exported_text(self) -> String {
@@ -234,12 +244,17 @@ impl App {
             _ => None,
         };
         let mut feedback = Feedback::default();
-        feedback.add(path, &self.open.source.name, &self.open.doc, self.open.store.clone(), scope);
+        feedback.add(path, None, &self.open.source.name, &self.open.doc, self.open.store.clone(), scope);
         feedback
     }
 
     pub(super) fn prepare_feedback(&self, scope: SendScope) -> Result<Feedback> {
-        let Some(tree) = &self.tree else { return Ok(self.file_feedback(scope)) };
+        let Some(tree) = &self.tree else {
+            if !self.pick_cache.is_empty() {
+                return Ok(self.reply_feedback(scope));
+            }
+            return Ok(self.file_feedback(scope));
+        };
         let mut feedback = Feedback::default();
         for path in self.review_files() {
             if !path.is_file() {
@@ -249,10 +264,10 @@ impl App {
             }
             let name = path.strip_prefix(tree.root()).unwrap_or(&path).display().to_string();
             if self.is_open(&path) {
-                feedback.add(Some(path), &name, &self.open.doc, self.open.store.clone(), scope);
+                feedback.add(Some(path), None, &name, &self.open.doc, self.open.store.clone(), scope);
             } else {
                 let (doc, store) = self.load_review_file(&path)?;
-                feedback.add(Some(path), &name, &doc, store, scope);
+                feedback.add(Some(path), None, &name, &doc, store, scope);
             }
         }
         // Folder feedback has always ended each file's block with one extra newline, so

@@ -9,6 +9,7 @@ mod header;
 mod input;
 mod menu;
 mod pick;
+mod replies;
 mod review;
 #[cfg(test)]
 mod review_test_support;
