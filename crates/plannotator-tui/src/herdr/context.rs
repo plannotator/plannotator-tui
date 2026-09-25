@@ -57,6 +57,10 @@ pub(crate) struct HerdrEnv {
     pub(crate) session_id: Option<String>,
     /// `PLANNOTATOR_TUI_NEWEST=1`: open the newest reply straight away, no picker.
     pub(crate) newest: bool,
+    /// `PLANNOTATOR_TUI_TERMINAL_PANE`: open this pane's recent output instead of a file.
+    pub(crate) terminal_pane: Option<String>,
+    /// `PLANNOTATOR_TUI_TERMINAL_LINES`: how many recent lines to read from that pane.
+    pub(crate) terminal_lines: Option<u32>,
 }
 
 impl HerdrEnv {
@@ -83,6 +87,8 @@ impl HerdrEnv {
             session: non_empty("PLANNOTATOR_TUI_SESSION").map(PathBuf::from),
             session_id: non_empty("PLANNOTATOR_TUI_SESSION_ID"),
             newest: env("PLANNOTATOR_TUI_NEWEST").as_deref() == Some("1"),
+            terminal_pane: non_empty("PLANNOTATOR_TUI_TERMINAL_PANE"),
+            terminal_lines: non_empty("PLANNOTATOR_TUI_TERMINAL_LINES").and_then(|v| v.parse().ok()),
         }
     }
 
@@ -105,6 +111,24 @@ impl HerdrEnv {
     /// Whether the pane entrypoint opens an agent message rather than a file.
     pub(crate) fn has_message_source(&self) -> bool {
         self.session.is_some() || self.session_id.is_some() || self.message_pid.is_some()
+    }
+
+    /// The pane whose output the user asked to review: the focused pane when a plugin action
+    /// started us, else the caller's own pane (an agent or a script running the command).
+    pub(crate) fn reviewed_pane(&self) -> Option<String> {
+        match &self.context {
+            Some(context) => context.focused_pane_id.clone(),
+            None => self.pane_id.clone(),
+        }
+    }
+
+    /// The agent Herdr saw in `pane` when it snapshotted the context, if that pane was focused.
+    pub(crate) fn context_agent_in(&self, pane: &str) -> Option<String> {
+        let context = self.context.as_ref()?;
+        (context.focused_pane_id.as_deref() == Some(pane))
+            .then(|| context.focused_pane_agent.clone())
+            .flatten()
+            .filter(|agent| !agent.trim().is_empty())
     }
 
     /// Ask Herdr which agent runs in `pane` (`herdr pane get`), for the label when the
@@ -206,5 +230,26 @@ mod tests {
         assert!(!env(&[]).newest);
         assert!(!env(&[("PLANNOTATOR_TUI_NEWEST", "")]).newest);
         assert!(!env(&[("PLANNOTATOR_TUI_NEWEST", "0")]).newest);
+    }
+
+    #[test]
+    fn the_reviewed_pane_is_the_focused_one_from_an_action_else_the_caller() {
+        let action = env(&[
+            ("HERDR_PANE_ID", "w1:p9"),
+            ("HERDR_PLUGIN_CONTEXT_JSON", r#"{"focused_pane_id":"w1:p2","focused_pane_agent":"codex"}"#),
+        ]);
+        assert_eq!(action.reviewed_pane().as_deref(), Some("w1:p2"));
+        assert_eq!(action.context_agent_in("w1:p2").as_deref(), Some("codex"));
+        assert_eq!(action.context_agent_in("w1:p3"), None);
+        assert_eq!(env(&[("HERDR_PANE_ID", "w1:p9")]).reviewed_pane().as_deref(), Some("w1:p9"));
+        assert_eq!(env(&[("HERDR_PLUGIN_CONTEXT_JSON", "{}")]).reviewed_pane(), None);
+    }
+
+    #[test]
+    fn the_terminal_pane_and_line_count_come_from_the_launcher() {
+        let env =
+            env(&[("PLANNOTATOR_TUI_TERMINAL_PANE", "w1:p2"), ("PLANNOTATOR_TUI_TERMINAL_LINES", "80")]);
+        assert_eq!(env.terminal_pane.as_deref(), Some("w1:p2"));
+        assert_eq!(env.terminal_lines, Some(80));
     }
 }

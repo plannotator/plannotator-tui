@@ -53,6 +53,13 @@ title = "Annotate: agent's last message"
 contexts = ["pane"]
 command = ["./bin/plannotator-tui.exe", "herdr", "last"]
 
+# The focused pane's recent output as a review; no default key.
+[[actions]]
+id = "terminal"
+title = "Annotate: terminal output"
+contexts = ["pane"]
+command = ["./bin/plannotator-tui.exe", "herdr", "terminal"]
+
 [[link_handlers]]
 id = "markdown-file"
 title = "Annotate this file"

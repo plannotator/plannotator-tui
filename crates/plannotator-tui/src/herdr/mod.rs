@@ -5,3 +5,4 @@
 
 pub(crate) mod context;
 pub(crate) mod launch;
+pub(crate) mod terminal;

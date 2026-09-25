@@ -12,23 +12,26 @@ use plannotator_tui_schema::{Annotation, Kind};
 /// One annotation placed in the document, as the exporter needs it.
 pub(crate) struct Entry<'a> {
     pub(crate) annotation: &'a Annotation,
-    pub(crate) range: Range<usize>,
-    /// 1-based source line span of the annotated range.
-    pub(crate) lines: (usize, usize),
+    /// The annotated source text, as the agent should read it.
+    pub(crate) quote: String,
+    /// 1-based source line span of the annotated range; `None` where source lines mean
+    /// nothing to the reader (a terminal review), and the heading omits them.
+    pub(crate) lines: Option<(usize, usize)>,
 }
 
-pub(crate) fn feedback(source: &str, name: &str, entries: &[Entry<'_>]) -> String {
+pub(crate) fn feedback(name: &str, entries: &[Entry<'_>]) -> String {
     if entries.is_empty() {
         return "No annotations.".to_owned();
     }
     let mut out = format!("# Annotations on {name}\n\n");
     for (i, entry) in entries.iter().enumerate() {
-        let quoted = source.get(entry.range.clone()).unwrap_or("");
+        let quoted = entry.quote.as_str();
         let line_label = match entry.lines {
-            (a, b) if a == b => format!("line {a}"),
-            (a, b) => format!("lines {a}\u{2013}{b}"),
+            Some((a, b)) if a == b => format!(" (line {a})"),
+            Some((a, b)) => format!(" (lines {a}\u{2013}{b})"),
+            None => String::new(),
         };
-        let _ = writeln!(out, "## Annotation {} ({line_label})", i + 1);
+        let _ = writeln!(out, "## Annotation {}{line_label}", i + 1);
         let body = entry.annotation.body.trim();
         match entry.annotation.anchor.kind() {
             Kind::Delete => {
@@ -71,6 +74,16 @@ fn quote_lines(text: &str) -> String {
     text.replace('\n', "\n> ")
 }
 
+/// The source text under `range`, less the line breaks at `joins`: breaks a wrapper
+/// inserted inside a token, which were never in the text the reader saw printed.
+pub(crate) fn quote(source: &str, range: &Range<usize>, joins: &[usize]) -> String {
+    let text = source.get(range.clone()).unwrap_or("");
+    text.char_indices()
+        .filter(|(offset, _)| joins.binary_search(&(range.start + offset)).is_err())
+        .map(|(_, ch)| ch)
+        .collect()
+}
+
 /// 1-based line numbers of the first and last byte of `range`.
 pub(crate) fn line_span(source: &str, range: &Range<usize>) -> (usize, usize) {
     let line_at = |offset: usize| source.get(..offset).map_or(1, |s| s.matches('\n').count() + 1);
@@ -78,7 +91,7 @@ pub(crate) fn line_span(source: &str, range: &Range<usize>) -> (usize, usize) {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, reason = "tests assert by panicking")]
+#[allow(clippy::expect_used, clippy::indexing_slicing, reason = "tests assert by panicking")]
 mod tests {
     use super::*;
     use plannotator_tui_schema::{Anchor, SourceRange, State};
@@ -110,15 +123,26 @@ mod tests {
         let (comment, r1) = annotation(source, "login page", Kind::Comment, "Which page?\nBe specific.");
         let (delete, r2) = annotation(source, "Drop the `legacy` path.", Kind::Delete, "");
         let entries = [
-            Entry { annotation: &comment, lines: line_span(source, &r1), range: r1 },
-            Entry { annotation: &delete, lines: line_span(source, &r2), range: r2 },
+            Entry { annotation: &comment, lines: Some(line_span(source, &r1)), quote: source[r1].to_owned() },
+            Entry { annotation: &delete, lines: Some(line_span(source, &r2)), quote: source[r2].to_owned() },
         ];
-        let out = feedback(source, "plan.md", &entries);
+        let out = feedback("plan.md", &entries);
         assert_eq!(
             out,
             "# Annotations on plan.md\n\n\
              ## Annotation 1 (line 3)\nComment on: \"login page\"\n> Which page?\n> Be specific.\n\n\
              ## Annotation 2 (line 5)\nRemove this:\n```\nDrop the `legacy` path.\n```\n> I don't want this.\n\n"
+        );
+    }
+
+    #[test]
+    fn an_entry_without_lines_has_no_line_label() {
+        let source = "$ ls\n";
+        let (comment, range) = annotation(source, "ls", Kind::Comment, "why");
+        let entries = [Entry { annotation: &comment, lines: None, quote: source[range].to_owned() }];
+        assert_eq!(
+            feedback("terminal · w1:p1", &entries),
+            "# Annotations on terminal · w1:p1\n\n## Annotation 1\nComment on: \"ls\"\n> why\n\n"
         );
     }
 

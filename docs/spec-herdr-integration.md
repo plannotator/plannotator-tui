@@ -279,6 +279,25 @@ the env above, resolves, and execs `herdr plugin pane open`. Resolution, in orde
 It passes `PLANNOTATOR_TUI_FILE`, `PLANNOTATOR_TUI_DELIVER_TO`, `PLANNOTATOR_TUI_DELIVER_AGENT` explicitly so
 the pane never has to guess. `argv` construction is a pure, tested function.
 
+### `plannotator-tui herdr terminal [--lines N] [--placement P] [--deliver-to PANE] [--print]`
+
+Reviews a pane's recent output. The pane is the context's `focused_pane_id` (from an action),
+else `HERDR_PANE_ID` (the caller). The launcher runs
+`herdr pane read <pane> --source recent-unwrapped --lines N --format text` (default 200;
+Herdr caps at 1000) and fails before any pane opens when the read fails or the cleaned text is
+empty. Unwrapped lines are the program's own, so a split that narrows the pane does not
+re-break them. Delivery and placement resolve as for `last`; a split opens beside the reviewed
+pane. It passes `PLANNOTATOR_TUI_TERMINAL_PANE` and `PLANNOTATOR_TUI_TERMINAL_LINES` instead of
+`PLANNOTATOR_TUI_FILE`, and the doc pane reads the pane again when it starts.
+
+The document is one fenced `text` block (the fence outlasts any backtick run in the output),
+with escape sequences, control characters, trailing whitespace and surrounding blank lines
+removed. Code blocks clip rather than wrap, so lines wider than the view are broken when the
+pane opens: at a space when one fits, else inside the token. Feedback quotes rejoin a break
+inside a token without a space (so a long path reads as printed), and carry no `(line N)`
+label, which would count wrapped rows rather than output lines. It is transient (`Provenance::Stdin`): no sidecar, history, or drafts.
+`--print` writes the document to stdout and opens nothing.
+
 ### Modules and ownership
 
 ```
@@ -287,13 +306,14 @@ crates/plannotator-tui/src/config.rs          Config, HerdrConfig, Placement, Sp
 crates/plannotator-tui/src/herdr/mod.rs       pub(crate) mod context; pub(crate) mod launch;
 crates/plannotator-tui/src/herdr/context.rs   HerdrContext (serde of the context JSON),
                                         HerdrEnv::from_env(), Target { pane, agent }
-crates/plannotator-tui/src/herdr/launch.rs    Launch, plan(), argv(), run()
+crates/plannotator-tui/src/herdr/launch.rs    Launch, plan(), plan_terminal(), argv(), run()
+crates/plannotator-tui/src/herdr/terminal.rs  read(), clean(), wrap(), document(): pane output as a review
 crates/plannotator-tui/src/delivery.rs        DeliveryError { Blocked, Unavailable, Failed },
                                         HerdrAgent { bin, pane, agent }, parse_response()
 crates/plannotator-tui/src/store.rs           Record.deliveries, record_delivery(), all_delivered()
 crates/plannotator-tui/src/app/mod.rs         SendState, send(), send_label(), is_agent target
 crates/plannotator-tui/src/app/draw.rs        header Send button + geometry.send_button
 crates/plannotator-tui/src/app/input.rs       button click, q → confirm when unsent
-herdr/herdr-plugin.toml                 doc pane, open / open-link actions, link handler
+herdr/herdr-plugin.toml                 doc pane, open / open-link / last / terminal actions, link handler
 skills/plannotator-tui/SKILL.md               the agent instruction (draft; not wired yet)
 ```

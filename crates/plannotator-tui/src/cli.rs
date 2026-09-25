@@ -35,6 +35,7 @@ const USAGE: &str = "usage:
   plannotator-tui --version
   plannotator-tui herdr open [file.md | folder] [--placement overlay|split|popup] [--deliver-to <pane>]
   plannotator-tui herdr last [--placement P] [--deliver-to <pane>] [--newest]
+  plannotator-tui herdr terminal [--lines N] [--placement P] [--deliver-to <pane>] [--print]
   plannotator-tui herdr pane
   plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes|opencode] [--pid N] [--session <transcript>]
                        [--session-id <id>] [--stdin] [--print] [--pick N] [--newest]";
@@ -180,6 +181,9 @@ fn herdr_command(args: &[String]) -> Result<()> {
     if sub == Some("pane") {
         return herdr_pane();
     }
+    if sub == Some("terminal") {
+        return herdr_terminal(args.get(1..).unwrap_or_default());
+    }
     if !matches!(sub, Some("open" | "last")) {
         anyhow::bail!(USAGE);
     }
@@ -222,10 +226,55 @@ fn herdr_command(args: &[String]) -> Result<()> {
     run(&env, &launch)
 }
 
+/// `plannotator-tui herdr terminal [--lines N] [--placement P] [--deliver-to PANE] [--print]`:
+/// review the focused pane's recent output. The read happens here first so a pane with
+/// nothing to show fails before a review pane opens; `--print` stops after it.
+fn herdr_terminal(args: &[String]) -> Result<()> {
+    use crate::herdr::launch::{OpenArgs, TerminalRead, plan_terminal, run};
+    use crate::herdr::terminal;
+    let mut open = OpenArgs::default();
+    let mut lines = terminal::DEFAULT_LINES;
+    let mut print = false;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--lines" => {
+                lines = rest
+                    .next()
+                    .and_then(|n| n.parse::<u32>().ok())
+                    .filter(|n| *n >= 1)
+                    .context("--lines takes a number from 1")?;
+            }
+            "--placement" => {
+                let value = rest.next().context("--placement needs a value")?;
+                open.placement = Some(value.parse()?);
+            }
+            "--deliver-to" => {
+                open.deliver_to = Some(rest.next().context("--deliver-to needs a value")?.clone());
+            }
+            "--print" => print = true,
+            other => anyhow::bail!("unexpected argument {other:?}\n{USAGE}"),
+        }
+    }
+    let env = HerdrEnv::from_env();
+    let pane = env.reviewed_pane().context("no focused pane to read")?;
+    let text = terminal::read(&env, &pane, lines)?;
+    if print {
+        print!("{}", terminal::document(&text));
+        return Ok(());
+    }
+    let config = Config::load()?;
+    let cwd = std::env::current_dir().context("current directory")?;
+    let launch = plan_terminal(&env, &config, open, &cwd, TerminalRead { pane, lines })?;
+    run(&env, &launch)
+}
+
 /// The pane entrypoint: Herdr runs this in the opened pane; the environment says what to show.
 fn herdr_pane() -> Result<()> {
     let env = HerdrEnv::from_env();
-    let result = if env.has_message_source() {
+    let result = if let Some(pane) = env.terminal_pane.clone() {
+        crate::herdr::terminal::run(&env, &pane)
+    } else if env.has_message_source() {
         crate::last::run(&crate::last::LastOptions {
             host: env.host.clone(),
             pid: env.message_pid,

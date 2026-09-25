@@ -111,6 +111,12 @@ placement = "overlay"   # overlay (full tab, default) | split | popup
 `plannotator-tui herdr last --newest` opens the agent's newest reply without asking which
 one; without the flag the picker comes first, as it always has.
 
+`plannotator-tui herdr terminal [--lines N]` opens the focused pane's recent output (the last
+200 lines by default; Herdr caps a read at 1000) as a transient review, shown verbatim in one
+code block. Send goes to the agent in that pane, as it does for a reply; a pane with no agent
+copies instead. `--print` writes the document to stdout instead of opening a pane. Herdr
+Annotate ships it as the `annotate.terminal` action with no default key.
+
 `plannotator-tui config` prints the file's path and the values in effect. The `herdr/`
 directory in this repo is the development manifest; users should install Herdr Annotate.
 
@@ -189,6 +195,7 @@ plannotator-tui --export <file|folder>                          # all active not
 plannotator-tui --annotate <file> <quote> <text> [comment|looks_good|delete] [--occurrence N]
 plannotator-tui --snapshot <file|folder> [cols rows scroll] [quote]   # one frame as text
 plannotator-tui --bench <file>                                  # parse / layout timings
+plannotator-tui herdr terminal [--lines N] --print              # a Herdr pane's recent output as a document
 ```
 
 ## Repository

@@ -1,4 +1,5 @@
-//! Standalone argv recorder compiled by Windows tests with `rustc`.
+//! Standalone argv recorder compiled by tests with `rustc`. `pane read` prints the
+//! `pane-read.txt` fixture, or fails with `pane-read.error` on stderr when that exists.
 
 use std::fs::OpenOptions;
 use std::io::Write as _;
@@ -67,6 +68,13 @@ fn main() {
                 r#"{"result":{"process_info":{"foreground_process_group_id":42,"foreground_processes":[{"name":"codex","pid":42}]}}}"#,
             )
         ),
+        ["pane", "read", ..] => match std::fs::read_to_string(root.join("pane-read.error")) {
+            Ok(error) => {
+                eprint!("{error}");
+                std::process::exit(1);
+            }
+            Err(_) => print!("{}", fixture(root, "pane-read.txt", "")),
+        },
         _ => print!(r#"{{"result":{{}}}}"#),
     }
 }

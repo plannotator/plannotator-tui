@@ -332,3 +332,48 @@ fn newest_reaches_the_pane_only_when_last_was_asked_for_it() {
         .expect("plans");
     assert!(!argv(&open).iter().any(|a| a.starts_with("PLANNOTATOR_TUI_NEWEST")));
 }
+
+#[test]
+fn terminal_review_reads_the_focused_pane_and_delivers_to_its_agent() {
+    let context = HerdrContext {
+        focused_pane_id: Some("w1:p1".into()),
+        focused_pane_agent: Some("claude".into()),
+        focused_pane_cwd: Some("/w".into()),
+        ..HerdrContext::default()
+    };
+    let read = TerminalRead { pane: "w1:p1".into(), lines: 200 };
+    let launch = plan_terminal(
+        &env(None, Some(context)),
+        &Config::default(),
+        OpenArgs::default(),
+        Path::new("/"),
+        read,
+    )
+    .expect("plans");
+    let args = argv(&launch);
+    assert!(args.contains(&"PLANNOTATOR_TUI_TERMINAL_PANE=w1:p1".to_owned()), "{args:?}");
+    assert!(args.contains(&"PLANNOTATOR_TUI_TERMINAL_LINES=200".to_owned()), "{args:?}");
+    assert!(args.contains(&"PLANNOTATOR_TUI_DELIVER_TO=w1:p1".to_owned()), "{args:?}");
+    assert!(args.contains(&"PLANNOTATOR_TUI_DELIVER_AGENT=claude".to_owned()), "{args:?}");
+    assert!(!args.iter().any(|a| a.starts_with("PLANNOTATOR_TUI_FILE=")), "a terminal review opens no file");
+    assert!(!args.iter().any(|a| a.starts_with("PLANNOTATOR_TUI_HOST=")), "nor an agent message");
+}
+
+#[test]
+fn terminal_review_of_a_shell_splits_beside_it_and_delivers_nowhere() {
+    let context = HerdrContext {
+        focused_pane_id: Some("w1:p4".into()),
+        focused_pane_cwd: Some("/w".into()),
+        ..HerdrContext::default()
+    };
+    let read = TerminalRead { pane: "w1:p4".into(), lines: 50 };
+    let args = OpenArgs { placement: Some(Placement::Split), ..OpenArgs::default() };
+    let launch =
+        plan_terminal(&env(Some("w9:p9"), Some(context)), &Config::default(), args, Path::new("/"), read)
+            .expect("plans");
+    assert_eq!(launch.deliver, None, "no agent in the pane: the review falls back to the clipboard");
+    let args = argv(&launch);
+    let target = args.iter().position(|a| a == "--target-pane").and_then(|i| args.get(i + 1));
+    assert_eq!(target.map(String::as_str), Some("w1:p4"));
+    assert!(args.contains(&"PLANNOTATOR_TUI_TERMINAL_PANE=w1:p4".to_owned()), "{args:?}");
+}

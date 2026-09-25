@@ -178,6 +178,9 @@ pub(crate) struct App {
     message_transcript: String,
     /// The host-assigned session id, for the archive's `session`; never a path.
     message_session: Option<String>,
+    /// Set for a terminal review: the offsets of line breaks the wrapper inserted inside a
+    /// token. Feedback quotes rejoin them and carry no line labels.
+    terminal_breaks: Option<Vec<usize>>,
     compose: Compose,
     /// Whether the terminal reports Shift+Enter distinctly (kitty keyboard protocol).
     pub(super) shift_enter: bool,
@@ -245,6 +248,7 @@ impl App {
             message_host: String::new(),
             message_transcript: String::new(),
             message_session: None,
+            terminal_breaks: None,
             compose: Compose::default(),
             shift_enter: false,
             last_click: None,
@@ -372,6 +376,11 @@ impl App {
 
     pub(crate) fn set_status(&mut self, status: String) {
         self.status = Some(status);
+    }
+
+    /// Mark this as a terminal review whose wrapper broke tokens at `breaks` (sorted).
+    pub(crate) fn set_terminal_breaks(&mut self, breaks: Vec<usize>) {
+        self.terminal_breaks = Some(breaks);
     }
 
     pub(crate) fn record_frame(&mut self, ms: f64) {

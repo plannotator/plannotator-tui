@@ -53,6 +53,8 @@ pub(super) struct Feedback {
     pub(super) parts: Vec<FeedbackPart>,
     pub(super) annotations: Vec<AnnotationRecord>,
     pub(super) counts: HashMap<PathBuf, ReviewCounts>,
+    /// Set for a terminal review: no line labels, and quotes rejoin these breaks.
+    pub(super) terminal_breaks: Option<Vec<usize>>,
 }
 
 impl Feedback {
@@ -74,8 +76,12 @@ impl Feedback {
             .filter(|p| scope == SendScope::All || store.is_pending(p.annotation))
             .map(|p| export::Entry {
                 annotation: p.annotation,
-                lines: export::line_span(&doc.source, p.range),
-                range: p.range.clone(),
+                lines: self.terminal_breaks.is_none().then(|| export::line_span(&doc.source, p.range)),
+                quote: export::quote(
+                    &doc.source,
+                    p.range,
+                    self.terminal_breaks.as_deref().unwrap_or_default(),
+                ),
             })
             .collect();
         if entries.is_empty() {
@@ -84,7 +90,7 @@ impl Feedback {
         if !self.text.is_empty() {
             self.text.push('\n');
         }
-        self.text.push_str(&export::feedback(&doc.source, name, &entries));
+        self.text.push_str(&export::feedback(name, &entries));
         let ids = entries.iter().map(|e| e.annotation.id.clone()).collect();
         self.count += entries.len();
         self.annotations.extend(entries.iter().map(|entry| {
@@ -243,7 +249,7 @@ impl App {
             Provenance::File { path } => Some(path.clone()),
             _ => None,
         };
-        let mut feedback = Feedback::default();
+        let mut feedback = Feedback { terminal_breaks: self.terminal_breaks.clone(), ..Feedback::default() };
         feedback.add(path, None, &self.open.source.name, &self.open.doc, self.open.store.clone(), scope);
         feedback
     }
