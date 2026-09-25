@@ -3,12 +3,11 @@
 //! and agents (the skill). `plan` and `argv` are pure; only `run` touches a process.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Context, Result};
 use plannotator_tui_hosts::Host;
 
-use super::context::{HerdrEnv, Target};
+use super::context::{HerdrEnv, Target, herdr_command};
 use crate::config::{Config, Placement, SplitDirection};
 
 /// Command-line inputs to the launcher.
@@ -343,7 +342,7 @@ pub(crate) fn argv(launch: &Launch) -> Vec<String> {
 
 /// `herdr pane process-info --pane <pane>`, raw JSON.
 pub(crate) fn process_info(env: &HerdrEnv, pane: &str) -> Result<String> {
-    let output = Command::new(&env.bin)
+    let output = herdr_command(&env.bin, env.session_name.as_deref())
         .args(["pane", "process-info", "--pane", pane])
         .output()
         .with_context(|| format!("running {} pane process-info", env.bin.display()))?;
@@ -355,7 +354,8 @@ pub(crate) fn process_info(env: &HerdrEnv, pane: &str) -> Result<String> {
 
 /// `herdr agent get <pane>`, raw JSON; `None` when the pane has no agent Herdr can describe.
 pub(crate) fn agent_get(env: &HerdrEnv, pane: &str) -> Option<String> {
-    let output = Command::new(&env.bin).args(["agent", "get", pane]).output().ok()?;
+    let output =
+        herdr_command(&env.bin, env.session_name.as_deref()).args(["agent", "get", pane]).output().ok()?;
     output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
@@ -364,7 +364,7 @@ pub(crate) fn run(env: &HerdrEnv, launch: &Launch) -> Result<()> {
     if !env.in_herdr {
         anyhow::bail!("not inside Herdr (HERDR_ENV is not set)");
     }
-    let status = Command::new(&env.bin)
+    let status = herdr_command(&env.bin, env.session_name.as_deref())
         .args(argv(launch))
         .status()
         .with_context(|| format!("running {}", env.bin.display()))?;

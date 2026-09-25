@@ -51,7 +51,13 @@ fn main() {
         .expect("open call log");
     log.write_all(line.as_bytes()).expect("write call log");
 
-    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let command_args = match arg_refs.as_slice() {
+        ["--session", _, rest @ ..] => rest,
+        rest => rest,
+    };
+
+    match command_args {
         ["agent", "get", _] => print!(
             "{}",
             fixture(

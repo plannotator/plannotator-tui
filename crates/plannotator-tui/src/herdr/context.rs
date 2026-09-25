@@ -1,6 +1,7 @@
 //! The environment Herdr hands a plugin process, and the delivery target derived from it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde::Deserialize;
 
@@ -33,6 +34,8 @@ pub(crate) struct HerdrEnv {
     pub(crate) in_herdr: bool,
     /// `HERDR_BIN_PATH`, else `herdr` on `PATH`.
     pub(crate) bin: PathBuf,
+    /// `HERDR_SESSION`: Herdr's named session. Explicit `--session` beats inherited socket overrides.
+    pub(crate) session_name: Option<String>,
     /// `HERDR_PANE_ID`: the pane this process runs in. Inside the app that is our own
     /// pane; only the launcher may treat it as "the caller".
     pub(crate) pane_id: Option<String>,
@@ -75,6 +78,7 @@ impl HerdrEnv {
         Self {
             in_herdr: env("HERDR_ENV").as_deref() == Some("1"),
             bin: non_empty("HERDR_BIN_PATH").map_or_else(|| PathBuf::from("herdr"), PathBuf::from),
+            session_name: non_empty("HERDR_SESSION"),
             pane_id: non_empty("HERDR_PANE_ID"),
             context,
             file: non_empty("PLANNOTATOR_TUI_FILE").map(PathBuf::from),
@@ -134,7 +138,7 @@ impl HerdrEnv {
     /// Ask Herdr which agent runs in `pane` (`herdr pane get`), for the label when the
     /// launcher only knew the pane id. One short process at startup; `None` on any failure.
     pub(crate) fn agent_in_pane(&self, pane: &str) -> Option<String> {
-        let output = std::process::Command::new(&self.bin)
+        let output = herdr_command(&self.bin, self.session_name.as_deref())
             .args(["pane", "get", pane])
             .stdin(std::process::Stdio::null())
             .output()
@@ -143,6 +147,14 @@ impl HerdrEnv {
         let json: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
         json.pointer("/result/pane/agent")?.as_str().map(str::to_owned)
     }
+}
+
+pub(crate) fn herdr_command(bin: &Path, session_name: Option<&str>) -> Command {
+    let mut command = Command::new(bin);
+    if let Some(session) = session_name.filter(|session| !session.is_empty()) {
+        command.args(["--session", session]);
+    }
+    command
 }
 
 #[cfg(test)]
@@ -170,7 +182,28 @@ mod tests {
         let env = env(&[]);
         assert!(!env.in_herdr);
         assert_eq!(env.bin, PathBuf::from("herdr"));
+        assert_eq!(env.session_name, None);
         assert_eq!(env.delivery_target(), None);
+    }
+
+    #[test]
+    fn named_herdr_session_is_preserved_for_child_cli_calls() {
+        let named = env(&[("HERDR_SESSION", "personal")]);
+        assert_eq!(named.session_name.as_deref(), Some("personal"));
+        assert_eq!(env(&[("HERDR_SESSION", "")]).session_name, None);
+    }
+
+    #[test]
+    fn herdr_command_prepends_explicit_session_when_present() {
+        let mut command = herdr_command(Path::new("herdr"), Some("personal"));
+        command.args(["pane", "list"]);
+        let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        assert_eq!(args, ["--session", "personal", "pane", "list"]);
+
+        let mut command = herdr_command(Path::new("herdr"), None);
+        command.args(["pane", "list"]);
+        let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        assert_eq!(args, ["pane", "list"]);
     }
 
     #[test]

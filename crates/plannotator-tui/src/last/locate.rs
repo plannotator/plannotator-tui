@@ -1,7 +1,6 @@
 //! Select the exact-session or fallback discovery path and read its assistant messages.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use plannotator_tui_hosts::{Host, HostError, Message, Role, detect_host, sniff};
@@ -125,7 +124,7 @@ pub(crate) fn screen_fallback(env: &crate::herdr::context::HerdrEnv) -> Option<D
     if !env.in_herdr {
         return None;
     }
-    let output = Command::new(&env.bin)
+    let output = crate::herdr::context::herdr_command(&env.bin, env.session_name.as_deref())
         .args(["agent", "read", &target.pane, "--source", "recent-unwrapped", "--format", "text"])
         .output()
         .ok()
