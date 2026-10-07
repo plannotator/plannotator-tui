@@ -146,7 +146,7 @@ fn ambiguous_pid_does_not_read_the_newest_session() {
     let process = HoldingProcess::new(&fixture.selected, Some(&fixture.other));
     let out = fixture.command(process.0.id()).output().expect("runs");
     assert!(out.status.success(), "--print reports discovery failures without aborting its caller");
-    assert!(out.stdout.is_empty());
+    assert_eq!(out.stdout, [] as [u8; 0]);
     assert!(String::from_utf8_lossy(&out.stderr).contains("2 open transcripts"));
 }
 
@@ -156,7 +156,7 @@ fn pid_without_an_open_transcript_does_not_read_another_session() {
     let process = HoldingProcess::new(Path::new("/dev/null"), None);
     let out = fixture.command(process.0.id()).output().expect("runs");
     assert!(out.status.success());
-    assert!(out.stdout.is_empty());
+    assert_eq!(out.stdout, [] as [u8; 0]);
     assert!(String::from_utf8_lossy(&out.stderr).contains("0 open transcripts"));
 }
 
