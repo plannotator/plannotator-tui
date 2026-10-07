@@ -157,7 +157,7 @@ fn an_action_without_a_focused_pane_reads_nothing() {
 
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("no focused pane to read"));
-    assert!(calls(&fake).is_empty());
+    assert_eq!(calls(&fake), [] as [Value; 0]);
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 

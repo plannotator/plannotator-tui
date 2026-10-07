@@ -72,7 +72,7 @@ fn exact_file_host_ids_prefer_the_current_windows_path_bucket() {
         &codex_home.join("sessions/2026/08/31").join(format!("rollout-2026-08-31T10-00-00-{OTHER_ID}.jsonl")),
     );
     assert_eq!(codex::find_transcripts_by_id(&codex_home, ID).expect("codex"), vec![codex_file]);
-    assert!(codex::find_transcripts_by_id(&codex_home, "missing").expect("miss").is_empty());
+    assert_eq!(codex::find_transcripts_by_id(&codex_home, "missing").expect("miss"), [] as [PathBuf; 0]);
 
     let copilot_home = root.join("copilot root");
     let copilot_session = copilot_home.join("session-state").join(ID);
