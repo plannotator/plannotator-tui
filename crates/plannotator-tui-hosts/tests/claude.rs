@@ -81,5 +81,8 @@ fn a_dangling_parent_makes_the_chain_untrusted_and_file_order_applies() {
 
 #[test]
 fn garbage_input_yields_no_messages_rather_than_an_error() {
-    assert!(parse_messages("not json\n{\"type\":\"progress\"}\n", 3).is_empty());
+    assert_eq!(
+        parse_messages("not json\n{\"type\":\"progress\"}\n", 3),
+        [] as [plannotator_tui_hosts::Message; 0]
+    );
 }

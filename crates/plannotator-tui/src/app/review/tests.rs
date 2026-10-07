@@ -28,7 +28,7 @@ fn finish_undo_and_restore_keep_pending_edits_and_preserve_sent_status() {
     click(&mut app, undo);
     assert_eq!(app.open.store.len(), 3);
     assert_eq!(app.send_count(), 2, "undo did not make A pending");
-    assert!(app.open.store.archived().is_empty());
+    assert_eq!(app.open.store.archived(), []);
 
     press(&mut app, 'F');
     reopen(&mut app);

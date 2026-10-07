@@ -193,7 +193,7 @@ fn archiving_keeps_pending_notes_and_restores_complete_annotations_and_history()
     let restored = store.annotations.iter().find(|a| a.id == original.id).expect("same id");
     assert_eq!(restored, &original);
     assert!(!store.is_pending(restored), "restoring must not resend it");
-    assert!(store.archived().is_empty());
+    assert_eq!(store.archived(), []);
     assert_eq!(store.deliveries, history);
     std::fs::remove_dir_all(root).expect("cleanup");
 }
@@ -208,7 +208,7 @@ fn archive_and_restore_failures_leave_memory_and_disk_intact() {
     std::fs::create_dir(&blocked_tmp).expect("block temporary file");
     assert!(store.archive_sent().is_err());
     assert_eq!(store.len(), 1);
-    assert!(store.archived().is_empty());
+    assert_eq!(store.archived(), []);
     assert_eq!(std::fs::read(&location.record).expect("record"), before);
     std::fs::remove_dir(&blocked_tmp).expect("unblock");
 

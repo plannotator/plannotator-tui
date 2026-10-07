@@ -58,5 +58,5 @@ fn when_every_turn_has_completed_the_whole_thread_counts_newest_first() {
 
 #[test]
 fn an_unknown_thread_has_no_files() {
-    assert!(find_transcripts(home(), Some("nope")).is_empty());
+    assert_eq!(find_transcripts(home(), Some("nope")), [] as [std::path::PathBuf; 0]);
 }

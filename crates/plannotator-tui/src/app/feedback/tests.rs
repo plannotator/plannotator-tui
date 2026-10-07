@@ -216,7 +216,7 @@ fn reply_reviews_keep_sending_the_whole_transient_review() {
     assert!(calls[1].contains("> A") && calls[1].contains("> B"));
     press(&mut app, 'F');
     assert_eq!(app.open.store.len(), 2);
-    assert!(app.open.store.archived().is_empty());
+    assert_eq!(app.open.store.archived(), []);
     assert!(app.open.store.is_transient());
     assert!(!draw(&mut app, 80, 24).contains("Review \u{25be}"), "a reply review has no Review menu");
     std::fs::remove_dir_all(root).expect("cleanup");

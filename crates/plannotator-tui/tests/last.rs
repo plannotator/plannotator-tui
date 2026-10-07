@@ -168,7 +168,7 @@ fn print_never_fails_the_caller_when_nothing_is_found() {
     let missing = fixtures().join("does-not-exist.jsonl");
     let out = bin().args(["last", "--session"]).arg(&missing).arg("--print").output().expect("runs");
     assert!(out.status.success(), "exit 0 is the contract");
-    assert!(out.stdout.is_empty());
+    assert_eq!(out.stdout, [] as [u8; 0]);
     assert!(String::from_utf8_lossy(&out.stderr).contains("does-not-exist.jsonl"));
 }
 

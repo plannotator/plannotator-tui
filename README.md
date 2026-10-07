@@ -97,9 +97,10 @@ part of the review and are sent whether or not its folder is listed.
 ## Inside Herdr
 
 Install [Herdr Annotate](https://github.com/plannotator/herdr-annotate); it bundles this binary,
-opens it in a pane with `prefix+o` (folder) or `prefix+shift+o` (agent's last reply) or by
-Ctrl-clicking a `file://…md` link, and the header button sends the review straight back to
-the agent as its next message: `Send 3 new ▸ claude in w1:p2 (E)`. Folder reviews show
+opens it in a pane with `prefix+o` (folder) or `prefix+shift+o` (agent's last reply), and the
+header button sends the review straight back to the agent as its next message:
+`Send 3 new ▸ claude in w1:p2 (E)`. Ctrl-clicking a `file://…md` link opens it in Annotate only
+if you install the add-on: `herdr plugin install plannotator/herdr-annotate/links`. Folder reviews show
 `Send 3 new across 2 files` and send one combined feedback message.
 
 ```toml

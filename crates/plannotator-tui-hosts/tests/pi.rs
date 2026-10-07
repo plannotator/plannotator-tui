@@ -86,7 +86,7 @@ fn tool_calls_tool_results_and_thinking_are_not_messages() {
 
 #[test]
 fn an_unreconstructable_chain_yields_nothing_rather_than_the_wrong_messages() {
-    assert!(parse_messages(&fixture("pi-dangling.jsonl"), 25).is_empty());
+    assert_eq!(parse_messages(&fixture("pi-dangling.jsonl"), 25), [] as [plannotator_tui_hosts::Message; 0]);
 }
 
 #[test]
