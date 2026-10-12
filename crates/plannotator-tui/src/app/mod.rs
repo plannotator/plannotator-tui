@@ -5,6 +5,7 @@ mod archive_view;
 mod compose;
 mod draw;
 mod feedback;
+mod file_search;
 mod header;
 mod input;
 mod menu;
@@ -56,6 +57,8 @@ enum Mode {
     ConfirmQuit,
     /// Choosing which of the agent's recent messages to review.
     Pick,
+    /// Quick Open: finding a file in the folder by name.
+    FileSearch,
     /// Restoring annotations from finished file reviews.
     Archive,
     /// The header's Review menu is open over a file or folder review.
@@ -90,6 +93,8 @@ struct Geometry {
     archive_rows: Vec<(Rect, usize)>,
     /// Picker rows drawn last frame, with their candidate index.
     pick_rows: Vec<(Rect, usize)>,
+    /// Quick Open result rows drawn last frame, with their position in the results.
+    search_rows: Vec<(Rect, usize)>,
 }
 
 /// A finished selection waiting for an action.
@@ -133,6 +138,8 @@ pub(crate) struct App {
     project: String,
     /// Present in folder mode.
     tree: Option<Tree>,
+    /// Present while Quick Open is showing.
+    file_search: Option<file_search::FileSearch>,
     tree_cursor: usize,
     /// First tree row drawn; follows `tree_cursor` so the selected row stays visible.
     tree_scroll: usize,
@@ -219,6 +226,7 @@ impl App {
             data_dir,
             project,
             tree: None,
+            file_search: None,
             tree_cursor: 0,
             tree_scroll: 0,
             tree_visible: None,
@@ -357,12 +365,36 @@ impl App {
             return Ok(());
         }
         let path = row.path.clone();
-        if matches!(&self.open.source.provenance, Provenance::File { path: p } if *p == path) {
+        self.open_file_path(&path)
+    }
+
+    /// Expand the folders above `path` and put the tree cursor on it, with the same count
+    /// refresh an expanded directory gets. Folders the user had expanded stay expanded. The
+    /// file is already open by now, so a folder that cannot be listed is only reported.
+    fn reveal_in_tree(&mut self, path: &Path) {
+        let Some(mut tree) = self.tree.take() else { return };
+        let result = tree.reveal(path);
+        self.refresh_counts(&mut tree);
+        self.tree = Some(tree);
+        match result {
+            Ok(Some(index)) => self.tree_cursor = index,
+            Ok(None) => {}
+            Err(error) => self.status = Some(format!("showing {} in the tree: {error:#}", path.display())),
+        }
+        self.refresh_review_counts();
+        self.derive_send_state();
+        self.keep_tree_cursor_visible(usize::from(self.geometry.tree.height));
+    }
+
+    /// Open `path` in place of the current document. The new document is built first, so a
+    /// file that cannot be read leaves the current one open.
+    fn open_file_path(&mut self, path: &Path) -> Result<()> {
+        if matches!(&self.open.source.provenance, Provenance::File { path: p } if p == path) {
             self.focus = Focus::Document;
             return Ok(());
         }
         let width = self.open.layout.width;
-        self.open = Open::new(read_file(&path)?, width, &self.data_dir, &self.project)?;
+        self.open = Open::new(read_file(path)?, width, &self.data_dir, &self.project)?;
         self.update_open_review_counts();
         self.derive_send_state();
         self.scroll = 0;

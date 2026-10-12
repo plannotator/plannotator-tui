@@ -89,6 +89,7 @@ impl App {
             Mode::Edit(_) => self.draw_compose(frame, &self.compose_title("edit")),
             Mode::Browse if self.pending.is_some() => self.draw_toolbar(frame),
             Mode::Pick => self.draw_pick(frame),
+            Mode::FileSearch => self.draw_file_search(frame),
             Mode::Archive => self.draw_archive(frame),
             Mode::ReviewMenu => self.draw_review_menu(frame),
             Mode::Browse | Mode::ConfirmQuit => {}
@@ -412,13 +413,17 @@ impl App {
         }
         // `S` is bound only in a reply review, so only a reply review names it.
         let quit = if self.is_file_review() { "q quit " } else { "S send+quit · q quit " };
-        let help = match self.focus {
+        let mut help = match self.focus {
             _ if self.pending.is_some() => "a looks good · c comment · d delete · esc clear ".to_owned(),
             Focus::Tree => "j/k · enter open · . hidden · E send · t hide · q quit ".to_owned(),
             Focus::Rail => format!("j/k · e edit · x remove · tab · {quit}"),
             Focus::Document if self.roam => format!("hjkl move · v select · c comment · esc blocks · {quit}"),
             Focus::Document => format!("i move · v select · c comment · E send · tab · {quit}"),
         };
+        // Quick Open works from any pane of a folder review, so every pane's help names it.
+        if self.tree.is_some() && self.pending.is_none() {
+            help.insert_str(0, "ctrl+p find · ");
+        }
         // The status must stay readable at any width, so the key help yields columns to it
         // (and is clipped) rather than the other way round.
         let status_width = self.status.as_ref().map_or(0, |s| s.width() + 1) as u16;

@@ -8,6 +8,7 @@ mod config;
 mod delivery;
 mod doc;
 mod export;
+mod file_search;
 mod herdr;
 mod last;
 mod layout;

@@ -372,13 +372,15 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<(
     app.clipboard = true;
     let mut dirty = true;
     while !app.quit {
+        dirty |= app.poll_file_search();
         if dirty {
             let started = Instant::now();
             terminal.draw(|frame| app.draw(frame))?;
             app.record_frame(started.elapsed().as_secs_f64() * 1000.0);
             dirty = false;
         }
-        if event::poll(Duration::from_millis(250))? {
+        let wait_ms = if app.file_search_scanning() { 25 } else { 250 };
+        if event::poll(Duration::from_millis(wait_ms))? {
             app.handle_event(&event::read()?)?;
             dirty = true;
             // Coalesce bursts (wheel, drag) into one redraw.

@@ -54,18 +54,18 @@ pub(crate) struct Tree {
     pub(crate) rows: Vec<Row>,
 }
 
-fn is_markdown(path: &Path) -> bool {
+pub(crate) fn is_markdown(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "md" | "markdown" | "mdx"))
 }
 
-fn is_hidden(path: &Path) -> bool {
+pub(crate) fn is_hidden(path: &Path) -> bool {
     path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.'))
 }
 
 /// A real (non-symlinked) directory that is not a dependency or build tree.
-fn is_walkable_dir(path: &Path) -> bool {
+pub(crate) fn is_walkable_dir(path: &Path) -> bool {
     let by_name = path.file_name().and_then(|n| n.to_str()).is_none_or(|n| !SKIPPED_DIRS.contains(&n));
     by_name && std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_dir())
 }
@@ -139,6 +139,23 @@ impl Tree {
     /// Index of the row for `path`, if it is currently listed.
     pub(crate) fn position(&self, path: &Path) -> Option<usize> {
         self.rows.iter().position(|r| r.path == path)
+    }
+
+    /// Expand only the ancestors needed to list a search result.
+    pub(crate) fn reveal(&mut self, path: &Path) -> Result<Option<usize>> {
+        let relative = path.strip_prefix(&self.root).context("search result outside folder")?;
+        let mut ancestor = self.root.clone();
+        let mut components = relative.components().peekable();
+        while let Some(component) = components.next() {
+            ancestor.push(component);
+            if components.peek().is_some()
+                && let Some(index) = self.position(&ancestor)
+                && self.rows.get(index).is_some_and(|row| !row.expanded)
+            {
+                self.toggle(index)?;
+            }
+        }
+        Ok(self.position(path))
     }
 
     /// The first listed file, in display order.
