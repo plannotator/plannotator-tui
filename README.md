@@ -41,6 +41,13 @@ Homebrew 6 asks you to trust a third-party tap once before installing from it.
 Prebuilt binaries for macOS, Linux and Windows are on the
 [releases page](https://github.com/plannotator/plannotator-tui/releases).
 
+On x86_64 Linux, choose `plannotator-tui-x86_64-unknown-linux-musl` if the GNU
+binary reports a missing `GLIBC_*` version, or if you use Alpine. This static
+musl build does not require system glibc or a local Rust toolchain. Existing
+GNU/Linux binaries remain available. Verify your download against `SHA256SUMS`
+from the same release, make it executable, and put it on your `PATH` as
+`plannotator-tui`.
+
 ## Use
 
 ```sh
