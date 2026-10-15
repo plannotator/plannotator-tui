@@ -26,6 +26,7 @@ jobs:
       matrix:
         include:
           - { target: x86_64-unknown-linux-gnu,  os: ubuntu-22.04 }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-22.04 }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
           - { target: x86_64-apple-darwin,       os: macos-15-intel }
           - { target: aarch64-apple-darwin,      os: macos-15 }
@@ -41,7 +42,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+      - name: install musl linker
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
       - run: cargo build --release -p plannotator-tui --target ${{ matrix.target }}
+      - name: smoke-test musl on older glibc and Alpine
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          for image in debian:bullseye-slim alpine:3.24; do
+            docker run --rm -v "$PWD:/work:ro" -w /work "$image" \
+              sh scripts/smoke-musl.sh "target/${{ matrix.target }}/release/plannotator-tui"
+          done
       - name: name the asset by target
         shell: bash
         run: |
