@@ -337,11 +337,10 @@ pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
     // A config that fails to parse never kept the plain TUI from starting; it still does
     // not. `plannotator-tui config` is where the error is reported.
     let config = Config::load().unwrap_or_default();
-    crate::theme::install(crate::theme::resolve(
-        |key| std::env::var(key).ok(),
-        config.ui.theme,
-        crate::theme::detect,
-    )?);
+    crate::theme::install(
+        crate::theme::resolve(|key| std::env::var(key).ok(), config.ui.theme, crate::theme::detect)?,
+        &config.colors,
+    );
     let mut terminal = ratatui::init();
     execute!(stdout(), EnableMouseCapture)?;
     let _ = execute!(stdout(), EnableBracketedPaste);

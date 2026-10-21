@@ -12,6 +12,7 @@ use tui_markdown::{Options, StyleSheet};
 
 use crate::doc::{BlockKind, Document};
 use crate::srcmap::{LineOffsets, align};
+use crate::theme::palette;
 use crate::wrap::{Row, clip_line, wrap_line, wrap_table};
 
 /// Rows of vertical space between blocks.
@@ -25,9 +26,9 @@ struct Styles;
 impl StyleSheet for Styles {
     fn heading(&self, level: u8) -> Style {
         match level {
-            1 => Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-            2 => Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-            _ => Style::new().fg(Color::LightCyan).add_modifier(Modifier::BOLD),
+            1 => Style::new().fg(palette().heading).add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            2 => Style::new().fg(palette().heading).add_modifier(Modifier::BOLD),
+            _ => Style::new().fg(palette().subheading).add_modifier(Modifier::BOLD),
         }
     }
     fn heading_marker(&self, _level: u8) -> &'static str {

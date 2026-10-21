@@ -148,6 +148,30 @@ wins over the file, and `plannotator-tui config` prints whichever is in effect. 
 backgrounds plannotator-tui paints itself change; the document keeps your terminal's own
 colours either way.
 
+`[colors]` replaces individual roles of whichever palette is in force; a role left out keeps
+its light or dark value. A colour is a name (`yellow`, `light-cyan`), a 256-colour index
+(`238`) or `#rrggbb`. An unknown role or colour is an error that names it, and
+`plannotator-tui config` prints the roles you set. Every role, with the dark palette's values
+(apart from `selection`, which is reverse video by default):
+
+```toml
+[colors]
+accent = "cyan"          # focused borders and gutter, the open file, menu and picker frames
+heading = "cyan"         # every heading level
+comment = "yellow"       # comment titles, the compose box, annotated rows in the gutter
+looks-good = "green"
+delete = "red"           # also the struck-through text
+comment-bg = "58"        # the tint under commented text
+looks-good-bg = "22"     # the tint under looks-good text
+block = "236"            # the focused block and the focused tree row
+toolbar = "238"          # the floating toolbar and the idle header buttons
+cursor = "240"           # the keyboard cursor cell
+selection = "#45475a"    # a character selection, a picker row, a menu row
+```
+
+`cursor` and `selection` become plain backgrounds when set: the text on them keeps the
+terminal's colour.
+
 ### Keys
 
 Every key is rebindable under `[keys]`: an action, and the keys that run it.

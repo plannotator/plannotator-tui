@@ -10,6 +10,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use super::draw::picker_help;
 use super::{App, Mode, label};
 use crate::keys::{self, Action};
+use crate::theme::palette;
 
 impl App {
     pub(super) fn archive_key(&mut self, key: KeyEvent) {
@@ -63,7 +64,7 @@ impl App {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::new().fg(Color::Cyan))
+            .border_style(Style::new().fg(palette().accent))
             .title(format!(" Archived annotations ({}) ", self.archive_items.len()))
             .title_bottom(picker_help(
                 "select",
@@ -99,7 +100,7 @@ impl App {
             let quote = item.annotation.anchor.original_text.split_whitespace().collect::<Vec<_>>().join(" ");
             let body = item.annotation.body.split_whitespace().collect::<Vec<_>>().join(" ");
             let style = if index == self.archive_cursor {
-                Style::new().fg(Color::Black).bg(Color::Cyan)
+                Style::new().fg(Color::Black).bg(palette().accent)
             } else {
                 Style::new()
             };

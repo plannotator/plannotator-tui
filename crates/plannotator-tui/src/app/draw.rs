@@ -26,9 +26,9 @@ const COMPOSE_WIDTH: u16 = 48;
 
 fn accent(kind: Kind) -> Color {
     match kind {
-        Kind::Comment => Color::Yellow,
-        Kind::LooksGood => Color::Green,
-        Kind::Delete => Color::Red,
+        Kind::Comment => palette().comment,
+        Kind::LooksGood => palette().looks_good,
+        Kind::Delete => palette().delete,
     }
 }
 
@@ -99,7 +99,8 @@ impl App {
     fn draw_tree(&self, frame: &mut Frame, area: Rect) {
         let Some(tree) = &self.tree else { return };
         let focused = self.focus == Focus::Tree;
-        let border = if focused { Style::new().fg(Color::Cyan) } else { Style::new().fg(Color::DarkGray) };
+        let border =
+            if focused { Style::new().fg(palette().accent) } else { Style::new().fg(Color::DarkGray) };
         let block = Block::default().borders(Borders::RIGHT).border_style(border);
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -123,7 +124,7 @@ impl App {
                 };
                 let mut style = if row.is_dir { Style::new().dim() } else { Style::new() };
                 if open_path == Some(row.path.as_path()) {
-                    style = style.bold().fg(Color::Cyan);
+                    style = style.bold().fg(palette().accent);
                 }
                 let row_bg = (focused && i == self.tree_cursor).then(|| palette().block_bg);
                 if let Some(bg) = row_bg {
@@ -138,7 +139,7 @@ impl App {
                 Line::from(vec![
                     Span::styled(format!(" {name}"), style),
                     Span::styled(" ".repeat(pad), with_bg(Style::new())),
-                    Span::styled(count, with_bg(Style::new().fg(Color::Yellow))),
+                    Span::styled(count, with_bg(Style::new().fg(palette().comment))),
                 ])
             })
             .collect();
@@ -179,7 +180,7 @@ impl App {
                     Kind::Comment => Style::new().bg(palette().comment_bg),
                     Kind::LooksGood => Style::new().bg(palette().approve_bg),
                     Kind::Delete => {
-                        Style::new().fg(Color::Red).add_modifier(Modifier::CROSSED_OUT | Modifier::DIM)
+                        Style::new().fg(palette().delete).add_modifier(Modifier::CROSSED_OUT | Modifier::DIM)
                     }
                 };
                 buf.set_style(Rect { x: doc.x + col as u16, y: screen_y, width: 1, height: 1 }, style);
@@ -204,8 +205,8 @@ impl App {
             }
 
             let marker = match (block == self.selected, row_has_annotation) {
-                (true, _) => Span::styled("▍", Style::new().fg(Color::Cyan)),
-                (false, true) => Span::styled("▍", Style::new().fg(Color::Yellow)),
+                (true, _) => Span::styled("▍", Style::new().fg(palette().accent)),
+                (false, true) => Span::styled("▍", Style::new().fg(palette().comment)),
                 (false, false) => Span::raw(" "),
             };
             buf.set_span(gutter.x, screen_y, &marker, 1);
@@ -285,7 +286,7 @@ impl App {
         let boxed = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::new().fg(Color::Yellow))
+            .border_style(Style::new().fg(palette().comment))
             .title(Span::styled(title.to_owned(), Style::new().dim()));
         let inner = boxed.inner(rect);
         frame.render_widget(boxed, rect);
@@ -395,7 +396,8 @@ impl App {
             let label = format!(" {} ", label.as_deref().unwrap_or("Undo finish"));
             let width = (label.width() as u16).min(area.width);
             let rect = Rect { x: area.right() - width, y: area.y, width, height: area.height };
-            frame.render_widget(Paragraph::new(label.as_str()).style(Style::new().fg(Color::Cyan)), rect);
+            frame
+                .render_widget(Paragraph::new(label.as_str()).style(Style::new().fg(palette().accent)), rect);
             self.geometry.undo_button = Some(rect);
             area.width = area.width.saturating_sub(width);
         }

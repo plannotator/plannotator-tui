@@ -81,7 +81,7 @@ impl App {
                 }
                 Button::Review => {
                     self.geometry.review_button = Some(rect);
-                    Style::new().fg(Color::Cyan).bg(palette().toolbar_bg)
+                    Style::new().fg(palette().accent).bg(palette().toolbar_bg)
                 }
             };
             frame.buffer_mut().set_span(rect.x, rect.y, &Span::styled(label, style), rect.width);

@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::keys::Keymap;
-use crate::theme::ThemeSetting;
+use crate::theme::{Colors, ThemeSetting};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
@@ -20,9 +20,10 @@ pub(crate) struct Config {
     pub(crate) herdr: HerdrConfig,
     pub(crate) ui: UiConfig,
     pub(crate) keys: Keymap,
+    pub(crate) colors: Colors,
 }
 
-/// How the app looks. One key so far; the colours themselves are not configurable yet.
+/// Which palette the app starts from; `[colors]` adjusts individual roles of it.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct UiConfig {
@@ -250,5 +251,29 @@ mod tests {
     fn roundtrips_through_toml() {
         let text = Config::default().to_toml().expect("serializes");
         assert_eq!(Config::parse(&text).expect("parses"), Config::default());
+    }
+
+    #[test]
+    fn colors_are_read_by_role_and_roundtrip() {
+        let config =
+            Config::parse("[colors]\naccent = \"magenta\"\nlooks-good-bg = \"#a6e3a1\"\nblock = \"236\"\n")
+                .expect("parses");
+        assert_eq!(config.colors.accent.map(|c| c.0), Some(ratatui::style::Color::Magenta));
+        assert_eq!(config.colors.looks_good_bg.map(|c| c.0), Some(ratatui::style::Color::Rgb(166, 227, 161)));
+        assert_eq!(config.colors.heading, None);
+        let text = config.to_toml().expect("serializes");
+        assert_eq!(Config::parse(&text).expect("reparses"), config);
+    }
+
+    #[test]
+    fn an_unknown_color_role_error_names_the_role() {
+        let err = Config::parse("[colors]\nbackground = \"black\"\n").expect_err("rejected");
+        assert!(err.to_string().contains("background"), "{err}");
+    }
+
+    #[test]
+    fn an_unreadable_color_error_names_the_value() {
+        let err = Config::parse("[colors]\nheading = \"chartreuse\"\n").expect_err("rejected");
+        assert!(err.to_string().contains("chartreuse"), "{err}");
     }
 }

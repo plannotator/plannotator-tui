@@ -34,6 +34,24 @@ fn the_printed_theme_is_the_environments_when_it_speaks() {
 }
 
 #[test]
+fn configured_colors_are_printed_with_the_theme() {
+    let dir = std::env::temp_dir().join(format!("plannotator-tui-colors-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    let path = dir.join("config.toml");
+    std::fs::write(&path, "[colors]\nheading = \"#89B4FA\"\nlooks-good = \"green\"\n").expect("config");
+    let out = Command::new(env!("CARGO_BIN_EXE_plannotator-tui"))
+        .env("PLANNOTATOR_TUI_CONFIG", &path)
+        .env_remove("PLANNOTATOR_TUI_THEME")
+        .arg("config")
+        .output()
+        .expect("config runs");
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{text}{}", String::from_utf8_lossy(&out.stderr));
+    assert!(text.contains("[colors]\nheading = \"#89B4FA\"\nlooks-good = \"Green\""), "{text}");
+}
+
+#[test]
 fn an_unreadable_theme_in_the_environment_is_reported_rather_than_ignored() {
     let mut command = Command::new(env!("CARGO_BIN_EXE_plannotator-tui"));
     let out = command.env("PLANNOTATOR_TUI_THEME", "solarized").arg("config").output().expect("config runs");

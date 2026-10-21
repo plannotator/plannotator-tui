@@ -6,7 +6,7 @@
 //! installs a palette in tests or in headless runs, so those keep the dark one.
 //!
 //! Precedence: `PLANNOTATOR_TUI_THEME` → `[ui] theme` in the config file → asking the
-//! terminal → dark.
+//! terminal → dark. `[colors]` then replaces individual roles of whichever palette won.
 
 use std::fmt;
 use std::io::IsTerminal as _;
@@ -83,14 +83,27 @@ impl Theme {
     }
 }
 
-/// Every colour we paint that is not the terminal's own.
+/// Every colour a theme or `[colors]` can change.
 ///
-/// A role is here because it is painted *under* text whose colour belongs to the terminal:
-/// a fixed dark background hides dark text on a light terminal, and the other way round.
-/// Styles that set both a foreground and a background read the same either way and stay
-/// where they are used.
+/// The backgrounds are here because they are painted *under* text whose colour belongs to
+/// the terminal: a fixed dark background hides dark text on a light terminal, and the other
+/// way round. The foregrounds are ANSI colours that already follow the terminal, so both
+/// palettes share them; they are here so `[colors]` can reach them. Styles that set both a
+/// foreground and a background read the same either way and stay where they are used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Palette {
+    /// Focused borders and gutter, the open file in the tree, active header text.
+    pub(crate) accent: Color,
+    /// Level one and two headings.
+    pub(crate) heading: Color,
+    /// Level three and deeper headings.
+    pub(crate) subheading: Color,
+    /// Comment titles, the compose box, annotated rows in the gutter, tree counts.
+    pub(crate) comment: Color,
+    /// Looks-good titles and toolbar label.
+    pub(crate) looks_good: Color,
+    /// Delete titles, toolbar label and struck-through text.
+    pub(crate) delete: Color,
     /// The focused block's bar, and the focused row of the file tree.
     pub(crate) block_bg: Color,
     /// The floating toolbar and the idle header buttons.
@@ -109,6 +122,12 @@ pub(crate) struct Palette {
 
 /// The palette this app has always had. Dark terminals must see no change at all.
 pub(crate) static DARK: Palette = Palette {
+    accent: Color::Cyan,
+    heading: Color::Cyan,
+    subheading: Color::LightCyan,
+    comment: Color::Yellow,
+    looks_good: Color::Green,
+    delete: Color::Red,
     block_bg: Color::Indexed(236),
     toolbar_bg: Color::Indexed(238),
     idle_fg: Color::Gray,
@@ -123,6 +142,12 @@ pub(crate) static DARK: Palette = Palette {
 /// annotation tints are the pale ends of the same hues. `REVERSED` becomes a real
 /// background: reversing dark-on-light gives a black bar that swallows the tints under it.
 pub(crate) static LIGHT: Palette = Palette {
+    accent: DARK.accent,
+    heading: DARK.heading,
+    subheading: DARK.subheading,
+    comment: DARK.comment,
+    looks_good: DARK.looks_good,
+    delete: DARK.delete,
     block_bg: Color::Indexed(254),
     toolbar_bg: Color::Indexed(252),
     idle_fg: Color::DarkGray,
@@ -133,17 +158,103 @@ pub(crate) static LIGHT: Palette = Palette {
     selection: Style::new().bg(Color::Indexed(153)),
 };
 
-static PALETTE: OnceLock<&'static Palette> = OnceLock::new();
+/// A colour as `[colors]` writes it: a name (`yellow`, `light-cyan`), a 256-colour index
+/// (`238`) or `#rrggbb`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ColorValue(pub(crate) Color);
+
+impl FromStr for ColorValue {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        s.parse().map(Self).map_err(|_| {
+            anyhow::anyhow!("unknown color {s:?}; expected a name like yellow, an index 0-255, or #rrggbb")
+        })
+    }
+}
+
+impl Serialize for ColorValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        serializer.collect_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for ColorValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        text.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+/// `[colors]`: per-role replacements for the palette in force. A role left out keeps the
+/// light or dark value; `cursor` and `selection` become plain backgrounds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default, rename_all = "kebab-case")]
+pub(crate) struct Colors {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) accent: Option<ColorValue>,
+    /// Every heading level.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) heading: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) comment: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) looks_good: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) delete: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) comment_bg: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) looks_good_bg: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) block: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) toolbar: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) cursor: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) selection: Option<ColorValue>,
+}
+
+impl Palette {
+    /// This palette with every role `colors` names replaced.
+    pub(crate) fn with(mut self, colors: &Colors) -> Self {
+        let set = |slot: &mut Color, value: Option<ColorValue>| {
+            if let Some(ColorValue(color)) = value {
+                *slot = color;
+            }
+        };
+        set(&mut self.accent, colors.accent);
+        set(&mut self.heading, colors.heading);
+        set(&mut self.subheading, colors.heading);
+        set(&mut self.comment, colors.comment);
+        set(&mut self.looks_good, colors.looks_good);
+        set(&mut self.delete, colors.delete);
+        set(&mut self.comment_bg, colors.comment_bg);
+        set(&mut self.approve_bg, colors.looks_good_bg);
+        set(&mut self.block_bg, colors.block);
+        set(&mut self.toolbar_bg, colors.toolbar);
+        if let Some(ColorValue(color)) = colors.cursor {
+            self.cursor = Style::new().bg(color);
+        }
+        if let Some(ColorValue(color)) = colors.selection {
+            self.selection = Style::new().bg(color);
+        }
+        self
+    }
+}
+
+static PALETTE: OnceLock<Palette> = OnceLock::new();
 
 /// The palette in force. Dark until [`install`] says otherwise, which is what tests,
 /// `--snapshot`, `--export` and every other headless run get.
 pub(crate) fn palette() -> &'static Palette {
-    PALETTE.get().copied().unwrap_or(&DARK)
+    PALETTE.get().unwrap_or(&DARK)
 }
 
 /// Fix the palette for this process. The first call wins; later ones are ignored.
-pub(crate) fn install(theme: Theme) {
-    let _ = PALETTE.set(theme.palette());
+pub(crate) fn install(theme: Theme, colors: &Colors) {
+    let _ = PALETTE.set(theme.palette().with(colors));
 }
 
 /// Ask the terminal whether its background is light or dark.
@@ -266,6 +377,11 @@ mod tests {
         assert_eq!(DARK.approve_bg, Color::Indexed(22));
         assert_eq!(DARK.cursor, Style::new().bg(Color::Indexed(240)));
         assert_eq!(DARK.selection, Style::new().add_modifier(Modifier::REVERSED));
+        assert_eq!(
+            (DARK.accent, DARK.heading, DARK.subheading),
+            (Color::Cyan, Color::Cyan, Color::LightCyan)
+        );
+        assert_eq!((DARK.comment, DARK.looks_good, DARK.delete), (Color::Yellow, Color::Green, Color::Red));
     }
 
     /// Nothing installs a palette in a test binary, so every existing snapshot and style
@@ -293,6 +409,59 @@ mod tests {
     fn the_light_selection_is_a_background_not_a_reversal() {
         assert!(!LIGHT.selection.add_modifier.contains(Modifier::REVERSED));
         assert!(LIGHT.selection.bg.is_some());
+    }
+
+    #[test]
+    fn no_colors_leave_both_palettes_alone() {
+        assert_eq!(DARK.with(&Colors::default()), DARK);
+        assert_eq!(LIGHT.with(&Colors::default()), LIGHT);
+    }
+
+    #[test]
+    fn a_color_replaces_its_role_and_nothing_else() {
+        let colors = Colors { block: Some(ColorValue(Color::Rgb(1, 2, 3))), ..Colors::default() };
+        let palette = LIGHT.with(&colors);
+        assert_eq!(palette.block_bg, Color::Rgb(1, 2, 3));
+        assert_eq!(Palette { block_bg: LIGHT.block_bg, ..palette }, LIGHT);
+    }
+
+    #[test]
+    fn heading_covers_every_level() {
+        let colors = Colors { heading: Some(ColorValue(Color::Magenta)), ..Colors::default() };
+        let palette = DARK.with(&colors);
+        assert_eq!((palette.heading, palette.subheading), (Color::Magenta, Color::Magenta));
+    }
+
+    /// A configured cursor or selection is the whole style: the dark selection's reversal
+    /// and the light cursor's white glyph would fight a colour picked to match a theme.
+    #[test]
+    fn cursor_and_selection_become_plain_backgrounds() {
+        let colors = Colors {
+            cursor: Some(ColorValue(Color::Indexed(7))),
+            selection: Some(ColorValue(Color::Indexed(8))),
+            ..Colors::default()
+        };
+        assert_eq!(LIGHT.with(&colors).cursor, Style::new().bg(Color::Indexed(7)));
+        assert_eq!(DARK.with(&colors).selection, Style::new().bg(Color::Indexed(8)));
+    }
+
+    #[test]
+    fn a_color_reads_names_indexes_and_hex_and_prints_back_the_same() {
+        for (text, color) in [
+            ("light-cyan", Color::LightCyan),
+            ("238", Color::Indexed(238)),
+            ("#1e1e2e", Color::Rgb(30, 30, 46)),
+        ] {
+            let parsed: ColorValue = text.parse().expect("parses");
+            assert_eq!(parsed.0, color);
+            assert_eq!(parsed.0.to_string().parse::<ColorValue>().expect("reparses"), parsed);
+        }
+    }
+
+    #[test]
+    fn an_unreadable_color_is_an_error_naming_it() {
+        let err = "chartreuse".parse::<ColorValue>().expect_err("rejected");
+        assert!(err.to_string().contains("chartreuse"), "{err}");
     }
 
     #[test]

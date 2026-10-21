@@ -10,7 +10,7 @@ use plannotator_tui_hosts::Message;
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr as _;
@@ -145,7 +145,7 @@ impl App {
         let boxed = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::new().fg(Color::Cyan))
+            .border_style(Style::new().fg(palette().accent))
             .title(Span::styled(" which message? ", Style::new().dim()))
             .title_bottom(Span::styled(
                 picker_help(
