@@ -1,22 +1,24 @@
 //! A small archive picker: identify a note by file, quote and body, then restore it.
 
 use ratatui::Frame;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 
 use super::{App, Mode, label};
+use crate::keys::{self, Action};
 
 impl App {
     pub(super) fn archive_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => self.move_archive_cursor(1),
-            KeyCode::Char('k') | KeyCode::Up => self.move_archive_cursor(-1),
-            KeyCode::Enter => self.restore_selected_archived(),
-            KeyCode::Esc | KeyCode::Char('H' | 'q') => self.mode = Mode::Browse,
-            KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => self.mode = Mode::Browse,
+        match self.keys.action(&key, keys::ARCHIVE) {
+            Some(Action::Down) => self.move_archive_cursor(1),
+            Some(Action::Up) => self.move_archive_cursor(-1),
+            Some(Action::Confirm) => self.restore_selected_archived(),
+            Some(Action::Back | Action::Archive | Action::Quit | Action::Interrupt) => {
+                self.mode = Mode::Browse;
+            }
             _ => {}
         }
     }

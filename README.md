@@ -89,6 +89,8 @@ dimmed. The keys also work without opening the menu.
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
 
+These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
+
 Hidden folders are out of the tree until `.` asks for them, and `.git`, `.hg`, `.svn`,
 `.jj`, `.cache`, `.direnv`, `.venv`, `venv`, `__pycache__`, `node_modules`, `vendor`,
 `target`, `build`, `dist` and `out` stay out either way — none of them is read at all.
@@ -138,6 +140,48 @@ question, and `PLANNOTATOR_TUI_THEME=light|dark` does the same for one run — t
 wins over the file, and `plannotator-tui config` prints whichever is in effect. Only the
 backgrounds plannotator-tui paints itself change; the document keeps your terminal's own
 colours either way.
+
+### Keys
+
+Every key is rebindable under `[keys]`: an action, and the keys that run it.
+
+```toml
+[keys]
+left = ["j", "Left"]   # jkl; instead of hjkl
+down = ["k", "Down"]
+up = ["l", "Up"]
+right = [";", "Right"]
+line-start = ["^", "Home"]
+```
+
+An entry replaces that action's keys and leaves every other action at its default; `[]`
+unbinds it. A key is one character (`G` is Shift+g), `ctrl+<character>`, or one of `Up`,
+`Down`, `Left`, `Right`, `Home`, `End`, `PageUp`, `PageDown`, `Enter`, `Esc`, `Tab`,
+`Delete`, `Backspace`. An action keeps its meaning everywhere it applies, so `down` moves
+down in the document, the tree, the notes and every picker. A key bound to two actions that
+are live at the same time is an error that names both, and the hints at the bottom of the
+screen show your keys. `plannotator-tui config` prints every action with its keys.
+
+| Action | Default | Does |
+|---|---|---|
+| `up` `down` `left` `right` | `k` `j` `h` `l`, arrows | move; `left`/`right` in the document start the cursor, `right` in the tree opens |
+| `word-forward` `word-back` | `w` `b` | cursor to the next or previous word |
+| `line-start` `line-end` | `0` `$`, `Home` `End` | cursor to the start or end of the line |
+| `page-down` `page-up` | `ctrl+d` `ctrl+u`, `PageDown` `PageUp` | half a page |
+| `top` `bottom` | `g` `G`, `Home` `End` | first or last block |
+| `confirm` `back` | `Enter` `Esc` | finish, open, run; cancel, close |
+| `quit` `interrupt` | `q` `ctrl+c` | quit |
+| `cycle-focus` | `Tab` | tree · document · notes |
+| `send` `send-and-close` | `E` `S` | send; send and close a reply review |
+| `toggle-tree` `reload` `pick-message` | `t` `r` `p` | show/hide the tree; reload; choose another reply |
+| `review-menu` | `m` | the Review menu |
+| `resend-all` `finish-review` `undo-finish` `archive` | `R` `F` `U` `H` | file and folder review actions |
+| `toggle-hidden` | `.` | show/hide dot-prefixed entries in the tree |
+| `edit` `remove` | `e` `x`, `Delete` | the selected note |
+| `visual` `move-cursor` | `v` `i` | select with the cursor; move it first |
+| `comment` `clear-block` | `c` `x` | on the block; clear its annotations |
+| `looks-good` `delete` | `a` `d` | toolbar, with `comment` |
+| `yes` `no` | `y` `n` | the send-before-quitting question |
 
 Actions forwarded by Herdr Mirror default to a split beside the invoking remote
 pane. Mirror does not preserve overlay presentation, and Herdr 0.8.2 opens an

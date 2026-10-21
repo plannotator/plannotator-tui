@@ -2,9 +2,7 @@
 
 use anyhow::Result;
 use plannotator_tui_schema::Kind;
-use ratatui::crossterm::event::{
-    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
-};
+use ratatui::crossterm::event::{Event, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
 
 use super::compose::ComposeAction;
 use super::menu::ReviewAction;
@@ -12,6 +10,7 @@ use super::selection::Selection;
 use super::send::SendState;
 use super::{App, Focus, GUTTER, Mode, Pending, TOOLBAR};
 use crate::delivery::Delivery as _;
+use crate::keys::{self, Action};
 
 impl App {
     pub(crate) fn handle_event(&mut self, event: &Event) -> Result<()> {
@@ -46,46 +45,46 @@ impl App {
 
     fn browse_key(&mut self, key: KeyEvent) -> Result<()> {
         // Global keys first.
-        match (key.code, key.modifiers) {
-            (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+        match self.keys.action(&key, keys::GLOBAL) {
+            Some(Action::Quit | Action::Interrupt) => {
                 self.request_quit();
                 return Ok(());
             }
-            (KeyCode::Tab, _) => {
+            Some(Action::CycleFocus) => {
                 self.cycle_focus();
                 return Ok(());
             }
-            (KeyCode::Char('E'), _) => return self.send_feedback(),
+            Some(Action::Send) => return self.send_feedback(),
             // A reply review sends every note, so one the agent already has closes like `q`.
-            (KeyCode::Char('S'), _) if !self.is_file_review() => {
+            Some(Action::SendAndClose) if !self.is_file_review() => {
                 if self.send_state == SendState::Sent {
                     self.request_quit();
                     return Ok(());
                 }
                 return self.send_and_quit();
             }
-            (KeyCode::Char('m'), _) if self.is_file_review() => {
+            Some(Action::ReviewMenu) if self.is_file_review() => {
                 self.open_review_menu();
                 return Ok(());
             }
-            (KeyCode::Char('R'), _) if self.is_file_review() => {
+            Some(Action::ResendAll) if self.is_file_review() => {
                 return self.run_review_action(ReviewAction::ResendAll);
             }
-            (KeyCode::Char('F'), _) if self.is_file_review() => {
+            Some(Action::FinishReview) if self.is_file_review() => {
                 return self.run_review_action(ReviewAction::Finish);
             }
-            (KeyCode::Char('U'), _) if self.is_file_review() => {
+            Some(Action::UndoFinish) if self.is_file_review() => {
                 return self.run_review_action(ReviewAction::Undo);
             }
-            (KeyCode::Char('H'), _) if self.is_file_review() => {
+            Some(Action::Archive) if self.is_file_review() => {
                 return self.run_review_action(ReviewAction::Archive);
             }
-            (KeyCode::Char('t'), _) => {
+            Some(Action::ToggleTree) => {
                 self.toggle_tree(self.geometry.doc.width + self.geometry.tree.width + GUTTER);
                 return Ok(());
             }
-            (KeyCode::Char('r'), _) => return self.reload(),
-            (KeyCode::Char('p'), _) => {
+            Some(Action::Reload) => return self.reload(),
+            Some(Action::PickMessage) => {
                 self.reopen_picker();
                 return Ok(());
             }
@@ -100,16 +99,16 @@ impl App {
 
     /// The quit confirmation: send first, quit anyway, or stay.
     fn confirm_quit_key(&mut self, key: KeyEvent) -> Result<()> {
-        match key.code {
-            KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
+        match self.keys.action(&key, keys::CONFIRM_QUIT) {
+            Some(Action::Yes | Action::Confirm) => {
                 self.mode = Mode::Browse;
                 self.send_and_quit()?;
             }
-            KeyCode::Char('n' | 'N') => {
+            Some(Action::No) => {
                 self.mode = Mode::Browse;
                 self.quit = true;
             }
-            KeyCode::Esc => self.mode = Mode::Browse,
+            Some(Action::Back) => self.mode = Mode::Browse,
             _ => {}
         }
         Ok(())
@@ -127,14 +126,14 @@ impl App {
 
     fn tree_key(&mut self, key: KeyEvent) -> Result<()> {
         let len = self.tree_len();
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
+        match self.keys.action(&key, keys::TREE) {
+            Some(Action::Down) => {
                 self.tree_cursor = (self.tree_cursor + 1).min(len.saturating_sub(1));
             }
-            KeyCode::Char('k') | KeyCode::Up => self.tree_cursor = self.tree_cursor.saturating_sub(1),
-            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.open_tree_selection()?,
-            KeyCode::Char('.') => self.toggle_tree_hidden()?,
-            KeyCode::Esc => self.focus = Focus::Document,
+            Some(Action::Up) => self.tree_cursor = self.tree_cursor.saturating_sub(1),
+            Some(Action::Confirm | Action::Right) => self.open_tree_selection()?,
+            Some(Action::ToggleHidden) => self.toggle_tree_hidden()?,
+            Some(Action::Back) => self.focus = Focus::Document,
             _ => {}
         }
         // The tree's height is the last frame's; the first frame has not drawn yet, but its cursor is row 0.
@@ -144,14 +143,14 @@ impl App {
 
     fn rail_key(&mut self, key: KeyEvent) -> Result<()> {
         let len = self.open.store.placed().len();
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
+        match self.keys.action(&key, keys::RAIL) {
+            Some(Action::Down) => {
                 self.rail_cursor = (self.rail_cursor + 1).min(len.saturating_sub(1));
             }
-            KeyCode::Char('k') | KeyCode::Up => self.rail_cursor = self.rail_cursor.saturating_sub(1),
-            KeyCode::Enter | KeyCode::Char('e') => self.edit_selected_annotation(),
-            KeyCode::Char('x') | KeyCode::Delete => self.remove_selected_annotation()?,
-            KeyCode::Esc => self.focus = Focus::Document,
+            Some(Action::Up) => self.rail_cursor = self.rail_cursor.saturating_sub(1),
+            Some(Action::Confirm | Action::Edit) => self.edit_selected_annotation(),
+            Some(Action::Remove) => self.remove_selected_annotation()?,
+            Some(Action::Back) => self.focus = Focus::Document,
             _ => {}
         }
         if let Some(target) = self.open.store.placed().get(self.rail_cursor)
@@ -167,7 +166,8 @@ impl App {
         let page = i64::from(self.geometry.doc.height.max(1));
         // With a selection waiting, the toolbar keys win.
         if self.pending.is_some()
-            && let Some(&(_, _, _, kind)) = TOOLBAR.iter().find(|(_, _, k, _)| KeyCode::Char(*k) == key.code)
+            && let Some(action) = self.keys.action(&key, keys::TOOLBAR)
+            && let Some(&(_, _, _, kind)) = TOOLBAR.iter().find(|item| item.2 == action)
         {
             return self.act(kind);
         }
@@ -179,7 +179,7 @@ impl App {
         // Roaming (`i`): the cursor moves with nothing selected yet, so `v` can start
         // anywhere. Other keys fall through to their block-mode meaning.
         if self.roam && self.selection.is_none() {
-            if key.code == KeyCode::Esc {
+            if self.keys.is(Action::Back, &key) {
                 self.roam = false;
                 self.status = None;
                 return Ok(());
@@ -188,35 +188,39 @@ impl App {
                 return Ok(());
             }
         }
-        match (key.code, key.modifiers) {
-            (KeyCode::Esc, _) => {
+        match self.keys.action(&key, keys::DOCUMENT) {
+            Some(Action::Back) => {
                 if self.pending.is_some() || self.selection.is_some() {
                     self.clear_selection();
                 } else {
                     self.request_quit();
                 }
             }
-            (KeyCode::Char('v'), _) => {
+            Some(Action::Visual) => {
                 self.clear_selection();
                 self.selection = Some(Selection::start(self.cursor));
-                self.status = Some("visual: move to extend, enter to select, esc to cancel".into());
+                self.status = Some(format!(
+                    "visual: move to extend, {} to select, {} to cancel",
+                    self.keys.hint(Action::Confirm),
+                    self.keys.hint(Action::Back)
+                ));
             }
-            (KeyCode::Char('i'), _) => self.start_roaming(),
-            (KeyCode::Char('j') | KeyCode::Down, _) => self.select_block(self.selected + 1),
-            (KeyCode::Char('k') | KeyCode::Up, _) => self.select_block(self.selected.saturating_sub(1)),
+            Some(Action::MoveCursor) => self.start_roaming(),
+            Some(Action::Down) => self.select_block(self.selected + 1),
+            Some(Action::Up) => self.select_block(self.selected.saturating_sub(1)),
             // A cursor that moves must be visible, so a column move in block mode is a
             // roaming move: the same key, with the cursor drawn.
-            (KeyCode::Char('h' | 'l') | KeyCode::Left | KeyCode::Right, _) => {
+            Some(Action::Left | Action::Right) => {
                 self.start_roaming();
                 self.motion_key(key);
             }
-            (KeyCode::Char('d'), KeyModifiers::CONTROL) | (KeyCode::PageDown, _) => self.page_by(page / 2),
-            (KeyCode::Char('u'), KeyModifiers::CONTROL) | (KeyCode::PageUp, _) => self.page_by(-page / 2),
-            (KeyCode::Char('g') | KeyCode::Home, _) => self.select_block(0),
-            (KeyCode::Char('G') | KeyCode::End, _) => {
+            Some(Action::PageDown) => self.page_by(page / 2),
+            Some(Action::PageUp) => self.page_by(-page / 2),
+            Some(Action::Top) => self.select_block(0),
+            Some(Action::Bottom) => {
                 self.select_block(self.open.doc.blocks.len().saturating_sub(1));
             }
-            (KeyCode::Char('c') | KeyCode::Enter, _) => {
+            Some(Action::Comment | Action::Confirm) => {
                 // No selection: comment on the whole selected block.
                 if let (Some(block), Some(rendered)) =
                     (self.open.doc.blocks.get(self.selected), self.open.layout.blocks.get(self.selected))
@@ -225,7 +229,7 @@ impl App {
                     self.act(Kind::Comment)?;
                 }
             }
-            (KeyCode::Char('x'), _) => {
+            Some(Action::ClearBlock) => {
                 let removed = self.open.store.remove_in_block(&self.open.doc, self.selected)?;
                 if removed > 0 {
                     self.mark_unsent();
@@ -240,9 +244,9 @@ impl App {
 
     /// Keys while a keyboard selection is being extended.
     fn visual_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc => self.clear_selection(),
-            KeyCode::Enter | KeyCode::Char('v') => self.finish_selection(),
+        match self.keys.action(&key, keys::VISUAL) {
+            Some(Action::Back) => self.clear_selection(),
+            Some(Action::Confirm | Action::Visual) => self.finish_selection(),
             _ => {
                 self.motion_key(key);
             }
@@ -256,20 +260,30 @@ impl App {
     fn start_roaming(&mut self) {
         self.clear_selection();
         self.roam = true;
-        self.status = Some("move: hjkl w b 0 $ · v select · esc back to blocks".into());
+        let hint = |action| self.keys.hint(action);
+        self.status = Some(format!(
+            "move: {} {} {} {} {} · {} select · {} back to blocks",
+            self.keys.directions_hint(),
+            hint(Action::WordForward),
+            hint(Action::WordBack),
+            hint(Action::LineStart),
+            hint(Action::LineEnd),
+            hint(Action::Visual),
+            hint(Action::Back)
+        ));
     }
 
     /// The cursor motions shared by visual and roaming modes. True when `key` was one.
     fn motion_key(&mut self, key: KeyEvent) -> bool {
-        match key.code {
-            KeyCode::Char('h') | KeyCode::Left => self.move_cursor(0, -1),
-            KeyCode::Char('l') | KeyCode::Right => self.move_cursor(0, 1),
-            KeyCode::Char('j') | KeyCode::Down => self.move_cursor(1, 0),
-            KeyCode::Char('k') | KeyCode::Up => self.move_cursor(-1, 0),
-            KeyCode::Char('w') => self.move_word(1),
-            KeyCode::Char('b') => self.move_word(-1),
-            KeyCode::Char('0') | KeyCode::Home => self.cursor.1 = 0,
-            KeyCode::Char('$') | KeyCode::End => {
+        match self.keys.action(&key, keys::MOTION) {
+            Some(Action::Left) => self.move_cursor(0, -1),
+            Some(Action::Right) => self.move_cursor(0, 1),
+            Some(Action::Down) => self.move_cursor(1, 0),
+            Some(Action::Up) => self.move_cursor(-1, 0),
+            Some(Action::WordForward) => self.move_word(1),
+            Some(Action::WordBack) => self.move_word(-1),
+            Some(Action::LineStart) => self.cursor.1 = 0,
+            Some(Action::LineEnd) => {
                 self.cursor.1 =
                     self.open.layout.row(self.cursor.0).map_or(0, |r| r.cells.len().saturating_sub(1));
             }

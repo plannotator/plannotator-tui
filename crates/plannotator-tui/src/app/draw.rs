@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::{App, Focus, GUTTER, Geometry, Mode, TOOLBAR, glyph, label};
+use crate::keys::Action;
 use crate::theme::palette;
 use crate::wrap::wrap_line;
 
@@ -234,7 +235,8 @@ impl App {
     }
 
     fn draw_toolbar(&mut self, frame: &mut Frame) {
-        let labels: Vec<String> = TOOLBAR.iter().map(|(g, l, k, _)| format!(" {g} {l} ({k}) ")).collect();
+        let labels: Vec<String> =
+            TOOLBAR.iter().map(|(g, l, a, _)| format!(" {g} {l} ({}) ", self.keys.hint(*a))).collect();
         let width: u16 = labels.iter().map(|l| l.width() as u16).sum::<u16>() + 1;
         let Some(rect) = self.float_origin(1, width) else { return };
         frame.render_widget(Clear, rect);
@@ -374,8 +376,11 @@ impl App {
             // The question owns the footer: the browse help would name keys that are not
             // live while it is up.
             let question = format!(
-                " send feedback to {} before quitting? y send · n quit · esc cancel",
-                self.delivery.describe()
+                " send feedback to {} before quitting? {} send · {} quit · {} cancel",
+                self.delivery.describe(),
+                self.keys.hint(Action::Yes),
+                self.keys.hint(Action::No),
+                self.keys.hint(Action::Back)
             );
             frame.render_widget(Paragraph::new(Line::from(Span::raw(question).bold())), area);
             return;
@@ -410,14 +415,49 @@ impl App {
         if frame.area().width < RAIL_MIN_TOTAL_WIDTH {
             parts.push("rail hidden: widen to ≥80 cols".into());
         }
-        // `S` is bound only in a reply review, so only a reply review names it.
-        let quit = if self.is_file_review() { "q quit " } else { "S send+quit · q quit " };
+        let key = |action| self.keys.hint(action);
+        // `send-and-close` is bound only in a reply review, so only a reply review names it.
+        let quit = if self.is_file_review() {
+            format!("{} quit ", key(Action::Quit))
+        } else {
+            format!("{} send+quit · {} quit ", key(Action::SendAndClose), key(Action::Quit))
+        };
+        let (up_down, tab) = (format!("{}/{}", key(Action::Down), key(Action::Up)), key(Action::CycleFocus));
         let help = match self.focus {
-            _ if self.pending.is_some() => "a looks good · c comment · d delete · esc clear ".to_owned(),
-            Focus::Tree => "j/k · enter open · . hidden · E send · t hide · q quit ".to_owned(),
-            Focus::Rail => format!("j/k · e edit · x remove · tab · {quit}"),
-            Focus::Document if self.roam => format!("hjkl move · v select · c comment · esc blocks · {quit}"),
-            Focus::Document => format!("i move · v select · c comment · E send · tab · {quit}"),
+            _ if self.pending.is_some() => format!(
+                "{} looks good · {} comment · {} delete · {} clear ",
+                key(Action::LooksGood),
+                key(Action::Comment),
+                key(Action::Delete),
+                key(Action::Back)
+            ),
+            Focus::Tree => format!(
+                "{up_down} · {} open · {} hidden · {} send · {} hide · {} quit ",
+                key(Action::Confirm),
+                key(Action::ToggleHidden),
+                key(Action::Send),
+                key(Action::ToggleTree),
+                key(Action::Quit)
+            ),
+            Focus::Rail => format!(
+                "{up_down} · {} edit · {} remove · {tab} · {quit}",
+                key(Action::Edit),
+                key(Action::Remove)
+            ),
+            Focus::Document if self.roam => format!(
+                "{} move · {} select · {} comment · {} blocks · {quit}",
+                self.keys.directions_hint(),
+                key(Action::Visual),
+                key(Action::Comment),
+                key(Action::Back)
+            ),
+            Focus::Document => format!(
+                "{} move · {} select · {} comment · {} send · {tab} · {quit}",
+                key(Action::MoveCursor),
+                key(Action::Visual),
+                key(Action::Comment),
+                key(Action::Send)
+            ),
         };
         // The status must stay readable at any width, so the key help yields columns to it
         // (and is clipped) rather than the other way round.

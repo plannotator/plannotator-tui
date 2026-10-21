@@ -736,3 +736,18 @@ fn a_reply_already_sent_is_not_sent_again_from_another_reply() {
     assert!(calls[1].contains("on the middle"), "{}", calls[1]);
     assert!(!calls[1].contains("on the newest"), "the newest reply was sent already: {}", calls[1]);
 }
+
+/// `[keys]` drives the app and its hints: the rebound key moves, the key it replaced does not.
+#[test]
+fn rebound_movement_keys_move_and_the_footer_names_them() {
+    let mut app = app(Box::new(Discard));
+    app.keys =
+        toml::from_str("left = [\"j\"]\ndown = [\"k\"]\nup = [\"l\"]\nright = [\";\"]\n").expect("keys");
+    keys(&mut app, &[KeyCode::Char('j')]);
+    assert_eq!(app.selected, 0, "j is left now, and a column move starts the cursor");
+    keys(&mut app, &[KeyCode::Esc, KeyCode::Char('k')]);
+    assert_eq!(app.selected, 1);
+    app.roam = true;
+    let footer = draw(&mut app).pop().expect("footer");
+    assert!(footer.contains("jkl; move"), "{footer:?}");
+}

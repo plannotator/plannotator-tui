@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 use ratatui::Frame;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr as _;
 
 use super::{App, Mode};
+use crate::keys::{self, Action};
 use crate::theme::palette;
 
 #[cfg(test)]
@@ -31,18 +32,18 @@ const REVIEW_ACTIONS: [ReviewAction; 4] =
 const MENU_HELP: &str = " \u{2191}\u{2193} move \u{b7} enter run \u{b7} esc close ";
 
 impl ReviewAction {
-    /// The key that runs the action, from the menu and directly in the review.
-    fn key(self) -> char {
+    /// The key binding that runs the action, from the menu and directly in the review.
+    fn binding(self) -> Action {
         match self {
-            Self::ResendAll => 'R',
-            Self::Finish => 'F',
-            Self::Undo => 'U',
-            Self::Archive => 'H',
+            Self::ResendAll => Action::ResendAll,
+            Self::Finish => Action::FinishReview,
+            Self::Undo => Action::UndoFinish,
+            Self::Archive => Action::Archive,
         }
     }
 
-    fn from_key(key: char) -> Option<Self> {
-        REVIEW_ACTIONS.into_iter().find(|action| action.key() == key)
+    fn for_binding(binding: Action) -> Option<Self> {
+        REVIEW_ACTIONS.into_iter().find(|action| action.binding() == binding)
     }
 }
 
@@ -111,24 +112,23 @@ impl App {
     }
 
     pub(super) fn menu_key(&mut self, key: KeyEvent) -> Result<()> {
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => self.move_menu_cursor(true),
-            KeyCode::Char('k') | KeyCode::Up => self.move_menu_cursor(false),
-            KeyCode::Enter => {
+        match self.keys.action(&key, keys::MENU) {
+            Some(Action::Down) => self.move_menu_cursor(true),
+            Some(Action::Up) => self.move_menu_cursor(false),
+            Some(Action::Confirm) => {
                 if let Some(&action) = REVIEW_ACTIONS.get(self.menu_cursor)
                     && self.action_applies(action)
                 {
                     return self.run_review_action(action);
                 }
             }
-            KeyCode::Esc | KeyCode::Char('m') => self.mode = Mode::Browse,
-            KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => self.mode = Mode::Browse,
-            KeyCode::Char(ch) => {
-                if let Some(action) = ReviewAction::from_key(ch) {
+            Some(Action::Back | Action::ReviewMenu | Action::Interrupt) => self.mode = Mode::Browse,
+            Some(binding) => {
+                if let Some(action) = ReviewAction::for_binding(binding) {
                     return self.run_review_action(action);
                 }
             }
-            _ => {}
+            None => {}
         }
         Ok(())
     }
@@ -161,7 +161,9 @@ impl App {
         let area = frame.area();
         let rows: Vec<(ReviewAction, String)> = REVIEW_ACTIONS
             .iter()
-            .map(|&action| (action, format!(" {}  {} ", action.key(), self.action_label(action))))
+            .map(|&action| {
+                (action, format!(" {}  {} ", self.keys.hint(action.binding()), self.action_label(action)))
+            })
             .collect();
         let content = rows.iter().map(|(_, text)| text.width()).max().unwrap_or(0).max(MENU_HELP.width());
         let width = (content as u16 + 2).min(area.width);

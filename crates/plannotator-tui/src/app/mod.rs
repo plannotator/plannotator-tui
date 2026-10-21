@@ -28,6 +28,7 @@ use ratatui::layout::Rect;
 
 use crate::delivery::Delivery;
 use crate::doc::Document;
+use crate::keys::{Action, Keymap};
 use crate::layout::DocLayout;
 use crate::store::{Location, Store};
 use crate::tree::Tree;
@@ -39,10 +40,10 @@ use send::SendState;
 pub(super) const GUTTER: u16 = 2;
 
 /// Toolbar items in display order: (glyph, label, key, kind).
-const TOOLBAR: [(&str, &str, char, Kind); 3] = [
-    ("👍", "looks good", 'a', Kind::LooksGood),
-    ("💬", "comment", 'c', Kind::Comment),
-    ("✗", "delete", 'd', Kind::Delete),
+const TOOLBAR: [(&str, &str, Action, Kind); 3] = [
+    ("👍", "looks good", Action::LooksGood, Kind::LooksGood),
+    ("💬", "comment", Action::Comment, Kind::Comment),
+    ("✗", "delete", Action::Delete, Kind::Delete),
 ];
 
 #[derive(Debug, PartialEq, Eq)]
@@ -184,6 +185,7 @@ pub(crate) struct App {
     compose: Compose,
     /// Whether the terminal reports Shift+Enter distinctly (kitty keyboard protocol).
     pub(super) shift_enter: bool,
+    pub(crate) keys: Keymap,
     /// The last primary-button press, for double-click detection.
     last_click: Option<(std::time::Instant, u16, u16)>,
     geometry: Geometry,
@@ -251,6 +253,7 @@ impl App {
             terminal_breaks: None,
             compose: Compose::default(),
             shift_enter: false,
+            keys: Keymap::default(),
             last_click: None,
             geometry: Geometry::default(),
             status: None,

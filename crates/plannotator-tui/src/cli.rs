@@ -334,11 +334,12 @@ fn interactive(path: &PathBuf) -> Result<()> {
 pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
     // Settle the palette before the screen is ours: the background-colour query talks to
     // the terminal directly, and it must not race the alternate screen or the event loop.
+    // A config that fails to parse never kept the plain TUI from starting; it still does
+    // not. `plannotator-tui config` is where the error is reported.
+    let config = Config::load().unwrap_or_default();
     crate::theme::install(crate::theme::resolve(
         |key| std::env::var(key).ok(),
-        // A config that fails to parse never kept the plain TUI from starting; it still does
-        // not. `plannotator-tui config` is where the error is reported.
-        Config::load().map(|config| config.ui.theme).unwrap_or_default(),
+        config.ui.theme,
         crate::theme::detect,
     )?);
     let mut terminal = ratatui::init();
@@ -357,6 +358,7 @@ pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
     let width = doc_width(terminal.size().map_or(120, |s| s.width));
     let result = build(width).and_then(|mut app| {
         app.shift_enter = shift_enter;
+        app.keys = config.keys;
         event_loop(&mut terminal, app)
     });
     if shift_enter {

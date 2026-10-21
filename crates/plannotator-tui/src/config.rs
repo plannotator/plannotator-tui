@@ -11,6 +11,7 @@ use std::str::FromStr;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::keys::Keymap;
 use crate::theme::ThemeSetting;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -18,6 +19,7 @@ use crate::theme::ThemeSetting;
 pub(crate) struct Config {
     pub(crate) herdr: HerdrConfig,
     pub(crate) ui: UiConfig,
+    pub(crate) keys: Keymap,
 }
 
 /// How the app looks. One key so far; the colours themselves are not configurable yet.
