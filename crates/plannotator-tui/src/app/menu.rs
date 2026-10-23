@@ -10,6 +10,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr as _;
 
+use super::draw::picker_help;
 use super::{App, Mode};
 use crate::keys::{self, Action};
 use crate::theme::palette;
@@ -28,8 +29,6 @@ pub(super) enum ReviewAction {
 
 const REVIEW_ACTIONS: [ReviewAction; 4] =
     [ReviewAction::ResendAll, ReviewAction::Finish, ReviewAction::Undo, ReviewAction::Archive];
-
-const MENU_HELP: &str = " \u{2191}\u{2193} move \u{b7} enter run \u{b7} esc close ";
 
 impl ReviewAction {
     /// The key binding that runs the action, from the menu and directly in the review.
@@ -165,7 +164,11 @@ impl App {
                 (action, format!(" {}  {} ", self.keys.hint(action.binding()), self.action_label(action)))
             })
             .collect();
-        let content = rows.iter().map(|(_, text)| text.width()).max().unwrap_or(0).max(MENU_HELP.width());
+        let help = picker_help(
+            "move",
+            [self.keys.labelled(Action::Confirm, "run"), self.keys.labelled(Action::Back, "close")],
+        );
+        let content = rows.iter().map(|(_, text)| text.width()).max().unwrap_or(0).max(help.width());
         let width = (content as u16 + 2).min(area.width);
         let height = (REVIEW_ACTIONS.len() as u16 + 2).min(area.height);
         // Under the Review button, flush with its right edge, like a dropdown.
@@ -179,7 +182,7 @@ impl App {
             .border_type(BorderType::Rounded)
             .border_style(Style::new().fg(Color::Cyan))
             .title(Span::styled(" review ", Style::new().dim()))
-            .title_bottom(Span::styled(MENU_HELP, Style::new().dim()));
+            .title_bottom(Span::styled(help, Style::new().dim()));
         let inner = boxed.inner(rect);
         frame.render_widget(boxed, rect);
         let mut menu_rows = Vec::new();

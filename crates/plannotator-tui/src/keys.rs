@@ -271,9 +271,16 @@ impl<'de> Deserialize<'de> for Keymap {
 }
 
 impl Keymap {
-    /// The first action in `context` bound to `key`.
+    /// The first action in `context` bound to `key`. A plain binding also matches the key
+    /// with Ctrl held, so an exact Ctrl binding is tried first: `page-up = ["ctrl+k"]` must
+    /// not lose `ctrl+k` to `up`'s plain `k` just because `up` comes first.
     pub(crate) fn action(&self, key: &KeyEvent, context: &[Action]) -> Option<Action> {
-        context.iter().copied().find(|&action| self.is(action, key))
+        let exact_ctrl = |action| self.keys(action).iter().any(|k| k.ctrl && k.matches(key));
+        context
+            .iter()
+            .copied()
+            .find(|&action| exact_ctrl(action))
+            .or_else(|| context.iter().copied().find(|&action| self.is(action, key)))
     }
 
     pub(crate) fn is(&self, action: Action, key: &KeyEvent) -> bool {
@@ -283,6 +290,13 @@ impl Keymap {
     /// The action's first key as the hints spell it; empty when it is unbound.
     pub(crate) fn hint(&self, action: Action) -> String {
         self.keys(action).first().map(|key| key.hint()).unwrap_or_default()
+    }
+
+    /// `key label` for a hint line, or nothing when the action is unbound, so an unbound
+    /// action leaves no bare label behind.
+    pub(crate) fn labelled(&self, action: Action, label: &str) -> Option<String> {
+        let key = self.hint(action);
+        (!key.is_empty()).then(|| format!("{key} {label}"))
     }
 
     /// The four cursor directions run together the way the hints show them: `hjkl`.
@@ -305,8 +319,8 @@ impl Keymap {
                             return Err(format!(
                                 "key {:?} is bound to both {} and {}",
                                 key.to_string(),
-                                name(other),
-                                name(action)
+                                other.as_str(),
+                                action.as_str()
                             ));
                         }
                         Some(_) => {}
@@ -319,9 +333,50 @@ impl Keymap {
     }
 }
 
-/// The action's name as `[keys]` writes it.
-fn name(action: Action) -> String {
-    toml::Value::try_from(action).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
+impl Action {
+    /// The action's name as `[keys]` writes it.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Up => "up",
+            Self::Down => "down",
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::WordForward => "word-forward",
+            Self::WordBack => "word-back",
+            Self::LineStart => "line-start",
+            Self::LineEnd => "line-end",
+            Self::PageDown => "page-down",
+            Self::PageUp => "page-up",
+            Self::Top => "top",
+            Self::Bottom => "bottom",
+            Self::Confirm => "confirm",
+            Self::Back => "back",
+            Self::Quit => "quit",
+            Self::Interrupt => "interrupt",
+            Self::CycleFocus => "cycle-focus",
+            Self::Send => "send",
+            Self::SendAndClose => "send-and-close",
+            Self::ToggleTree => "toggle-tree",
+            Self::Reload => "reload",
+            Self::PickMessage => "pick-message",
+            Self::ReviewMenu => "review-menu",
+            Self::ResendAll => "resend-all",
+            Self::FinishReview => "finish-review",
+            Self::UndoFinish => "undo-finish",
+            Self::Archive => "archive",
+            Self::ToggleHidden => "toggle-hidden",
+            Self::Edit => "edit",
+            Self::Remove => "remove",
+            Self::Visual => "visual",
+            Self::MoveCursor => "move-cursor",
+            Self::Comment => "comment",
+            Self::ClearBlock => "clear-block",
+            Self::LooksGood => "looks-good",
+            Self::Delete => "delete",
+            Self::Yes => "yes",
+            Self::No => "no",
+        }
+    }
 }
 
 #[cfg(test)]

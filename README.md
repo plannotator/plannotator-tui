@@ -181,7 +181,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `visual` `move-cursor` | `v` `i` | select with the cursor; move it first |
 | `comment` `clear-block` | `c` `x` | on the block; clear its annotations |
 | `looks-good` `delete` | `a` `d` | toolbar, with `comment` |
-| `yes` `no` | `y` `n` | the send-before-quitting question |
+| `yes` `no` | `y` `n`, `Y` `N` | the send-before-quitting question |
 
 Actions forwarded by Herdr Mirror default to a split beside the invoking remote
 pane. Mirror does not preserve overlay presentation, and Herdr 0.8.2 opens an

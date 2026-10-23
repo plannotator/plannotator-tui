@@ -235,8 +235,13 @@ impl App {
     }
 
     fn draw_toolbar(&mut self, frame: &mut Frame) {
-        let labels: Vec<String> =
-            TOOLBAR.iter().map(|(g, l, a, _)| format!(" {g} {l} ({}) ", self.keys.hint(*a))).collect();
+        let labels: Vec<String> = TOOLBAR
+            .iter()
+            .map(|(g, l, a, _)| match self.keys.hint(*a) {
+                key if key.is_empty() => format!(" {g} {l} "),
+                key => format!(" {g} {l} ({key}) "),
+            })
+            .collect();
         let width: u16 = labels.iter().map(|l| l.width() as u16).sum::<u16>() + 1;
         let Some(rect) = self.float_origin(1, width) else { return };
         frame.render_widget(Clear, rect);
@@ -375,21 +380,22 @@ impl App {
         if self.mode == Mode::ConfirmQuit {
             // The question owns the footer: the browse help would name keys that are not
             // live while it is up.
-            let question = format!(
-                " send feedback to {} before quitting? {} send · {} quit · {} cancel",
-                self.delivery.describe(),
-                self.keys.hint(Action::Yes),
-                self.keys.hint(Action::No),
-                self.keys.hint(Action::Back)
-            );
+            let answers = [(Action::Yes, "send"), (Action::No, "quit"), (Action::Back, "cancel")]
+                .into_iter()
+                .filter_map(|(action, label)| self.keys.labelled(action, label))
+                .collect::<Vec<_>>()
+                .join(" · ");
+            let question =
+                format!(" send feedback to {} before quitting? {answers}", self.delivery.describe());
             frame.render_widget(Paragraph::new(Line::from(Span::raw(question).bold())), area);
             return;
         }
         if self.mode == Mode::Browse && !self.undo_archive.is_empty() {
-            let label = " U Undo finish ";
+            let label = self.keys.labelled(Action::UndoFinish, "Undo finish");
+            let label = format!(" {} ", label.as_deref().unwrap_or("Undo finish"));
             let width = (label.width() as u16).min(area.width);
             let rect = Rect { x: area.right() - width, y: area.y, width, height: area.height };
-            frame.render_widget(Paragraph::new(label).style(Style::new().fg(Color::Cyan)), rect);
+            frame.render_widget(Paragraph::new(label.as_str()).style(Style::new().fg(Color::Cyan)), rect);
             self.geometry.undo_button = Some(rect);
             area.width = area.width.saturating_sub(width);
         }
@@ -415,50 +421,64 @@ impl App {
         if frame.area().width < RAIL_MIN_TOTAL_WIDTH {
             parts.push("rail hidden: widen to ≥80 cols".into());
         }
-        let key = |action| self.keys.hint(action);
+        // Each hint names its action's first key; an unbound action drops out of the line.
+        let key = |action, label| self.keys.labelled(action, label);
+        let bare = |hint: String| (!hint.is_empty()).then_some(hint);
+        let up_down = bare(
+            [Action::Down, Action::Up]
+                .map(|action| self.keys.hint(action))
+                .iter()
+                .filter(|k| !k.is_empty())
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("/"),
+        );
+        let tab = bare(self.keys.hint(Action::CycleFocus));
         // `send-and-close` is bound only in a reply review, so only a reply review names it.
-        let quit = if self.is_file_review() {
-            format!("{} quit ", key(Action::Quit))
-        } else {
-            format!("{} send+quit · {} quit ", key(Action::SendAndClose), key(Action::Quit))
+        let send_and_close =
+            if self.is_file_review() { None } else { key(Action::SendAndClose, "send+quit") };
+        let quit = [send_and_close, key(Action::Quit, "quit")];
+        let help: Vec<Option<String>> = match self.focus {
+            _ if self.pending.is_some() => vec![
+                key(Action::LooksGood, "looks good"),
+                key(Action::Comment, "comment"),
+                key(Action::Delete, "delete"),
+                key(Action::Back, "clear"),
+            ],
+            Focus::Tree => vec![
+                up_down,
+                key(Action::Confirm, "open"),
+                key(Action::ToggleHidden, "hidden"),
+                key(Action::Send, "send"),
+                key(Action::ToggleTree, "hide"),
+                key(Action::Quit, "quit"),
+            ],
+            Focus::Rail => [up_down, key(Action::Edit, "edit"), key(Action::Remove, "remove"), tab]
+                .into_iter()
+                .chain(quit)
+                .collect(),
+            Focus::Document if self.roam => [
+                bare(self.keys.directions_hint()).map(|keys| format!("{keys} move")),
+                key(Action::Visual, "select"),
+                key(Action::Comment, "comment"),
+                key(Action::Back, "blocks"),
+            ]
+            .into_iter()
+            .chain(quit)
+            .collect(),
+            Focus::Document => [
+                key(Action::MoveCursor, "move"),
+                key(Action::Visual, "select"),
+                key(Action::Comment, "comment"),
+                key(Action::Send, "send"),
+                tab,
+            ]
+            .into_iter()
+            .chain(quit)
+            .collect(),
         };
-        let (up_down, tab) = (format!("{}/{}", key(Action::Down), key(Action::Up)), key(Action::CycleFocus));
-        let help = match self.focus {
-            _ if self.pending.is_some() => format!(
-                "{} looks good · {} comment · {} delete · {} clear ",
-                key(Action::LooksGood),
-                key(Action::Comment),
-                key(Action::Delete),
-                key(Action::Back)
-            ),
-            Focus::Tree => format!(
-                "{up_down} · {} open · {} hidden · {} send · {} hide · {} quit ",
-                key(Action::Confirm),
-                key(Action::ToggleHidden),
-                key(Action::Send),
-                key(Action::ToggleTree),
-                key(Action::Quit)
-            ),
-            Focus::Rail => format!(
-                "{up_down} · {} edit · {} remove · {tab} · {quit}",
-                key(Action::Edit),
-                key(Action::Remove)
-            ),
-            Focus::Document if self.roam => format!(
-                "{} move · {} select · {} comment · {} blocks · {quit}",
-                self.keys.directions_hint(),
-                key(Action::Visual),
-                key(Action::Comment),
-                key(Action::Back)
-            ),
-            Focus::Document => format!(
-                "{} move · {} select · {} comment · {} send · {tab} · {quit}",
-                key(Action::MoveCursor),
-                key(Action::Visual),
-                key(Action::Comment),
-                key(Action::Send)
-            ),
-        };
+        let help: Vec<String> = help.into_iter().flatten().collect();
+        let help = if help.is_empty() { String::new() } else { format!("{} ", help.join(" · ")) };
         // The status must stay readable at any width, so the key help yields columns to it
         // (and is clipped) rather than the other way round.
         let status_width = self.status.as_ref().map_or(0, |s| s.width() + 1) as u16;
@@ -477,4 +497,11 @@ impl App {
 fn short_id(id: &str) -> String {
     let tail: Vec<char> = id.chars().rev().take(5).collect();
     tail.into_iter().rev().collect()
+}
+
+/// A picker's bottom help: the arrows that move its cursor, then the bound keys.
+pub(super) fn picker_help(moves: &str, keys: impl IntoIterator<Item = Option<String>>) -> String {
+    let parts: Vec<String> =
+        std::iter::once(format!("\u{2191}\u{2193} {moves}")).chain(keys.into_iter().flatten()).collect();
+    format!(" {} ", parts.join(" \u{b7} "))
 }

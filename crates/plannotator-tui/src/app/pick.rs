@@ -15,6 +15,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr as _;
 
+use super::draw::picker_help;
 use super::{App, Mode, Open};
 use crate::keys::{self, Action};
 use crate::last::message_source;
@@ -147,7 +148,14 @@ impl App {
             .border_style(Style::new().fg(Color::Cyan))
             .title(Span::styled(" which message? ", Style::new().dim()))
             .title_bottom(Span::styled(
-                " ↑↓ preview · enter open · esc cancel · q quit ",
+                picker_help(
+                    "preview",
+                    [
+                        self.keys.labelled(Action::Confirm, "open"),
+                        self.keys.labelled(Action::Back, "cancel"),
+                        self.keys.labelled(Action::Quit, "quit"),
+                    ],
+                ),
                 Style::new().dim(),
             ));
         let inner = boxed.inner(rect);

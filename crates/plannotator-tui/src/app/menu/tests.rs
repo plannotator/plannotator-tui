@@ -246,3 +246,14 @@ fn clicking_the_review_button_opens_the_menu_and_clicking_a_row_runs_it() {
     assert_eq!(app.mode, Mode::Browse, "a click outside the menu closes it");
     std::fs::remove_dir_all(root).expect("cleanup");
 }
+
+#[test]
+fn the_header_buttons_name_the_rebound_keys() {
+    let (root, mut app, _) = file_app("menu-rebound");
+    app.keys = toml::from_str("review-menu = [\"M\"]\nsend = []\n").expect("keys");
+    app.add_quote_annotation("one", Kind::Comment, "A".into()).expect("A");
+    let screen = draw(&mut app, 100, 24);
+    let header = screen.lines().next().expect("header");
+    assert!(header.contains("Review \u{25be} (M)") && !header.contains("(E)"), "{header}");
+    std::fs::remove_dir_all(root).expect("cleanup");
+}

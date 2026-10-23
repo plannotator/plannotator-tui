@@ -7,6 +7,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 
+use super::draw::picker_help;
 use super::{App, Mode, label};
 use crate::keys::{self, Action};
 
@@ -64,12 +65,25 @@ impl App {
             .border_type(BorderType::Rounded)
             .border_style(Style::new().fg(Color::Cyan))
             .title(format!(" Archived annotations ({}) ", self.archive_items.len()))
-            .title_bottom(" ↑↓ select · enter/click restore · esc close ");
+            .title_bottom(picker_help(
+                "select",
+                [
+                    // A click restores too, so it is named even with `confirm` unbound.
+                    Some(match self.keys.hint(Action::Confirm) {
+                        key if key.is_empty() => "click restore".to_owned(),
+                        key => format!("{key}/click restore"),
+                    }),
+                    self.keys.labelled(Action::Back, "close"),
+                ],
+            ));
         let inner = block.inner(rect);
         frame.render_widget(block, rect);
         if self.archive_items.is_empty() {
             frame.render_widget(
-                Paragraph::new("No archived annotations. F finishes sent annotations."),
+                Paragraph::new(match self.keys.hint(Action::FinishReview) {
+                    key if key.is_empty() => "No archived annotations.".to_owned(),
+                    key => format!("No archived annotations. {key} finishes sent annotations."),
+                }),
                 inner,
             );
             return;

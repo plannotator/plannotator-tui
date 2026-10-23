@@ -8,6 +8,7 @@ use plannotator_tui_schema::Provenance;
 use super::feedback::{Feedback, FeedbackPart, ReviewCounts, SendScope};
 use super::{App, Mode};
 use crate::delivery::{Clipboard, Delivery as _, DeliveryError};
+use crate::keys::Action;
 use crate::store::{Location, Store};
 
 #[cfg(test)]
@@ -197,7 +198,11 @@ impl App {
                 String::new()
             };
             let to = if self.delivery.is_agent() { format!(" ▸ {target}") } else { String::new() };
-            return format!("{verb} {count} new{across}{to} (E)");
+            let key = match self.keys.hint(Action::Send) {
+                key if key.is_empty() => String::new(),
+                key => format!(" ({key})"),
+            };
+            return format!("{verb} {count} new{across}{to}{key}");
         }
         if self.delivery.is_agent() {
             match &self.send_state {

@@ -75,3 +75,34 @@ fn an_empty_list_unbinds_the_action() {
     assert!(!keymap.is(Quit, &press(KeyCode::Char('q'), KeyModifiers::NONE)));
     assert_eq!(keymap.hint(Quit), "");
 }
+
+#[test]
+fn an_exact_ctrl_binding_wins_over_a_plain_one_earlier_in_the_context() {
+    // `up` comes before `page-up` in the document, and its plain `k` also matches ctrl+k.
+    let keymap = parse("page-up = [\"ctrl+k\"]\n").expect("parses");
+    assert_eq!(keymap.action(&press(KeyCode::Char('k'), KeyModifiers::CONTROL), DOCUMENT), Some(PageUp));
+    assert_eq!(keymap.action(&press(KeyCode::Char('k'), KeyModifiers::NONE), DOCUMENT), Some(Up));
+}
+
+#[test]
+fn a_plain_binding_still_answers_ctrl_when_no_ctrl_binding_claims_it() {
+    // The defaults keep their behaviour: no action binds ctrl+j, so it still moves down.
+    let keymap = Keymap::default();
+    assert_eq!(keymap.action(&press(KeyCode::Char('j'), KeyModifiers::CONTROL), DOCUMENT), Some(Down));
+    assert_eq!(keymap.action(&press(KeyCode::Char('d'), KeyModifiers::CONTROL), DOCUMENT), Some(PageDown));
+}
+
+#[test]
+fn every_action_name_is_the_one_the_config_file_writes() {
+    for (action, _) in DEFAULTS {
+        let serialized = toml::Value::try_from(action).expect("serializes");
+        assert_eq!(serialized.as_str(), Some(action.as_str()));
+    }
+}
+
+#[test]
+fn an_unbound_action_drops_out_of_the_hints() {
+    let keymap = parse("quit = []\n").expect("parses");
+    assert_eq!(keymap.labelled(Quit, "quit"), None);
+    assert_eq!(keymap.labelled(Send, "send").as_deref(), Some("E send"));
+}
