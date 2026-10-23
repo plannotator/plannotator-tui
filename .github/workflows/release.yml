@@ -48,11 +48,7 @@ jobs:
       - run: cargo build --release -p plannotator-tui --target ${{ matrix.target }}
       - name: smoke-test musl on older glibc and Alpine
         if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: |
-          for image in debian:bullseye-slim alpine:3.24; do
-            docker run --rm -v "$PWD:/work:ro" -w /work "$image" \
-              sh scripts/smoke-musl.sh "target/${{ matrix.target }}/release/plannotator-tui"
-          done
+        run: sh scripts/smoke-musl-containers.sh "target/${{ matrix.target }}/release/plannotator-tui"
       - name: name the asset by target
         shell: bash
         run: |
