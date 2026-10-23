@@ -150,7 +150,7 @@ colours either way.
 
 `[colors]` replaces individual roles of whichever palette is in force; a role left out keeps
 its light or dark value. A colour is a name (`yellow`, `light-cyan`), a 256-colour index
-(`238`) or `#rrggbb`. An unknown role or colour is an error that names it, and
+(`238`, quoted or not) or `#rrggbb`. An unknown role or colour is an error that names it, and
 `plannotator-tui config` prints the roles you set. Every role, with the dark palette's values
 (apart from `selection`, which is reverse video by default):
 

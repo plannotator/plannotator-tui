@@ -266,6 +266,14 @@ mod tests {
     }
 
     #[test]
+    fn a_color_may_be_a_bare_index() {
+        let config = Config::parse("[colors]\nheading = 238\n").expect("parses");
+        assert_eq!(config.colors.heading.map(|c| c.0), Some(ratatui::style::Color::Indexed(238)));
+        let err = Config::parse("[colors]\nheading = 256\n").expect_err("out of range");
+        assert!(err.to_string().contains("256"), "{err}");
+    }
+
+    #[test]
     fn an_unknown_color_role_error_names_the_role() {
         let err = Config::parse("[colors]\nbackground = \"black\"\n").expect_err("rejected");
         assert!(err.to_string().contains("background"), "{err}");

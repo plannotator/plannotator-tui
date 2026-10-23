@@ -3,7 +3,7 @@
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 
@@ -100,7 +100,9 @@ impl App {
             let quote = item.annotation.anchor.original_text.split_whitespace().collect::<Vec<_>>().join(" ");
             let body = item.annotation.body.split_whitespace().collect::<Vec<_>>().join(" ");
             let style = if index == self.archive_cursor {
-                Style::new().fg(Color::Black).bg(palette().accent)
+                // Reversed accent: the row text takes the terminal background, which an accent
+                // picked to read as text on that background contrasts with.
+                Style::new().fg(palette().accent).add_modifier(Modifier::REVERSED)
             } else {
                 Style::new()
             };

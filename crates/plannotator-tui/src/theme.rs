@@ -173,16 +173,71 @@ impl FromStr for ColorValue {
     }
 }
 
-impl Serialize for ColorValue {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
-        serializer.collect_str(&self.0)
+/// Prints the colour the way `[colors]` writes it, so `plannotator-tui config` output can be
+/// pasted back: `light-blue`, `238`, `#1e1e2e`.
+impl fmt::Display for ColorValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self.0 {
+            Color::Indexed(index) => return write!(f, "{index}"),
+            Color::Rgb(r, g, b) => return write!(f, "#{r:02x}{g:02x}{b:02x}"),
+            Color::Reset => "reset",
+            Color::Black => "black",
+            Color::Red => "red",
+            Color::Green => "green",
+            Color::Yellow => "yellow",
+            Color::Blue => "blue",
+            Color::Magenta => "magenta",
+            Color::Cyan => "cyan",
+            Color::Gray => "gray",
+            Color::DarkGray => "dark-gray",
+            Color::LightRed => "light-red",
+            Color::LightGreen => "light-green",
+            Color::LightYellow => "light-yellow",
+            Color::LightBlue => "light-blue",
+            Color::LightMagenta => "light-magenta",
+            Color::LightCyan => "light-cyan",
+            Color::White => "white",
+        };
+        f.write_str(name)
     }
 }
 
+impl Serialize for ColorValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+/// A string as above, or a bare 256-colour index: `heading = 238`.
 impl<'de> Deserialize<'de> for ColorValue {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
-        let text = String::deserialize(deserializer)?;
-        text.parse().map_err(serde::de::Error::custom)
+        struct Visitor;
+
+        impl serde::de::Visitor<'_> for Visitor {
+            type Value = ColorValue;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a color name, an index 0-255, or #rrggbb")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, text: &str) -> std::result::Result<ColorValue, E> {
+                text.parse().map_err(E::custom)
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, index: i64) -> std::result::Result<ColorValue, E> {
+                u8::try_from(index)
+                    .map(|index| ColorValue(Color::Indexed(index)))
+                    .map_err(|_| E::custom(format!("unknown color {index}; a color index is 0-255")))
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, index: u64) -> std::result::Result<ColorValue, E> {
+                u8::try_from(index)
+                    .map(|index| ColorValue(Color::Indexed(index)))
+                    .map_err(|_| E::custom(format!("unknown color {index}; a color index is 0-255")))
+            }
+        }
+
+        deserializer.deserialize_any(Visitor)
     }
 }
 
@@ -454,7 +509,36 @@ mod tests {
         ] {
             let parsed: ColorValue = text.parse().expect("parses");
             assert_eq!(parsed.0, color);
-            assert_eq!(parsed.0.to_string().parse::<ColorValue>().expect("reparses"), parsed);
+            assert_eq!(parsed.to_string(), text);
+        }
+    }
+
+    #[test]
+    fn every_color_prints_in_a_spelling_that_parses_back() {
+        for color in [
+            Color::Reset,
+            Color::Black,
+            Color::Red,
+            Color::Green,
+            Color::Yellow,
+            Color::Blue,
+            Color::Magenta,
+            Color::Cyan,
+            Color::Gray,
+            Color::DarkGray,
+            Color::LightRed,
+            Color::LightGreen,
+            Color::LightYellow,
+            Color::LightBlue,
+            Color::LightMagenta,
+            Color::LightCyan,
+            Color::White,
+            Color::Indexed(0),
+            Color::Indexed(255),
+            Color::Rgb(0, 0, 255),
+        ] {
+            let text = ColorValue(color).to_string();
+            assert_eq!(text.parse::<ColorValue>().expect("parses").0, color, "{text}");
         }
     }
 
