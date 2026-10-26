@@ -194,4 +194,33 @@ mod tests {
         let bold_range = bold..bold + "**login page**".len();
         assert_eq!(layout.rendered_in_range(&doc.source, &bold_range), "login page");
     }
+
+    #[test]
+    fn every_cell_of_a_long_table_maps_to_its_source() {
+        let doc = Document::parse(
+            "| Item | Status | Next step |\n|---|---|---|\n\
+| A. Four changes from 3/7 (release checklist handoff, the 3/4 planning call, the 3/6 search demo, \
+the 3/4-3/7 progress review and rollout advice) | Scope partly confirmed; never added to the \
+draft | 1.0d design + 1.0d build + 1.0d review + 2.5d rollout = **5.5d** |\n\
+| B. 3/14 cache troubleshooting and the `api.example.com` proxy | Owner and priority not set | Your call |\n\
+| C. 3/19-20 export access in the admin panel (read and write) | Agreed at 1.0d, done once it's \
+tested; it's live, but QA hasn't finished acceptance testing | Close it now, or wait for the next sprint |\n\
+| D. 3/21 lookup and report tools in the CLI; 3/23 plugin consolidation | Marked \"not confirmed\" | Your call |\n"
+                .to_owned(),
+        );
+        let layout = DocLayout::build(&doc, 100);
+        let table = layout.blocks.iter().find(|b| b.kind == BlockKind::Table).expect("a table");
+        let mut cells = 0;
+        for row in &table.rows {
+            let text: String = row.line.spans.iter().map(|s| s.content.as_ref()).collect();
+            for (ch, offset) in text.chars().zip(&row.cells) {
+                if ch.is_alphanumeric() {
+                    let source = offset.and_then(|o| doc.source.get(o..));
+                    assert!(source.is_some_and(|s| s.starts_with(ch)), "{ch:?} is unmapped in {text:?}");
+                    cells += 1;
+                }
+            }
+        }
+        assert!(cells > 300, "only {cells} cells checked");
+    }
 }
