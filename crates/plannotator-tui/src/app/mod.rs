@@ -5,6 +5,7 @@ mod archive_view;
 mod compose;
 mod disk;
 mod draw;
+mod editor;
 mod feedback;
 mod file_search;
 mod header;
@@ -203,6 +204,11 @@ pub(crate) struct App {
     /// Whether the terminal reports Shift+Enter distinctly (kitty keyboard protocol).
     pub(super) shift_enter: bool,
     pub(crate) keys: Keymap,
+    /// `$VISUAL` or `$EDITOR`, read once at startup; `None` leaves `open-in-editor` asking
+    /// for one.
+    pub(crate) editor: Option<String>,
+    /// Set by `open-in-editor` for the event loop, which owns the terminal, to act on.
+    editor_request: Option<crate::editor::EditorRequest>,
     /// `[ui]` from the config: the centered viewport and the document width.
     pub(crate) ui: UiConfig,
     /// The last primary-button press, for double-click detection.
@@ -276,6 +282,8 @@ impl App {
             compose: Compose::default(),
             shift_enter: false,
             keys: Keymap::default(),
+            editor: None,
+            editor_request: None,
             ui: UiConfig::default(),
             last_click: None,
             geometry: Geometry::default(),

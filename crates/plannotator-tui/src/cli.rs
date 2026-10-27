@@ -343,37 +343,79 @@ pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
     );
     let mut terminal = ratatui::init();
     execute!(stdout(), EnableMouseCapture)?;
-    let _ = execute!(stdout(), EnableBracketedPaste);
     // Shift+Enter is only distinguishable from Enter where the kitty keyboard protocol
     // holds end to end (terminal, and any multiplexer in between). Ask for it; the flag
     // gates the compose box's hint so it never advertises a key that cannot arrive.
     let shift_enter = ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
+    claim_input(shift_enter);
+    let width = doc_width(terminal.size().map_or(120, |s| s.width));
+    let result = build(width).and_then(|mut app| {
+        app.shift_enter = shift_enter;
+        app.keys = config.keys;
+        app.ui = config.ui;
+        app.editor = crate::editor::from_env(|key| std::env::var(key).ok());
+        event_loop(&mut terminal, app)
+    });
+    release_input(shift_enter);
+    ratatui::restore();
+    result
+}
+
+/// Bracketed paste and, where the terminal has it, the kitty keyboard protocol. Mouse
+/// capture is the caller's: the first claim turns it on before the keyboard query.
+fn claim_input(shift_enter: bool) {
+    let _ = execute!(stdout(), EnableBracketedPaste);
     if shift_enter {
         let _ = execute!(
             stdout(),
             PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
         );
     }
-    let width = doc_width(terminal.size().map_or(120, |s| s.width));
-    let result = build(width).and_then(|mut app| {
-        app.shift_enter = shift_enter;
-        app.keys = config.keys;
-        app.ui = config.ui;
-        event_loop(&mut terminal, app)
-    });
+}
+
+/// Undo `claim_input` and mouse capture, in reverse order.
+fn release_input(shift_enter: bool) {
     if shift_enter {
         let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
     }
     let _ = execute!(stdout(), DisableBracketedPaste);
     let _ = execute!(stdout(), DisableMouseCapture);
+}
+
+/// Give the terminal to the editor until it exits, then take the screen back. The outer
+/// error is the terminal failing to come back, which ends the app; the inner one is the
+/// editor failing to start, which the app reports and survives.
+fn run_editor(
+    terminal: &mut ratatui::DefaultTerminal,
+    shift_enter: bool,
+    request: &crate::editor::EditorRequest,
+) -> Result<std::io::Result<std::process::ExitStatus>> {
+    use ratatui::crossterm::{cursor, terminal as term};
+    release_input(shift_enter);
     ratatui::restore();
-    result
+    let _ = execute!(stdout(), cursor::Show);
+    let outcome = match crate::editor::command(request) {
+        Some(mut command) => command.status(),
+        None => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "the editor command is empty")),
+    };
+    term::enable_raw_mode().context("taking the terminal back from the editor")?;
+    execute!(stdout(), term::EnterAlternateScreen, EnableMouseCapture)
+        .context("taking the terminal back from the editor")?;
+    claim_input(shift_enter);
+    // The editor drew over the screen ratatui remembers; draw the next frame in full.
+    terminal.clear()?;
+    Ok(outcome)
 }
 
 fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<()> {
     app.clipboard = true;
     let mut dirty = true;
     while !app.quit {
+        if let Some(request) = app.take_editor_request() {
+            let outcome = run_editor(terminal, app.shift_enter, &request)?;
+            app.editor_returned(&request, outcome);
+            dirty = true;
+        }
         dirty |= app.poll_file_search();
         dirty |= app.poll_disk();
         if dirty {
@@ -387,7 +429,8 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<(
             app.handle_event(&event::read()?)?;
             dirty = true;
             // Coalesce bursts (wheel, drag) into one redraw.
-            while event::poll(Duration::ZERO)? {
+            // Keys typed after `open-in-editor` belong to the editor, not to this loop.
+            while !app.wants_editor() && event::poll(Duration::ZERO)? {
                 app.handle_event(&event::read()?)?;
             }
         }

@@ -88,7 +88,7 @@ dimmed. The keys also work without opening the menu.
 
 | Where | Keys |
 |---|---|
-| anywhere | `Tab` cycle tree · document · notes; `E` send; `t` tree; `r` reload; `q` quit |
+| anywhere | `Tab` cycle tree · document · notes; `E` send; `t` tree; `r` reload; `o` open the file in `$EDITOR`; `q` quit |
 | reply review | `S` send and close |
 | document | `j`/`k` block; `c` comment on the block; `x` clear its annotations; `X` clear every annotation on the document, after a `y`; `v` select with `hjkl` `w` `b` `0` `$`, `Enter` to finish; `i` move the cursor with those keys first, then `v` to select from there |
 | toolbar | `a` looks good · `c` comment · `d` delete · `Esc` |
@@ -98,6 +98,13 @@ dimmed. The keys also work without opening the menu.
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
+
+`o` hands the terminal to `$VISUAL` (or `$EDITOR`, which may carry flags such as `code -w`)
+on the open file, at the current line for vim, nvim, nano, helix, emacs, micro and kak. When
+the editor exits the viewer comes back and, if the file changed, reloads it as `r` does so
+notes re-anchor. A GUI editor without its wait flag returns at once; save later and the
+footer says the file changed. Reply and terminal reviews have no file, so `o` does nothing
+there.
 
 Hidden folders are out of the tree until `.` asks for them, and `.git`, `.hg`, `.svn`,
 `.jj`, `.cache`, `.direnv`, `.venv`, `venv`, `__pycache__`, `node_modules`, `vendor`,
@@ -224,6 +231,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `cycle-focus` | `Tab` | tree · document · notes |
 | `send` `send-and-close` | `E` `S` | send; send and close a reply review |
 | `toggle-tree` `reload` `pick-message` | `t` `r` `p` | show/hide the tree; reload; choose another reply |
+| `open-in-editor` | `o` | edit the open file in `$VISUAL` or `$EDITOR`, then reload it |
 | `quick-open` | `ctrl+p` | find a file by name in a folder review |
 | `review-menu` | `m` | the Review menu |
 | `resend-all` `finish-review` `undo-finish` `archive` | `R` `F` `U` `H` | file and folder review actions |

@@ -7,6 +7,7 @@ mod cli;
 mod config;
 mod delivery;
 mod doc;
+mod editor;
 mod export;
 mod file_search;
 mod herdr;

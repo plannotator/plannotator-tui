@@ -109,6 +109,10 @@ impl App {
                 return Ok(());
             }
             Some(Action::Reload) => return self.reload(),
+            Some(Action::OpenInEditor) => {
+                self.request_editor();
+                return Ok(());
+            }
             Some(Action::PickMessage) => {
                 self.reopen_picker();
                 return Ok(());
