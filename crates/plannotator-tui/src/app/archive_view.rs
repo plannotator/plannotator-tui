@@ -51,7 +51,7 @@ impl App {
     }
 
     pub(super) fn draw_archive(&mut self, frame: &mut Frame) {
-        let area = frame.area();
+        let area = self.viewport(frame.area());
         let width = area.width.saturating_sub(4).clamp(1, 100).min(area.width);
         let height = area.height.saturating_sub(4).clamp(3, 22).min(area.height);
         let rect = Rect {

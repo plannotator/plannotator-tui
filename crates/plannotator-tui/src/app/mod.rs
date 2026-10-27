@@ -18,6 +18,7 @@ mod selection;
 mod send;
 #[cfg(test)]
 mod tests;
+mod viewport;
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -27,6 +28,7 @@ use anyhow::{Context, Result};
 use plannotator_tui_schema::{DocumentSource, Kind, Provenance};
 use ratatui::layout::Rect;
 
+use crate::config::UiConfig;
 use crate::delivery::Delivery;
 use crate::doc::Document;
 use crate::keys::{Action, Keymap};
@@ -193,6 +195,8 @@ pub(crate) struct App {
     /// Whether the terminal reports Shift+Enter distinctly (kitty keyboard protocol).
     pub(super) shift_enter: bool,
     pub(crate) keys: Keymap,
+    /// `[ui]` from the config: the centered viewport and the document width.
+    pub(crate) ui: UiConfig,
     /// The last primary-button press, for double-click detection.
     last_click: Option<(std::time::Instant, u16, u16)>,
     geometry: Geometry,
@@ -262,6 +266,7 @@ impl App {
             compose: Compose::default(),
             shift_enter: false,
             keys: Keymap::default(),
+            ui: UiConfig::default(),
             last_click: None,
             geometry: Geometry::default(),
             status: None,

@@ -299,6 +299,88 @@ fn draw_sized(app: &mut App, width: u16, height: u16) -> Vec<String> {
         .collect()
 }
 
+fn click(app: &mut App, kind: MouseEventKind, column: u16, row: u16) {
+    app.handle_event(&Event::Mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE }))
+        .expect("mouse");
+}
+
+fn blank(rows: &[String], columns: std::ops::Range<usize>) -> bool {
+    rows.iter().all(|row| row.chars().skip(columns.start).take(columns.len()).all(|c| c == ' '))
+}
+
+#[test]
+fn a_centered_app_leaves_both_margins_blank_and_its_buttons_still_click() {
+    let mut app = app(Box::new(Discard));
+    app.ui.horizontal_margin = 4;
+    app.ui.max_width = 120;
+    app.add_block_annotation(0, Kind::Comment, "centered comment".to_owned()).expect("annotation");
+    let rows = draw_sized(&mut app, 180, 20);
+    assert!(blank(&rows, 0..30) && blank(&rows, 150..180), "{rows:#?}");
+    assert_eq!(app.geometry.doc.x, 32);
+    let send = app.geometry.send_button.expect("send button");
+    assert_eq!(send.right(), 150);
+    click(&mut app, MouseEventKind::Down(MouseButton::Left), send.x + send.width / 2, send.y);
+    assert_eq!(app.send_state, SendState::Sent);
+}
+
+#[test]
+fn margins_yield_before_the_app_drops_below_80_columns_and_default_to_none() {
+    let mut app = app(Box::new(Discard));
+    draw_sized(&mut app, 180, 20);
+    assert_eq!(app.geometry.doc.x, 2, "full width by default");
+    app.ui.horizontal_margin = 4;
+    app.ui.max_width = 120;
+    for (width, left, viewport_width) in [(180, 30, 120), (100, 4, 92), (84, 2, 80), (60, 0, 60)] {
+        draw_sized(&mut app, width, 20);
+        let area = app.viewport(ratatui::layout::Rect::new(0, 0, width, 20));
+        assert_eq!((area.x, area.width), (left, viewport_width), "terminal {width}");
+        assert_eq!(app.geometry.doc.x, left + 2);
+        assert_eq!(app.open.layout.width, usize::from(app.geometry.doc.width));
+    }
+}
+
+#[test]
+fn doc_width_caps_the_text_and_spare_columns_sit_before_the_rail() {
+    let mut app = app(Box::new(Discard));
+    app.ui.doc_width = 100;
+    // (terminal, document): the cap holds when wide; when narrow the rail keeps its width
+    // and the document absorbs the shortfall.
+    for (width, doc_width) in [(250, 100), (140, 100), (120, 81), (90, 59)] {
+        draw_sized(&mut app, width, 20);
+        assert_eq!(app.geometry.doc.width, doc_width, "terminal {width}");
+        assert_eq!(app.open.layout.width, usize::from(doc_width));
+    }
+    app.ui.doc_width = 0;
+    draw_sized(&mut app, 250, 20);
+    assert_eq!(app.geometry.doc.width, 250 - 2 - 1 - 36, "zero takes every column the rail leaves");
+}
+
+#[test]
+fn popups_stay_inside_the_centered_app() {
+    let mut app = app(Box::new(Discard));
+    app.ui.horizontal_margin = 4;
+    app.ui.max_width = 80;
+    for mode in [Mode::Compose, Mode::ReviewMenu, Mode::Archive] {
+        app.mode = mode;
+        let rows = draw_sized(&mut app, 180, 20);
+        assert!(blank(&rows, 0..50) && blank(&rows, 130..180), "{rows:#?}");
+    }
+}
+
+#[test]
+fn a_mouse_selection_in_a_centered_app_selects_the_text_under_the_pointer() {
+    let mut app = app(Box::new(Discard));
+    app.ui.horizontal_margin = 4;
+    app.ui.max_width = 120;
+    draw_sized(&mut app, 180, 20);
+    let doc = app.geometry.doc;
+    click(&mut app, MouseEventKind::Down(MouseButton::Left), doc.x, doc.y);
+    click(&mut app, MouseEventKind::Drag(MouseButton::Left), doc.x + 3, doc.y);
+    click(&mut app, MouseEventKind::Up(MouseButton::Left), doc.x + 3, doc.y);
+    let pending = app.pending.as_ref().expect("selection");
+    assert_eq!(&app.open.doc.source[pending.range.clone()], "Plan");
+}
+
 fn open_path(app: &App) -> String {
     match &app.open.source.provenance {
         Provenance::File { path } => path.file_name().expect("name").to_string_lossy().into_owned(),

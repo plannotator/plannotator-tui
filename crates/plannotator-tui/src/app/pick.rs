@@ -136,11 +136,16 @@ impl App {
     }
 
     pub(super) fn draw_pick(&mut self, frame: &mut Frame) {
-        let area = frame.area();
+        let area = self.viewport(frame.area());
         let width = PICK_MAX_WIDTH.min(area.width.saturating_sub(4)).max(20);
         let rows = self.candidates.len() as u16;
         let height = (rows + 2).min(area.height.saturating_sub(2)).max(3);
-        let rect = Rect { x: (area.width - width) / 2, y: (area.height - height) / 2, width, height };
+        let rect = Rect {
+            x: area.x + (area.width - width) / 2,
+            y: area.y + (area.height - height) / 2,
+            width,
+            height,
+        };
         frame.render_widget(Clear, rect);
         let boxed = Block::default()
             .borders(Borders::ALL)

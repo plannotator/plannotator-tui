@@ -219,7 +219,7 @@ impl App {
 
     pub(super) fn draw_file_search(&mut self, frame: &mut Frame) {
         let Some(search) = &self.file_search else { return };
-        let area = frame.area();
+        let area = self.viewport(frame.area());
         let width = area.width.saturating_sub(4).clamp(1, 90).min(area.width);
         let height = area.height.saturating_sub(2).clamp(1, 18).min(area.height);
         let rect = Rect::new(

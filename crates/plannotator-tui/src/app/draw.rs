@@ -43,7 +43,7 @@ fn priority(kind: Kind) -> u8 {
 
 impl App {
     pub(crate) fn draw(&mut self, frame: &mut Frame) {
-        let area = frame.area();
+        let area = self.viewport(frame.area());
         let [header, body, footer] = Layout::vertical([
             Constraint::Length(self.header_height(area.width)),
             Constraint::Min(1),
@@ -58,11 +58,14 @@ impl App {
         } else {
             0
         };
+        // `[ui] doc_width` caps the text; the columns it leaves sit between it and the rail.
+        let room = body.width.saturating_sub(tree_width + GUTTER + u16::from(rail_width > 0) + rail_width);
+        let doc_width = if self.ui.doc_width == 0 { room } else { room.min(self.ui.doc_width) };
         let [tree, gutter, doc, _gap, rail] = Layout::horizontal([
             Constraint::Length(tree_width),
             Constraint::Length(GUTTER),
-            Constraint::Min(20),
-            Constraint::Length(u16::from(rail_width > 0)),
+            Constraint::Length(doc_width.max(20)),
+            Constraint::Min(u16::from(rail_width > 0)),
             Constraint::Length(rail_width),
         ])
         .areas(body);
@@ -279,9 +282,9 @@ impl App {
             .float_origin(height, COMPOSE_WIDTH)
             .or_else(|| self.edit_origin(height, COMPOSE_WIDTH))
             .unwrap_or_else(|| {
-                let area = frame.area();
+                let area = self.viewport(frame.area());
                 let width = COMPOSE_WIDTH.min(area.width);
-                Rect { x: (area.width - width) / 2, y: area.height / 2, width, height }
+                Rect { x: area.x + (area.width - width) / 2, y: area.y + area.height / 2, width, height }
             });
         frame.render_widget(Clear, rect);
         let boxed = Block::default()
@@ -421,7 +424,7 @@ impl App {
                 None => format!("block {}/{}", self.selected + 1, self.open.doc.blocks.len()),
             },
         ]);
-        if frame.area().width < RAIL_MIN_TOTAL_WIDTH {
+        if self.viewport(frame.area()).width < RAIL_MIN_TOTAL_WIDTH {
             parts.push("rail hidden: widen to ≥80 cols".into());
         }
         // Each hint names its action's first key; an unbound action drops out of the line.

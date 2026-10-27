@@ -358,6 +358,7 @@ pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
     let result = build(width).and_then(|mut app| {
         app.shift_enter = shift_enter;
         app.keys = config.keys;
+        app.ui = config.ui;
         event_loop(&mut terminal, app)
     });
     if shift_enter {

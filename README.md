@@ -178,6 +178,19 @@ selection = "#45475a"    # a character selection, a picker row, a menu row
 `cursor` and `selection` become plain backgrounds when set: the text on them keeps the
 terminal's colour.
 
+On a wide terminal, `[ui]` can keep the text to a readable measure:
+
+```toml
+[ui]
+doc_width = 100          # the document's text columns; spare columns sit before the notes
+max_width = 160          # center the whole app in this many columns
+horizontal_margin = 2    # blank columns on each side
+```
+
+All three default to `0`, which fills the terminal as before. The margin and `max_width`
+yield before the app drops below 80 columns, so a narrow pane keeps its notes rail; a
+narrow pane also lets the document shrink below `doc_width`.
+
 ### Keys
 
 Every key is rebindable under `[keys]`: an action, and the keys that run it.

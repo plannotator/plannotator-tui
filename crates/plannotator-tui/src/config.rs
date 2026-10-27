@@ -30,6 +30,13 @@ pub(crate) struct UiConfig {
     /// `auto` asks the terminal for its background colour; `light` and `dark` skip the
     /// question. `PLANNOTATOR_TUI_THEME` overrides whatever is written here.
     pub(crate) theme: ThemeSetting,
+    /// Blank columns kept on each side of the app; yields before the app drops below 80.
+    pub(crate) horizontal_margin: u16,
+    /// Widest the app gets, centered in the terminal. Zero fills the terminal.
+    pub(crate) max_width: u16,
+    /// Widest the document's text gets; spare columns sit between it and the rail. Zero
+    /// lets the document take every column the rail leaves.
+    pub(crate) doc_width: u16,
 }
 
 /// How plannotator-tui opens inside Herdr.
@@ -245,6 +252,17 @@ mod tests {
     fn an_unknown_theme_error_names_the_value() {
         let err = Config::parse("[ui]\ntheme = \"solarized\"\n").expect_err("rejected");
         assert!(err.to_string().contains("solarized"), "{err}");
+    }
+
+    #[test]
+    fn widths_default_to_filling_the_terminal_and_roundtrip() {
+        assert_eq!(Config::default().ui.horizontal_margin, 0);
+        assert_eq!(Config::default().ui.max_width, 0);
+        assert_eq!(Config::default().ui.doc_width, 0);
+        let config =
+            Config::parse("[ui]\nhorizontal_margin = 2\nmax_width = 168\ndoc_width = 120\n").expect("parses");
+        assert_eq!((config.ui.horizontal_margin, config.ui.max_width, config.ui.doc_width), (2, 168, 120));
+        assert_eq!(Config::parse(&config.to_toml().expect("serializes")).expect("parses"), config);
     }
 
     #[test]

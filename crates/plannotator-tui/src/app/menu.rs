@@ -157,7 +157,7 @@ impl App {
     }
 
     pub(super) fn draw_review_menu(&mut self, frame: &mut Frame) {
-        let area = frame.area();
+        let area = self.viewport(frame.area());
         let rows: Vec<(ReviewAction, String)> = REVIEW_ACTIONS
             .iter()
             .map(|&action| {
