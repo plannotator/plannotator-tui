@@ -56,6 +56,15 @@ fn omp_is_selected_by_its_name_first_and_by_ompcode_last() {
 }
 
 #[test]
+fn command_code_is_selected_by_herdrs_label_or_its_names_only() {
+    for name in ["cmd", "command-code", "Command_Code", "commandcode"] {
+        assert_eq!(detect_host(env(&[("PLANNOTATOR_TUI_HOST", name)])).expect("host"), Host::CommandCode);
+    }
+    // A runtime name is not an agent: `node` stays unknown and the default applies.
+    assert_eq!(detect_host(env(&[("PLANNOTATOR_TUI_HOST", "node")])).expect("host"), Host::ClaudeCode);
+}
+
+#[test]
 fn the_copilot_marker_selects_copilot_and_droid_needs_the_override() {
     assert_eq!(detect_host(env(&[("COPILOT_CLI", "1")])).expect("host"), Host::Copilot);
     assert_eq!(
@@ -76,5 +85,6 @@ fn labels_are_the_short_names_herdr_uses() {
     assert_eq!(Host::Omp.label(), "omp");
     assert_eq!(Host::Hermes.label(), "hermes");
     assert_eq!(Host::OpenCode.label(), "opencode");
-    assert_eq!(Host::ALL.len(), 8);
+    assert_eq!(Host::CommandCode.label(), "cmd");
+    assert_eq!(Host::ALL.len(), 9);
 }

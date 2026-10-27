@@ -248,6 +248,44 @@ fn a_session_path_without_a_host_is_sniffed() {
     );
 }
 
+/// No session id from Herdr: the pane's cwd selects the session under `$HOME/.commandcode`.
+#[cfg(unix)]
+#[test]
+fn command_code_reads_the_session_started_in_the_agents_cwd() {
+    let home = temp_dir("cmd home");
+    let projects = home.join(".commandcode/projects");
+    std::fs::create_dir_all(&projects).expect("projects");
+    let source = fixtures().join("commandcode/users-me-my-proj");
+    let target = projects.join("users-me-my-proj");
+    std::fs::create_dir_all(&target).expect("project");
+    let name = "0198f0a1-7c2e-7b10-9a4d-3c5e8f1a2b3c.jsonl";
+    std::fs::copy(source.join(name), target.join(name)).expect("copy");
+    let out = bin()
+        .env("HOME", &home)
+        .env("PLANNOTATOR_TUI_CWD", "/Users/me/MyProj")
+        .env_remove("PLANNOTATOR_TUI_HOST")
+        .args(["last", "--host", "cmd", "--print"])
+        .output()
+        .expect("runs");
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim_end(),
+        "# Done\n\nassistant text 2, longer than the viewport\nsecond block",
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let elsewhere = bin()
+        .env("HOME", &home)
+        .env("PLANNOTATOR_TUI_CWD", "/Users/me/other")
+        .args(["last", "--host", "cmd", "--print"])
+        .output()
+        .expect("runs");
+    assert!(elsewhere.status.success(), "exit 0 is the contract");
+    assert_eq!(String::from_utf8_lossy(&elsewhere.stdout), "");
+    assert!(String::from_utf8_lossy(&elsewhere.stderr).contains("no Command Code session"));
+    std::fs::remove_dir_all(&home).expect("cleanup");
+}
+
 #[test]
 fn hermes_reads_the_session_named_by_id_from_hermes_home() {
     let home = std::env::temp_dir().join(format!("plannotator-tui-hermes-home-{}", std::process::id()));

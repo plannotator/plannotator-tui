@@ -7,6 +7,7 @@
 
 pub mod claude;
 pub mod codex;
+pub mod commandcode;
 pub mod copilot;
 pub mod droid;
 pub mod hermes;
@@ -35,6 +36,9 @@ pub enum Host {
     /// `OpenCode`: sessions, messages and parts in `SQLite` (`<xdg data>/opencode/opencode.db`),
     /// addressed by session id or found by the directory `OpenCode` was started in.
     OpenCode,
+    /// Command Code: pi's format under `~/.commandcode/projects/<slug>/<uuid>.jsonl`; Herdr
+    /// reports it as `cmd`.
+    CommandCode,
 }
 
 impl Host {
@@ -49,11 +53,12 @@ impl Host {
             Self::Omp => "omp",
             Self::Hermes => "hermes",
             Self::OpenCode => "opencode",
+            Self::CommandCode => "cmd",
         }
     }
 
     /// Every host with a transcript reader, for messages that list them.
-    pub const ALL: [Host; 8] = [
+    pub const ALL: [Host; 9] = [
         Host::ClaudeCode,
         Host::Codex,
         Host::Pi,
@@ -62,6 +67,7 @@ impl Host {
         Host::Droid,
         Host::Hermes,
         Host::OpenCode,
+        Host::CommandCode,
     ];
 }
 
@@ -172,13 +178,13 @@ impl From<std::io::Error> for HostError {
 }
 
 /// The host-assigned session id a transcript's name carries, when the host's naming
-/// scheme makes it unambiguous: Claude Code and Droid file a session as `<uuid>.jsonl`,
+/// scheme makes it unambiguous: Claude Code, Droid and Command Code file a session as `<uuid>.jsonl`,
 /// a Codex rollout ends in its thread uuid, and a Copilot session is a directory named by
 /// its uuid. Anything that is not uuid-shaped yields `None`: an arbitrary path handed in
 /// with `--session` must never be mistaken for an id, and a path is never one.
 pub fn session_id_of(host: Host, transcript: &Path) -> Option<String> {
     let candidate = match host {
-        Host::ClaudeCode | Host::Droid => transcript.file_stem()?.to_str()?.to_owned(),
+        Host::ClaudeCode | Host::Droid | Host::CommandCode => transcript.file_stem()?.to_str()?.to_owned(),
         Host::Codex => codex::thread_of(transcript)?,
         Host::Copilot => transcript.file_name()?.to_str()?.to_owned(),
         Host::Pi | Host::Omp | Host::Hermes | Host::OpenCode => return None,
@@ -187,7 +193,7 @@ pub fn session_id_of(host: Host, transcript: &Path) -> Option<String> {
 }
 
 /// `8-4-4-4-12` hex groups, any case.
-fn is_uuid(text: &str) -> bool {
+pub(crate) fn is_uuid(text: &str) -> bool {
     let bytes = text.as_bytes();
     bytes.len() == 36
         && bytes.iter().enumerate().all(|(i, b)| match i {
@@ -213,6 +219,7 @@ pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostErr
             "omp" | "oh-my-pi" | "ohmypi" => return Ok(Host::Omp),
             "hermes" | "hermes-cli" | "hermes_cli" => return Ok(Host::Hermes),
             "opencode" | "open-code" | "open_code" => return Ok(Host::OpenCode),
+            "cmd" | "command-code" | "command_code" | "commandcode" => return Ok(Host::CommandCode),
             _ => {}
         }
     }

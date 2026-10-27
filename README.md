@@ -230,7 +230,7 @@ An explicit `--placement` or `PLANNOTATOR_TUI_PLACEMENT` still takes precedence.
 
 `plannotator-tui last` finds the transcript of the agent that launched your shell and shows a
 picker of its recent replies. Hosts: Claude Code, Codex, pi, Oh My Pi, GitHub Copilot CLI,
-Droid, Hermes CLI, OpenCode (1 and 2). `--host`, `--pid`, `--session <transcript>` (format sniffed when
+Droid, Hermes CLI, OpenCode (1 and 2), Command Code (`cmd`). `--host`, `--pid`, `--session <transcript>` (format sniffed when
 no host is named) and `--session-id <id>` (Hermes, OpenCode) override detection; `--stdin`
 reads a document; `--newest` skips the picker and opens the newest reply straight away, with
 `p` still opening the picker on the rest;

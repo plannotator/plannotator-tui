@@ -236,6 +236,33 @@ fn a_last_launch_carries_the_pid_and_host_instead_of_a_file() {
     assert!(!args.iter().any(|a| a.starts_with("PLANNOTATOR_TUI_FILE=")));
 }
 
+/// Command Code under Herdr: agent `cmd`, no session reported, `node` in the foreground.
+#[test]
+fn herdrs_cmd_label_selects_command_code_while_the_pid_comes_from_the_process() {
+    let context = HerdrContext {
+        focused_pane_id: Some("w1:p1".into()),
+        focused_pane_agent: Some("cmd".into()),
+        focused_pane_cwd: Some("/w".into()),
+        ..HerdrContext::default()
+    };
+    let node = PROCESS_INFO.replace(r#""name":"claude""#, r#""name":"node""#);
+    assert_eq!(agent_pid(&node), Some((91279, "node".into())), "node alone is not an agent");
+    let agent_get =
+        r#"{"id":"cli:agent:get","result":{"agent":{"agent":"cmd","pane_id":"w1:p1"},"type":"agent_info"}}"#;
+    let launch = plan_last(
+        &env(None, Some(context)),
+        &Config::default(),
+        OpenArgs::default(),
+        Path::new("/"),
+        Some(&node),
+        Some(agent_get),
+    )
+    .expect("plans");
+    assert_eq!(launch.message, Some(AgentMessage { host: "cmd".into(), pid: Some(91279) }));
+    assert_eq!(launch.session, None);
+    assert!(argv(&launch).contains(&"PLANNOTATOR_TUI_HOST=cmd".to_owned()));
+}
+
 const AGENT_GET_PATH: &str = r#"{"id":"cli:agent:get","result":{"agent":{"agent":"omp","agent_session":{"agent":"omp","kind":"path","source":"herdr:omp","value":"~/.omp/agent/sessions/--w--/2026-08-29T01-00-00-000Z_0199.jsonl"},"pane_id":"w1:p1"},"type":"agent_info"}}"#;
 const AGENT_GET_ID: &str = r#"{"id":"cli:agent:get","result":{"agent":{"agent":"hermes","agent_session":{"agent":"hermes","kind":"id","source":"herdr:hermes","value":"sess_abc123"},"pane_id":"w1:p1"},"type":"agent_info"}}"#;
 const AGENT_GET_PI: &str = r#"{"id":"cli:agent:get","result":{"agent":{"agent":"pi","agent_session":{"agent":"pi","kind":"path","source":"herdr:pi","value":"~/.pi/agent/sessions/--w--/session.jsonl"},"pane_id":"w1:p1"},"type":"agent_info"}}"#;

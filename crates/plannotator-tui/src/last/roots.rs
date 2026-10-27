@@ -3,7 +3,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use plannotator_tui_hosts::{hermes, opencode};
+use plannotator_tui_hosts::{commandcode, hermes, opencode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Roots {
@@ -47,6 +47,11 @@ impl Roots {
         self.pi_session_dir.clone().unwrap_or_else(|| {
             self.pi_agent_dir.clone().unwrap_or_else(|| self.home.join(default_agent_dir)).join("sessions")
         })
+    }
+
+    /// Command Code reads `$HOME` (else `%USERPROFILE%`) and has no override of its own.
+    pub(super) fn commandcode_projects(&self) -> PathBuf {
+        self.home.join(commandcode::DEFAULT_PROJECTS_DIR)
     }
 
     pub(super) fn hermes_database(&self) -> PathBuf {

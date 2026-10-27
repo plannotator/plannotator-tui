@@ -7,7 +7,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 #[cfg(unix)]
 use plannotator_tui_hosts::copilot;
-use plannotator_tui_hosts::{Host, Match, Message, claude, droid, opencode, pi};
+use plannotator_tui_hosts::{Host, Match, Message, claude, commandcode, droid, opencode, pi};
 
 use super::LastOptions;
 use super::exact;
@@ -66,6 +66,11 @@ pub(super) fn read(
         Host::Pi => {
             let path = find_pi_transcript(cwd, roots, ".pi/agent", "pi")?;
             let messages = readers::pi_messages(&path, pick)?;
+            Ok((path, messages, Discovery::Folder))
+        }
+        Host::CommandCode => {
+            let path = find_commandcode_transcript(cwd, roots)?;
+            let messages = readers::commandcode_messages(&path, pick)?;
             Ok((path, messages, Discovery::Folder))
         }
         Host::Omp => bail!(
@@ -176,6 +181,17 @@ fn find_pi_transcript(cwd: &Path, roots: &Roots, default_agent_dir: &str, label:
     let sessions_dir = roots.pi_sessions(default_agent_dir);
     pi::find_transcript(&sessions_dir, cwd).ok_or_else(|| {
         anyhow::anyhow!("no {label} session for {} (looked in {})", cwd.display(), sessions_dir.display())
+    })
+}
+
+fn find_commandcode_transcript(cwd: &Path, roots: &Roots) -> Result<PathBuf> {
+    let projects = roots.commandcode_projects();
+    commandcode::find_transcript(&projects, cwd).ok_or_else(|| {
+        anyhow::anyhow!(
+            "no Command Code session started in {} (looked in {})",
+            cwd.display(),
+            projects.join(commandcode::project_slug(cwd)).display()
+        )
     })
 }
 

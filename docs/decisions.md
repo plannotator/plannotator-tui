@@ -363,6 +363,22 @@ looked up in whichever table holds it. Verified against the `beta` source
 (`packages/core/src/session/sql.ts`, `packages/schema/src/session-message.ts`,
 `packages/util/src/global-roots.ts`) and a mixed-schema fixture reproducing the report.
 
+**Command Code** (2026-10-27, plannotator-tui#106). Command Code writes pi's session format:
+a `session` header with the `cwd`, then `id`/`parentId` entries (`message`, `session_info`,
+`model_change`, ...), so it is pi's reader over another layout,
+`~/.commandcode/projects/<slug>/<uuid>.jsonl`. The slug is `@sindresorhus/slugify(cwd)` or
+`root` (`getProjectDirName` in `command-code` 1.88.0): lowercased, camel case split into
+words, every run of other characters one `-`. That is lossy (`/w/My Proj` and `/w/my-proj`
+share a directory) and non-ASCII is transliterated, which we do not reproduce, so a session
+counts for a cwd only when its header names that cwd: the slug directory is searched first,
+then every project directory, newest by last write as pi ranks them, and a cwd with no
+session of its own yields nothing rather than another folder's reply. The same directories
+hold `<uuid>.checkpoints.jsonl` sidecars; only uuid-named files are sessions. Herdr labels the
+agent `cmd` (the foreground process is `node`, which names no agent), so the label selects the
+host and the pane's cwd selects the session. Command Code reports its session id to Herdr
+when it runs its own Herdr integration; that id is looked up as `<id>.jsonl`, slug directory
+first.
+
 
 ## 15. The cursor can roam before selecting (2026-09-18)
 

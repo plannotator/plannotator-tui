@@ -105,7 +105,7 @@ pub fn find_transcript(sessions_dir: &Path, cwd: &Path) -> Option<PathBuf> {
 /// time, newest first; a file whose metadata cannot be read ranks after every file that
 /// has one, and ties fall back to the timestamp in the filename, so a directory whose
 /// files all share an mtime keeps the old ordering.
-fn newest_with_messages(mut files: Vec<PathBuf>) -> Option<PathBuf> {
+pub(crate) fn newest_with_messages(mut files: Vec<PathBuf>) -> Option<PathBuf> {
     files.sort();
     files.dedup();
     let mut ranked: Vec<(Option<std::time::SystemTime>, PathBuf)> =
