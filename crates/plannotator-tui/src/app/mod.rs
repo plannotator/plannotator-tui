@@ -3,6 +3,7 @@
 
 mod archive_view;
 mod compose;
+mod disk;
 mod draw;
 mod feedback;
 mod file_search;
@@ -117,10 +118,15 @@ struct Open {
     doc: Document,
     layout: DocLayout,
     store: Store,
+    /// The file's size and mtime when it was loaded; `None` for anything but a readable file.
+    disk: Option<disk::DiskStamp>,
+    /// The last change on disk the footer already reported, so it is said once.
+    disk_noticed: Option<disk::DiskStamp>,
 }
 
 impl Open {
     fn new(source: DocumentSource, width: usize, data_dir: &Path, project: &str) -> Result<Self> {
+        let disk = disk::DiskStamp::of_source(&source.provenance);
         let doc = Document::parse(source.content.clone());
         let layout = DocLayout::build(&doc, width);
         let store = match (&source.provenance, source.transient) {
@@ -129,7 +135,7 @@ impl Open {
             }
             _ => Store::transient(),
         };
-        Ok(Self { source, doc, layout, store })
+        Ok(Self { source, doc, layout, store, disk, disk_noticed: None })
     }
 }
 
@@ -203,6 +209,8 @@ pub(crate) struct App {
     last_click: Option<(std::time::Instant, u16, u16)>,
     geometry: Geometry,
     status: Option<String>,
+    /// When the event loop last compared the open file with its copy on disk.
+    disk_checked: Option<std::time::Instant>,
     frame_ms: f64,
     frame_max_ms: f64,
     /// Copy selections to the terminal clipboard (off for headless runs).
@@ -272,6 +280,7 @@ impl App {
             last_click: None,
             geometry: Geometry::default(),
             status: None,
+            disk_checked: None,
             frame_ms: 0.0,
             frame_max_ms: 0.0,
             clipboard: false,
@@ -592,7 +601,10 @@ impl App {
             return Ok(());
         };
         let path = path.clone();
+        let disk = disk::DiskStamp::of(&path);
         self.open.source = read_file(&path)?;
+        self.open.disk = disk;
+        self.open.disk_noticed = None;
         self.open.doc = Document::parse(self.open.source.content.clone());
         self.open.layout = DocLayout::build(&self.open.doc, self.open.layout.width);
         self.open.store =
