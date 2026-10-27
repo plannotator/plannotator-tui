@@ -18,6 +18,7 @@ impl App {
             Event::Key(key) if key.kind != KeyEventKind::Release => match &self.mode {
                 Mode::Browse => self.browse_key(*key),
                 Mode::ConfirmQuit => self.confirm_quit_key(*key),
+                Mode::ConfirmClearAll => self.confirm_clear_all_key(*key),
                 Mode::Pick => self.pick_key(*key),
                 Mode::FileSearch => {
                     self.file_search_key(*key);
@@ -133,6 +134,36 @@ impl App {
                 self.quit = true;
             }
             Some(Action::Back) => self.mode = Mode::Browse,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Ask before `clear-all` removes every annotation on the open document.
+    fn request_clear_all(&mut self) {
+        if self.open.store.len() == 0 {
+            self.status = Some("no annotations on current document".into());
+        } else {
+            self.mode = Mode::ConfirmClearAll;
+        }
+    }
+
+    /// The clear-all confirmation: only `yes` clears; `no` or `back` keep every note.
+    fn confirm_clear_all_key(&mut self, key: KeyEvent) -> Result<()> {
+        match self.keys.action(&key, keys::CONFIRM_CLEAR) {
+            Some(Action::Yes) => {
+                self.mode = Mode::Browse;
+                let removed = self.open.store.clear_all()?;
+                self.rail_cursor = 0;
+                self.clear_selection();
+                self.mark_unsent();
+                self.sync_tree_counts();
+                self.status = Some(format!("cleared {removed} annotation(s) on current document"));
+            }
+            Some(Action::No | Action::Back) => {
+                self.mode = Mode::Browse;
+                self.status = Some("clear cancelled".into());
+            }
             _ => {}
         }
         Ok(())
@@ -261,6 +292,7 @@ impl App {
                 }
                 self.status = Some(format!("removed {removed} annotation(s) on block"));
             }
+            Some(Action::ClearAll) => self.request_clear_all(),
             _ => {}
         }
         Ok(())
@@ -383,6 +415,7 @@ impl App {
                     Mode::Compose
                     | Mode::Browse
                     | Mode::ConfirmQuit
+                    | Mode::ConfirmClearAll
                     | Mode::Pick
                     | Mode::FileSearch
                     | Mode::Archive

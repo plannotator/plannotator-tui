@@ -58,6 +58,8 @@ enum Mode {
     Edit(String),
     /// Quit was asked for while feedback is unsent; the footer asks first.
     ConfirmQuit,
+    /// `clear-all` was pressed; the footer asks before every note on the document goes.
+    ConfirmClearAll,
     /// Choosing which of the agent's recent messages to review.
     Pick,
     /// Quick Open: finding a file in the folder by name.

@@ -16,6 +16,14 @@ fn the_defaults_bind_no_key_twice() {
 }
 
 #[test]
+fn clear_all_on_shifted_x_is_distinct_from_clear_block_on_x() {
+    let keymap = Keymap::default();
+    assert_eq!(keymap.action(&press(KeyCode::Char('X'), KeyModifiers::SHIFT), DOCUMENT), Some(ClearAll));
+    assert_eq!(keymap.action(&press(KeyCode::Char('x'), KeyModifiers::NONE), DOCUMENT), Some(ClearBlock));
+    assert_eq!(keymap.action(&press(KeyCode::Enter, KeyModifiers::NONE), CONFIRM_CLEAR), None);
+}
+
+#[test]
 fn an_entry_replaces_only_its_own_action() {
     let keymap =
         parse("left = [\"j\", \"Left\"]\ndown = [\"k\"]\nup = [\"l\"]\nright = [\";\"]\n").expect("parses");

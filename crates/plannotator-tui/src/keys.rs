@@ -50,6 +50,7 @@ pub(crate) enum Action {
     MoveCursor,
     Comment,
     ClearBlock,
+    ClearAll,
     LooksGood,
     Delete,
     Yes,
@@ -57,10 +58,10 @@ pub(crate) enum Action {
 }
 
 use Action::{
-    Archive, Back, Bottom, ClearBlock, Comment, Confirm, CycleFocus, Delete, Down, Edit, FinishReview,
-    Interrupt, Left, LineEnd, LineStart, LooksGood, MoveCursor, No, PageDown, PageUp, PickMessage, QuickOpen,
-    Quit, Reload, Remove, ResendAll, ReviewMenu, Right, Send, SendAndClose, ToggleHidden, ToggleTree, Top,
-    UndoFinish, Up, Visual, WordBack, WordForward, Yes,
+    Archive, Back, Bottom, ClearAll, ClearBlock, Comment, Confirm, CycleFocus, Delete, Down, Edit,
+    FinishReview, Interrupt, Left, LineEnd, LineStart, LooksGood, MoveCursor, No, PageDown, PageUp,
+    PickMessage, QuickOpen, Quit, Reload, Remove, ResendAll, ReviewMenu, Right, Send, SendAndClose,
+    ToggleHidden, ToggleTree, Top, UndoFinish, Up, Visual, WordBack, WordForward, Yes,
 };
 
 /// Browsing, before the focused pane gets the key.
@@ -84,7 +85,7 @@ pub(crate) const TREE: &[Action] = &[Down, Up, Confirm, Right, ToggleHidden, Bac
 pub(crate) const RAIL: &[Action] = &[Down, Up, Confirm, Edit, Remove, Back];
 pub(crate) const DOCUMENT: &[Action] = &[
     Back, Visual, MoveCursor, Down, Up, Left, Right, PageDown, PageUp, Top, Bottom, Comment, Confirm,
-    ClearBlock,
+    ClearBlock, ClearAll,
 ];
 /// Cursor motions, in visual mode and while moving the cursor (`move-cursor`).
 pub(crate) const MOTION: &[Action] = &[Left, Right, Down, Up, WordForward, WordBack, LineStart, LineEnd];
@@ -93,6 +94,9 @@ pub(crate) const VISUAL: &[Action] = &[Back, Confirm, Visual];
 /// While a finished selection waits for its kind.
 pub(crate) const TOOLBAR: &[Action] = &[LooksGood, Comment, Delete];
 pub(crate) const CONFIRM_QUIT: &[Action] = &[Yes, Confirm, No, Back];
+/// Before `clear-all` empties the document. Only `yes` clears: `confirm` would let a slip
+/// followed by Enter wipe every note.
+pub(crate) const CONFIRM_CLEAR: &[Action] = &[Yes, No, Back];
 pub(crate) const MENU: &[Action] =
     &[Down, Up, Confirm, Back, ReviewMenu, Interrupt, ResendAll, FinishReview, UndoFinish, Archive];
 pub(crate) const PICK: &[Action] = &[Down, Up, Confirm, Back, Quit];
@@ -108,6 +112,7 @@ const SHARED: &[&[&[Action]]] = &[
     &[GLOBAL, VISUAL, MOTION],
     &[GLOBAL, TOOLBAR],
     &[CONFIRM_QUIT],
+    &[CONFIRM_CLEAR],
     &[MENU],
     &[PICK],
     &[ARCHIVE],
@@ -247,6 +252,7 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (MoveCursor, &[ch('i')]),
     (Comment, &[ch('c')]),
     (ClearBlock, &[ch('x')]),
+    (ClearAll, &[ch('X')]),
     (LooksGood, &[ch('a')]),
     (Delete, &[ch('d')]),
     (Yes, &[ch('y'), ch('Y')]),
@@ -375,6 +381,7 @@ impl Action {
             Self::MoveCursor => "move-cursor",
             Self::Comment => "comment",
             Self::ClearBlock => "clear-block",
+            Self::ClearAll => "clear-all",
             Self::LooksGood => "looks-good",
             Self::Delete => "delete",
             Self::Yes => "yes",

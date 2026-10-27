@@ -90,7 +90,7 @@ dimmed. The keys also work without opening the menu.
 |---|---|
 | anywhere | `Tab` cycle tree · document · notes; `E` send; `t` tree; `r` reload; `q` quit |
 | reply review | `S` send and close |
-| document | `j`/`k` block; `c` comment on the block; `x` clear its annotations; `v` select with `hjkl` `w` `b` `0` `$`, `Enter` to finish; `i` move the cursor with those keys first, then `v` to select from there |
+| document | `j`/`k` block; `c` comment on the block; `x` clear its annotations; `X` clear every annotation on the document, after a `y`; `v` select with `hjkl` `w` `b` `0` `$`, `Enter` to finish; `i` move the cursor with those keys first, then `v` to select from there |
 | toolbar | `a` looks good · `c` comment · `d` delete · `Esc` |
 | notes | `j`/`k`; `e` edit; `x` remove; click a bubble |
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
@@ -231,8 +231,9 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `edit` `remove` | `e` `x`, `Delete` | the selected note |
 | `visual` `move-cursor` | `v` `i` | select with the cursor; move it first |
 | `comment` `clear-block` | `c` `x` | on the block; clear its annotations |
+| `clear-all` | `X` | every annotation on the document, after `yes` |
 | `looks-good` `delete` | `a` `d` | toolbar, with `comment` |
-| `yes` `no` | `y` `n`, `Y` `N` | the send-before-quitting question |
+| `yes` `no` | `y` `n`, `Y` `N` | the send-before-quitting and clear-all questions |
 
 Actions forwarded by Herdr Mirror default to a split beside the invoking remote
 pane. Mirror does not preserve overlay presentation, and Herdr 0.8.2 opens an

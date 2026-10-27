@@ -103,7 +103,7 @@ impl App {
             Mode::FileSearch => self.draw_file_search(frame),
             Mode::Archive => self.draw_archive(frame),
             Mode::ReviewMenu => self.draw_review_menu(frame),
-            Mode::Browse | Mode::ConfirmQuit => {}
+            Mode::Browse | Mode::ConfirmQuit | Mode::ConfirmClearAll => {}
         }
     }
 
@@ -399,6 +399,17 @@ impl App {
                 .join(" · ");
             let question =
                 format!(" send feedback to {} before quitting? {answers}", self.delivery.describe());
+            frame.render_widget(Paragraph::new(Line::from(Span::raw(question).bold())), area);
+            return;
+        }
+        if self.mode == Mode::ConfirmClearAll {
+            let answers = [(Action::Yes, "clear"), (Action::No, "cancel")]
+                .into_iter()
+                .filter_map(|(action, label)| self.keys.labelled(action, label))
+                .collect::<Vec<_>>()
+                .join(" · ");
+            let question =
+                format!(" clear all {} annotation(s) on current document? {answers}", self.open.store.len());
             frame.render_widget(Paragraph::new(Line::from(Span::raw(question).bold())), area);
             return;
         }

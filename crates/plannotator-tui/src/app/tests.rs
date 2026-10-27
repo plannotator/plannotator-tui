@@ -151,6 +151,41 @@ fn quitting_with_unsent_feedback_asks_before_it_quits() {
     assert_eq!(app.send_state, SendState::Ready, "nothing was sent");
 }
 
+#[test]
+fn clear_all_asks_first_and_only_yes_clears_the_document() {
+    let mut app = app(Box::new(Discard));
+    app.add_block_annotation(0, Kind::Comment, "first".to_owned()).expect("annotation");
+    app.add_block_annotation(1, Kind::LooksGood, String::new()).expect("annotation");
+    let press = |app: &mut App, c| app.handle_event(&Event::Key(KeyEvent::from(c))).expect("key");
+
+    press(&mut app, KeyCode::Char('X'));
+    assert_eq!(app.mode, Mode::ConfirmClearAll);
+    let rows = draw(&mut app);
+    let footer = row(&rows, 19);
+    assert!(
+        footer.contains("clear all 2 annotation(s) on current document? y clear · n cancel"),
+        "{footer:?}"
+    );
+    // Enter is not an answer: a slip followed by Enter must not wipe every note.
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.mode, Mode::ConfirmClearAll);
+    press(&mut app, KeyCode::Char('n'));
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.store.len(), 2, "n keeps every note");
+    press(&mut app, KeyCode::Char('X'));
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.open.store.len(), 2, "esc keeps every note");
+
+    press(&mut app, KeyCode::Char('X'));
+    press(&mut app, KeyCode::Char('y'));
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.store.len(), 0);
+    assert_eq!(app.status.as_deref(), Some("cleared 2 annotation(s) on current document"));
+
+    press(&mut app, KeyCode::Char('X'));
+    assert_eq!(app.mode, Mode::Browse, "nothing to clear, nothing to ask");
+}
+
 fn candidates() -> Vec<plannotator_tui_hosts::Message> {
     use plannotator_tui_hosts::{Message, Role};
     let message = |id: &str, text: &str, at: &str| Message {
