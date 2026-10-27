@@ -356,6 +356,17 @@ fn doc_width_caps_the_text_and_spare_columns_sit_before_the_rail() {
 }
 
 #[test]
+fn a_doc_width_that_does_not_bind_keeps_the_layout_down_to_the_narrowest_pane() {
+    let mut app = app(Box::new(Discard));
+    for doc_width in [0, 100] {
+        app.ui.doc_width = doc_width;
+        let rows = draw_sized(&mut app, 12, 10);
+        // Too narrow for the gutter: the text takes every column, as it did before `[ui]`.
+        assert_eq!((app.geometry.doc.x, app.geometry.doc.width), (0, 12), "doc_width {doc_width}: {rows:#?}");
+    }
+}
+
+#[test]
 fn popups_stay_inside_the_centered_app() {
     let mut app = app(Box::new(Discard));
     app.ui.horizontal_margin = 4;

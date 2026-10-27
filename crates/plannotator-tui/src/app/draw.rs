@@ -59,13 +59,20 @@ impl App {
             0
         };
         // `[ui] doc_width` caps the text; the columns it leaves sit between it and the rail.
-        let room = body.width.saturating_sub(tree_width + GUTTER + u16::from(rail_width > 0) + rail_width);
-        let doc_width = if self.ui.doc_width == 0 { room } else { room.min(self.ui.doc_width) };
+        // Only a cap that binds changes the split, so an unset or roomy cap lays out as before.
+        let gap = u16::from(rail_width > 0);
+        let room = body.width.saturating_sub(tree_width + GUTTER + gap + rail_width);
+        let cap = self.ui.doc_width.max(20);
+        let (text, spare) = if self.ui.doc_width > 0 && room > cap {
+            (Constraint::Length(cap), Constraint::Min(gap))
+        } else {
+            (Constraint::Min(20), Constraint::Length(gap))
+        };
         let [tree, gutter, doc, _gap, rail] = Layout::horizontal([
             Constraint::Length(tree_width),
             Constraint::Length(GUTTER),
-            Constraint::Length(doc_width.max(20)),
-            Constraint::Min(u16::from(rail_width > 0)),
+            text,
+            spare,
             Constraint::Length(rail_width),
         ])
         .areas(body);
