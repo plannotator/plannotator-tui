@@ -50,6 +50,8 @@ pub(super) struct FeedbackPart {
 pub(super) struct Feedback {
     pub(super) text: String,
     pub(super) count: usize,
+    /// Image paths across the sent notes, for the archive's counts.
+    pub(super) images: usize,
     pub(super) parts: Vec<FeedbackPart>,
     pub(super) annotations: Vec<AnnotationRecord>,
     pub(super) counts: HashMap<PathBuf, ReviewCounts>,
@@ -93,6 +95,7 @@ impl Feedback {
         self.text.push_str(&export::feedback(name, &entries));
         let ids = entries.iter().map(|e| e.annotation.id.clone()).collect();
         self.count += entries.len();
+        self.images += entries.iter().map(|e| e.annotation.plannotator_tui.images.len()).sum::<usize>();
         self.annotations.extend(entries.iter().map(|entry| {
             let a = entry.annotation;
             AnnotationRecord {

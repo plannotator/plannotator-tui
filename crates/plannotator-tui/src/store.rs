@@ -231,6 +231,7 @@ impl Store {
             author_name: None,
             state: State::Open,
             attachments: Vec::new(),
+            plannotator_tui: plannotator_tui_schema::NoteExtras::default(),
             created_at: now.clone(),
             updated_at: now,
             replies: Vec::new(),
@@ -300,6 +301,10 @@ impl Store {
             .collect();
         out.sort_by_key(|p| p.range.start);
         out
+    }
+
+    pub(crate) fn has_images(&self, id: &str) -> bool {
+        self.annotations.iter().any(|a| a.id == id && !a.plannotator_tui.images.is_empty())
     }
 
     pub(crate) fn len(&self) -> usize {

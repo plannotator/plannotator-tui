@@ -98,6 +98,9 @@ impl App {
         match &self.mode {
             Mode::Compose => self.draw_compose(frame, &self.compose_title("comment")),
             Mode::Edit(_) => self.draw_compose(frame, &self.compose_title("edit")),
+            Mode::AttachImage(_) => {
+                self.draw_compose(frame, " image path \u{b7} enter attaches \u{b7} esc cancels ");
+            }
             Mode::Browse if self.pending.is_some() => self.draw_toolbar(frame),
             Mode::Pick => self.draw_pick(frame),
             Mode::FileSearch => self.draw_file_search(frame),
@@ -318,7 +321,7 @@ impl App {
     }
 
     fn edit_origin(&self, height: u16, width: u16) -> Option<Rect> {
-        let Mode::Edit(id) = &self.mode else { return None };
+        let (Mode::Edit(id) | Mode::AttachImage(id)) = &self.mode else { return None };
         let (rect, _) = self.geometry.bubbles.iter().find(|(_, bubble_id)| bubble_id == id)?;
         let area = self.geometry.doc.union(*rect);
         let x = rect.right().saturating_sub(width).max(area.x);
@@ -366,8 +369,13 @@ impl App {
             } else {
                 ""
             };
+            let images = match placed.annotation.plannotator_tui.images.len() {
+                0 => String::new(),
+                1 => " · 1 image".to_owned(),
+                n => format!(" · {n} images"),
+            };
             let title = Span::styled(
-                format!(" {} {}{sent} ", glyph(kind), short_id(&placed.annotation.id)),
+                format!(" {} {}{images}{sent} ", glyph(kind), short_id(&placed.annotation.id)),
                 Style::new().fg(accent(kind)),
             );
             let bubble = Block::default()
@@ -445,6 +453,23 @@ impl App {
         if self.viewport(frame.area()).width < RAIL_MIN_TOTAL_WIDTH {
             parts.push("rail hidden: widen to ≥80 cols".into());
         }
+        let help = self.footer_help();
+        let help = if help.is_empty() { String::new() } else { format!("{} ", help.join(" · ")) };
+        // The status must stay readable at any width, so the key help yields columns to it
+        // (and is clipped) rather than the other way round.
+        let status_width = self.status.as_ref().map_or(0, |s| s.width() + 1) as u16;
+        let help_width = (help.width() as u16).min(area.width.saturating_sub(status_width.max(10)));
+        let [left_area, right_area] =
+            Layout::horizontal([Constraint::Min(10), Constraint::Length(help_width)]).areas(area);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::raw(format!(" {}", parts.join(" · "))).dim())),
+            left_area,
+        );
+        frame.render_widget(Paragraph::new(Line::from(Span::raw(help).dim()).right_aligned()), right_area);
+    }
+
+    /// The key help for the focused pane, in the user's keys.
+    fn footer_help(&self) -> Vec<String> {
         // Each hint names its action's first key; an unbound action drops out of the line.
         let key = |action, label| self.keys.labelled(action, label);
         let bare = |hint: String| (!hint.is_empty()).then_some(hint);
@@ -462,6 +487,10 @@ impl App {
         let send_and_close =
             if self.is_file_review() { None } else { key(Action::SendAndClose, "send+quit") };
         let quit = [send_and_close, key(Action::Quit, "quit")];
+        // The image keys act on the current note; removing is offered only when it has one.
+        let note = self.current_note();
+        let has_images = note.as_deref().is_some_and(|id| self.open.store.has_images(id));
+        let remove_image = has_images.then(|| key(Action::RemoveImage, "remove image")).flatten();
         let help: Vec<Option<String>> = match self.focus {
             _ if self.pending.is_some() => vec![
                 key(Action::LooksGood, "looks good"),
@@ -477,10 +506,17 @@ impl App {
                 key(Action::ToggleTree, "hide"),
                 key(Action::Quit, "quit"),
             ],
-            Focus::Rail => [up_down, key(Action::Edit, "edit"), key(Action::Remove, "remove"), tab]
-                .into_iter()
-                .chain(quit)
-                .collect(),
+            Focus::Rail => [
+                up_down,
+                key(Action::Edit, "edit"),
+                key(Action::Remove, "remove"),
+                key(Action::AttachImage, "image"),
+                remove_image,
+                tab,
+            ]
+            .into_iter()
+            .chain(quit)
+            .collect(),
             Focus::Document if self.roam => [
                 bare(self.keys.directions_hint()).map(|keys| format!("{keys} move")),
                 key(Action::Visual, "select"),
@@ -494,6 +530,8 @@ impl App {
                 key(Action::MoveCursor, "move"),
                 key(Action::Visual, "select"),
                 key(Action::Comment, "comment"),
+                note.is_some().then(|| key(Action::AttachImage, "image")).flatten(),
+                remove_image,
                 key(Action::Send, "send"),
                 tab,
             ]
@@ -505,19 +543,7 @@ impl App {
         // last.
         let find =
             if self.tree.is_some() && self.pending.is_none() { key(Action::QuickOpen, "find") } else { None };
-        let help: Vec<String> = help.into_iter().chain([find]).flatten().collect();
-        let help = if help.is_empty() { String::new() } else { format!("{} ", help.join(" · ")) };
-        // The status must stay readable at any width, so the key help yields columns to it
-        // (and is clipped) rather than the other way round.
-        let status_width = self.status.as_ref().map_or(0, |s| s.width() + 1) as u16;
-        let help_width = (help.width() as u16).min(area.width.saturating_sub(status_width.max(10)));
-        let [left_area, right_area] =
-            Layout::horizontal([Constraint::Min(10), Constraint::Length(help_width)]).areas(area);
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::raw(format!(" {}", parts.join(" · "))).dim())),
-            left_area,
-        );
-        frame.render_widget(Paragraph::new(Line::from(Span::raw(help).dim()).right_aligned()), right_area);
+        help.into_iter().chain([find]).flatten().collect()
     }
 }
 

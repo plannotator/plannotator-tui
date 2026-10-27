@@ -61,6 +61,13 @@ copies the feedback to the clipboard as numbered annotations (`# Annotations on 
 `## Annotation 1 (line 12)`, …). Every annotation is saved as JSON the moment you make it; `q`
 closes.
 
+`I` attaches a local image to the selected note (in the notes, or the selected block's note in
+the document): type, paste or drop its path, then `Enter`. Quoted, `~` and `file://` paths
+work; a relative path starts at the document's folder. PNG, JPEG, GIF, WebP, BMP and SVG files
+are accepted. The feedback lists each one as `Image: /absolute/path.png` under its note, so the
+agent opens it from your disk; nothing is copied or uploaded. `D` removes the last image added.
+Adding or removing an image makes a sent note pending again.
+
 Copies go to the clipboard as OSC 52, which is the terminal you are looking at, so on Herdr 0.9.0
 they reach your own machine even when the app runs on a remote server; Herdr Annotate's global
 `copy-context` and `copy-archive` actions do not, because they run outside a pane.
@@ -90,9 +97,9 @@ dimmed. The keys also work without opening the menu.
 |---|---|
 | anywhere | `Tab` cycle tree · document · notes; `E` send; `t` tree; `r` reload; `o` open the file in `$EDITOR`; `q` quit |
 | reply review | `S` send and close |
-| document | `j`/`k` block; `c` comment on the block; `x` clear its annotations; `X` clear every annotation on the document, after a `y`; `v` select with `hjkl` `w` `b` `0` `$`, `Enter` to finish; `i` move the cursor with those keys first, then `v` to select from there |
+| document | `j`/`k` block; `c` comment on the block; `x` clear its annotations; `X` clear every annotation on the document, after a `y`; `v` select with `hjkl` `w` `b` `0` `$`, `Enter` to finish; `i` move the cursor with those keys first, then `v` to select from there; `I`/`D` attach or remove an image on the block's note |
 | toolbar | `a` looks good · `c` comment · `d` delete · `Esc` |
-| notes | `j`/`k`; `e` edit; `x` remove; click a bubble |
+| notes | `j`/`k`; `e` edit; `x` remove; `I` attach an image, `D` remove the last; click a bubble |
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
@@ -237,6 +244,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `resend-all` `finish-review` `undo-finish` `archive` | `R` `F` `U` `H` | file and folder review actions |
 | `toggle-hidden` | `.` | show/hide dot-prefixed entries in the tree |
 | `edit` `remove` | `e` `x`, `Delete` | the selected note |
+| `attach-image` `remove-image` | `I` `D` | an image on the selected note, or the selected block's |
 | `visual` `move-cursor` | `v` `i` | select with the cursor; move it first |
 | `comment` `clear-block` | `c` `x` | on the block; clear its annotations |
 | `clear-all` | `X` | every annotation on the document, after `yes` |

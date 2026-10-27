@@ -9,6 +9,7 @@ mod editor;
 mod feedback;
 mod file_search;
 mod header;
+mod images;
 mod input;
 mod menu;
 mod pick;
@@ -58,6 +59,8 @@ enum Mode {
     Compose,
     /// Editing the body of an existing annotation (by id).
     Edit(String),
+    /// Typing the path of an image to attach to an annotation (by id).
+    AttachImage(String),
     /// Quit was asked for while feedback is unsent; the footer asks first.
     ConfirmQuit,
     /// `clear-all` was pressed; the footer asks before every note on the document goes.

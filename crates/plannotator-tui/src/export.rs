@@ -1,8 +1,9 @@
 //! Feedback export: annotations as numbered Markdown a coding agent reads without a schema.
 //!
 //! `# Annotations on <name>`, then one `## Annotation N (line X)` per annotation in document
-//! order: what kind of note it is, the quoted text, and the body as a blockquote. Deleted
-//! text is fenced so quoted markdown cannot escape.
+//! order: what kind of note it is, the quoted text, the body as a blockquote, and one
+//! `Image: <absolute path>` line per attached image. Deleted text is fenced so quoted
+//! markdown cannot escape.
 
 use std::fmt::Write as _;
 use std::ops::Range;
@@ -49,6 +50,10 @@ pub(crate) fn feedback(name: &str, entries: &[Entry<'_>]) -> String {
                 let _ = writeln!(out, "Comment on: \"{}\"", single_line(quoted));
                 let _ = writeln!(out, "> {}", quote_lines(body));
             }
+        }
+        // A whole line per path, so a path with spaces needs no quoting or escaping.
+        for image in &entry.annotation.plannotator_tui.images {
+            let _ = writeln!(out, "Image: {image}");
         }
         for reply in &entry.annotation.replies {
             let who = reply.author.as_deref().unwrap_or("reply");
@@ -109,6 +114,7 @@ mod tests {
             author_name: None,
             state: State::Open,
             attachments: Vec::new(),
+            plannotator_tui: plannotator_tui_schema::NoteExtras::default(),
             created_at: String::new(),
             updated_at: String::new(),
             replies: Vec::new(),
@@ -143,6 +149,19 @@ mod tests {
         assert_eq!(
             feedback("terminal · w1:p1", &entries),
             "# Annotations on terminal · w1:p1\n\n## Annotation 1\nComment on: \"ls\"\n> why\n\n"
+        );
+    }
+
+    #[test]
+    fn each_attached_image_is_one_line_with_its_path() {
+        let source = "see the header\n";
+        let (mut comment, range) = annotation(source, "header", Kind::Comment, "match this");
+        comment.plannotator_tui.images = vec!["/shots/before.png".into(), "/shots/after shot.png".into()];
+        let entries = [Entry { annotation: &comment, lines: Some((1, 1)), quote: source[range].to_owned() }];
+        assert_eq!(
+            feedback("plan.md", &entries),
+            "# Annotations on plan.md\n\n## Annotation 1 (line 1)\nComment on: \"header\"\n> match this\n\
+             Image: /shots/before.png\nImage: /shots/after shot.png\n\n"
         );
     }
 

@@ -30,11 +30,17 @@ impl App {
                 }
                 Mode::ReviewMenu => self.menu_key(*key),
                 Mode::Compose | Mode::Edit(_) => self.text_key(*key),
+                Mode::AttachImage(_) => self.image_prompt_key(*key),
             },
             // A paste lands in the comment box verbatim, newlines included; anywhere else
             // it is ignored rather than replayed as keystrokes.
             Event::Paste(text) if matches!(self.mode, Mode::Compose | Mode::Edit(_)) => {
                 self.compose.insert_text(text);
+                Ok(())
+            }
+            // A pasted or dropped path joins the image prompt's one line.
+            Event::Paste(text) if matches!(self.mode, Mode::AttachImage(_)) => {
+                self.image_prompt_paste(text);
                 Ok(())
             }
             // In Quick Open a paste joins the query, newlines dropped.
@@ -209,6 +215,8 @@ impl App {
             Some(Action::Up) => self.rail_cursor = self.rail_cursor.saturating_sub(1),
             Some(Action::Confirm | Action::Edit) => self.edit_selected_annotation(),
             Some(Action::Remove) => self.remove_selected_annotation()?,
+            Some(Action::AttachImage) => self.begin_attach_image(),
+            Some(Action::RemoveImage) => self.remove_image()?,
             Some(Action::Back) => self.focus = Focus::Document,
             _ => {}
         }
@@ -297,6 +305,8 @@ impl App {
                 self.status = Some(format!("removed {removed} annotation(s) on block"));
             }
             Some(Action::ClearAll) => self.request_clear_all(),
+            Some(Action::AttachImage) => self.begin_attach_image(),
+            Some(Action::RemoveImage) => self.remove_image()?,
             _ => {}
         }
         Ok(())
@@ -417,6 +427,7 @@ impl App {
                         }
                     }
                     Mode::Compose
+                    | Mode::AttachImage(_)
                     | Mode::Browse
                     | Mode::ConfirmQuit
                     | Mode::ConfirmClearAll

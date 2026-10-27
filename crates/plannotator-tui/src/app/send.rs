@@ -175,6 +175,7 @@ impl App {
             feedback: &feedback.text,
             annotations,
             count: feedback.count,
+            images: feedback.images,
             now_ms: None,
         });
     }

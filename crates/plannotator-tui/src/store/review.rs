@@ -76,30 +76,61 @@ impl Store {
         !self.annotations.is_empty() && self.annotations.iter().all(|a| !self.is_pending(a))
     }
 
-    /// Replace a body, advancing the existing timestamp beyond its last send even when
-    /// the clock has not ticked (or has moved backwards) since that send. One millisecond
-    /// is the smallest step the stored shape can represent.
+    /// Replace a body. Returns whether it changed.
     pub(crate) fn edit_body(&mut self, id: &str, body: String) -> Result<bool> {
+        self.change(id, |annotation| {
+            if annotation.body == body {
+                return false;
+            }
+            annotation.body = body;
+            true
+        })
+    }
+
+    /// Attach a local image by absolute path. False when the note already has it.
+    pub(crate) fn add_image(&mut self, id: &str, path: &str) -> Result<bool> {
+        self.change(id, |annotation| {
+            let images = &mut annotation.plannotator_tui.images;
+            if images.iter().any(|image| image == path) {
+                return false;
+            }
+            images.push(path.to_owned());
+            true
+        })
+    }
+
+    /// Detach the most recently attached image; `None` when the note has none.
+    pub(crate) fn remove_last_image(&mut self, id: &str) -> Result<Option<String>> {
+        let mut removed = None;
+        self.change(id, |annotation| {
+            removed = annotation.plannotator_tui.images.pop();
+            removed.is_some()
+        })?;
+        Ok(removed)
+    }
+
+    /// Apply `edit` to one annotation and save. When it reports a change, the timestamp
+    /// advances beyond the last send even when the clock has not ticked (or has moved
+    /// backwards) since that send, so the note is pending again. One millisecond is the
+    /// smallest step the stored shape can represent.
+    fn change(&mut self, id: &str, edit: impl FnOnce(&mut Annotation) -> bool) -> Result<bool> {
         let Some(annotation) = self.annotations.iter().find(|a| a.id == id) else { return Ok(false) };
-        if annotation.body == body {
-            return Ok(false);
-        }
         let previous =
             [parse_time(&annotation.updated_at), self.last_delivery(id).and_then(|d| parse_time(&d.at))]
                 .into_iter()
                 .flatten()
                 .max();
+        let mut next = self.clone();
+        let Some(annotation) = next.annotations.iter_mut().find(|a| a.id == id) else { return Ok(false) };
+        if !edit(annotation) {
+            return Ok(false);
+        }
         let mut now = OffsetDateTime::now_utc();
         if let Some(previous) = previous {
             now = now
                 .max(previous.checked_add(Duration::milliseconds(1)).context("advancing annotation time")?);
         }
-        let updated_at = format_millis(now)?;
-        let mut next = self.clone();
-        if let Some(annotation) = next.annotations.iter_mut().find(|a| a.id == id) {
-            annotation.body = body;
-            annotation.updated_at = updated_at;
-        }
+        annotation.updated_at = format_millis(now)?;
         next.save()?;
         *self = next;
         Ok(true)

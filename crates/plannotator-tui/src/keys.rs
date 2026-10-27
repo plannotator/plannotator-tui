@@ -47,6 +47,8 @@ pub(crate) enum Action {
     ToggleHidden,
     Edit,
     Remove,
+    AttachImage,
+    RemoveImage,
     Visual,
     MoveCursor,
     Comment,
@@ -59,10 +61,11 @@ pub(crate) enum Action {
 }
 
 use Action::{
-    Archive, Back, Bottom, ClearAll, ClearBlock, Comment, Confirm, CycleFocus, Delete, Down, Edit,
-    FinishReview, Interrupt, Left, LineEnd, LineStart, LooksGood, MoveCursor, No, OpenInEditor, PageDown,
-    PageUp, PickMessage, QuickOpen, Quit, Reload, Remove, ResendAll, ReviewMenu, Right, Send, SendAndClose,
-    ToggleHidden, ToggleTree, Top, UndoFinish, Up, Visual, WordBack, WordForward, Yes,
+    Archive, AttachImage, Back, Bottom, ClearAll, ClearBlock, Comment, Confirm, CycleFocus, Delete, Down,
+    Edit, FinishReview, Interrupt, Left, LineEnd, LineStart, LooksGood, MoveCursor, No, OpenInEditor,
+    PageDown, PageUp, PickMessage, QuickOpen, Quit, Reload, Remove, RemoveImage, ResendAll, ReviewMenu,
+    Right, Send, SendAndClose, ToggleHidden, ToggleTree, Top, UndoFinish, Up, Visual, WordBack, WordForward,
+    Yes,
 };
 
 /// Browsing, before the focused pane gets the key.
@@ -84,10 +87,26 @@ pub(crate) const GLOBAL: &[Action] = &[
     PickMessage,
 ];
 pub(crate) const TREE: &[Action] = &[Down, Up, Confirm, Right, ToggleHidden, Back];
-pub(crate) const RAIL: &[Action] = &[Down, Up, Confirm, Edit, Remove, Back];
+pub(crate) const RAIL: &[Action] = &[Down, Up, Confirm, Edit, Remove, AttachImage, RemoveImage, Back];
+/// `attach-image` and `remove-image` act on the selected block's note here.
 pub(crate) const DOCUMENT: &[Action] = &[
-    Back, Visual, MoveCursor, Down, Up, Left, Right, PageDown, PageUp, Top, Bottom, Comment, Confirm,
-    ClearBlock, ClearAll,
+    Back,
+    Visual,
+    MoveCursor,
+    Down,
+    Up,
+    Left,
+    Right,
+    PageDown,
+    PageUp,
+    Top,
+    Bottom,
+    Comment,
+    Confirm,
+    ClearBlock,
+    ClearAll,
+    AttachImage,
+    RemoveImage,
 ];
 /// Cursor motions, in visual mode and while moving the cursor (`move-cursor`).
 pub(crate) const MOTION: &[Action] = &[Left, Right, Down, Up, WordForward, WordBack, LineStart, LineEnd];
@@ -251,6 +270,8 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (ToggleHidden, &[ch('.')]),
     (Edit, &[ch('e')]),
     (Remove, &[ch('x'), named(KeyCode::Delete)]),
+    (AttachImage, &[ch('I')]),
+    (RemoveImage, &[ch('D')]),
     (Visual, &[ch('v')]),
     (MoveCursor, &[ch('i')]),
     (Comment, &[ch('c')]),
@@ -381,6 +402,8 @@ impl Action {
             Self::ToggleHidden => "toggle-hidden",
             Self::Edit => "edit",
             Self::Remove => "remove",
+            Self::AttachImage => "attach-image",
+            Self::RemoveImage => "remove-image",
             Self::Visual => "visual",
             Self::MoveCursor => "move-cursor",
             Self::Comment => "comment",

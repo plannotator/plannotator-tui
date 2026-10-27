@@ -392,3 +392,13 @@ mode still forces the selection to start at the top and be shrunk from below. Sp
 top-level list into one block per item was built and dropped: it made `j`/`k` + `c` reach a
 bullet directly, but changed rendering (a block gap between every bullet) and the block
 model for everyone, when roaming already reaches any line.
+
+## 16. Images on a note are local paths under `plannotator_tui` (2026-10-27)
+
+A note can carry images, rebuilt from plannotator-tui#73. Workspaces' `attachments` holds
+uploaded `https://` URLs and rejects anything else, so a local file cannot go there. The
+paths live in the annotation's own `plannotator_tui` namespace (`{"images": ["/abs/a.png"]}`),
+omitted when empty, so a note without images keeps the server shape and older records load
+unchanged. Feedback writes one `Image: <absolute path>` line per image: the whole line is the
+path, so spaces need no escaping, and agents open a path more readily than a `file://` URL.
+Nothing is copied or uploaded; uploading belongs to a future Workspaces sync.
