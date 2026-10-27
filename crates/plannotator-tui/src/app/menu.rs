@@ -67,9 +67,9 @@ impl App {
         }
     }
 
-    /// Open the menu on the first row that applies. Reply reviews have no menu.
+    /// Open the menu on the first row that applies. Reply and hosted reviews have no menu.
     pub(crate) fn open_review_menu(&mut self) {
-        if !self.is_file_review() {
+        if !self.has_review_menu() {
             return;
         }
         self.menu_cursor = REVIEW_ACTIONS.iter().position(|&action| self.action_applies(action)).unwrap_or(0);

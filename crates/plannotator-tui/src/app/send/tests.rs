@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use plannotator_tui_schema::{DocumentSource, Kind, Provenance};
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::review_test_support::{
     Outcome, RecordingDelivery, draw, file_app, folder_app, press, reply_app,
@@ -236,4 +237,17 @@ fn the_footer_names_s_only_in_a_reply_review_and_fits_at_80_columns() {
         assert!(footer.contains(help), "reply={reply}: {footer:?}");
         std::fs::remove_dir_all(root).expect("cleanup");
     }
+}
+
+#[test]
+fn the_send_chord_mid_comment_saves_the_comment_and_sends() {
+    let (_root, mut app, delivery) = file_app("chord-send");
+    for c in ['c', 'o', 'k'] {
+        press(&mut app, c);
+    }
+    app.handle_event(&Event::Key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))).expect("ctrl+s");
+    assert_eq!(app.mode, Mode::Browse);
+    assert!(!app.quit);
+    assert_eq!(delivery.calls.borrow().len(), 1);
+    assert!(delivery.calls.borrow().first().is_some_and(|text| text.contains("ok")));
 }

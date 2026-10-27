@@ -7,6 +7,7 @@ mod draw;
 mod feedback;
 mod file_search;
 mod header;
+pub(crate) mod host;
 mod input;
 mod menu;
 mod pick;
@@ -201,6 +202,8 @@ pub(crate) struct App {
     frame_max_ms: f64,
     /// Copy selections to the terminal clipboard (off for headless runs).
     pub(crate) clipboard: bool,
+    /// Where a host waits to hear that the notes should be sent; see `host`.
+    pub(crate) send_intent: Option<PathBuf>,
     pub(crate) quit: bool,
 }
 
@@ -268,6 +271,7 @@ impl App {
             frame_ms: 0.0,
             frame_max_ms: 0.0,
             clipboard: false,
+            send_intent: None,
             quit: false,
         })
     }

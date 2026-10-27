@@ -22,6 +22,16 @@ pub(super) enum SendState {
 }
 
 impl App {
+    /// The header button and a send from the comment box: deliver, or hand the notes to the
+    /// host that will.
+    pub(super) fn send(&mut self) -> Result<()> {
+        if self.is_hosted() {
+            self.hand_back();
+            return Ok(());
+        }
+        self.send_feedback()
+    }
+
     pub(super) fn send_feedback(&mut self) -> Result<()> {
         let scope = if self.is_file_review() { SendScope::Pending } else { SendScope::All };
         self.send_feedback_scope(scope)
@@ -188,6 +198,9 @@ impl App {
     }
 
     pub(super) fn send_label(&self) -> String {
+        if self.is_hosted() {
+            return self.hosted_send_label();
+        }
         let target = self.delivery.describe();
         let count = self.send_count();
         if self.is_file_review() {

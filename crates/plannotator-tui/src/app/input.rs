@@ -28,6 +28,10 @@ impl App {
                     Ok(())
                 }
                 Mode::ReviewMenu => self.menu_key(*key),
+                Mode::Compose | Mode::Edit(_) if self.keys.is_chord(Action::Send, key) => {
+                    self.save_compose()?;
+                    self.send()
+                }
                 Mode::Compose | Mode::Edit(_) => self.text_key(*key),
             },
             // A paste lands in the comment box verbatim, newlines included; anywhere else
@@ -70,6 +74,19 @@ impl App {
         };
         match action {
             Some(Action::QuickOpen) => return self.start_file_search(),
+            // A host delivers the notes: every send hands them back, and so does leaving.
+            Some(Action::Send | Action::SendAndClose) if self.is_hosted() => {
+                self.hand_back();
+                return Ok(());
+            }
+            Some(Action::Quit) if self.is_hosted() => {
+                self.leave_hosted();
+                return Ok(());
+            }
+            Some(Action::Interrupt) if self.is_hosted() => {
+                self.quit = true;
+                return Ok(());
+            }
             Some(Action::Quit | Action::Interrupt) => {
                 self.request_quit();
                 return Ok(());
@@ -87,20 +104,20 @@ impl App {
                 }
                 return self.send_and_quit();
             }
-            Some(Action::ReviewMenu) if self.is_file_review() => {
+            Some(Action::ReviewMenu) if self.has_review_menu() => {
                 self.open_review_menu();
                 return Ok(());
             }
-            Some(Action::ResendAll) if self.is_file_review() => {
+            Some(Action::ResendAll) if self.has_review_menu() => {
                 return self.run_review_action(ReviewAction::ResendAll);
             }
-            Some(Action::FinishReview) if self.is_file_review() => {
+            Some(Action::FinishReview) if self.has_review_menu() => {
                 return self.run_review_action(ReviewAction::Finish);
             }
-            Some(Action::UndoFinish) if self.is_file_review() => {
+            Some(Action::UndoFinish) if self.has_review_menu() => {
                 return self.run_review_action(ReviewAction::Undo);
             }
-            Some(Action::Archive) if self.is_file_review() => {
+            Some(Action::Archive) if self.has_review_menu() => {
                 return self.run_review_action(ReviewAction::Archive);
             }
             Some(Action::ToggleTree) => {
@@ -369,35 +386,39 @@ impl App {
     fn text_key(&mut self, key: KeyEvent) -> Result<()> {
         match self.compose.handle_key(key) {
             ComposeAction::Cancel => self.mode = Mode::Browse,
-            ComposeAction::Save => {
-                let body = self.compose.value().trim().to_owned();
-                match std::mem::replace(&mut self.mode, Mode::Browse) {
-                    Mode::Edit(id) => {
-                        if body.is_empty() {
-                            self.status = Some("edit cancelled: empty".into());
-                        } else if self.open.store.edit_body(&id, body)? {
-                            self.mark_unsent();
-                            self.status = Some("annotation updated".into());
-                        }
-                    }
-                    Mode::Compose
-                    | Mode::Browse
-                    | Mode::ConfirmQuit
-                    | Mode::Pick
-                    | Mode::FileSearch
-                    | Mode::Archive
-                    | Mode::ReviewMenu => {
-                        if !body.is_empty()
-                            && let Some(pending) = self.pending.take()
-                        {
-                            self.annotate(pending.range, Kind::Comment, body)?;
-                            self.status = Some("comment saved".into());
-                        }
-                        self.clear_selection();
-                    }
+            ComposeAction::Save => self.save_compose()?,
+            ComposeAction::Edited => {}
+        }
+        Ok(())
+    }
+
+    /// Save the comment or edit being written and go back to browsing.
+    fn save_compose(&mut self) -> Result<()> {
+        let body = self.compose.value().trim().to_owned();
+        match std::mem::replace(&mut self.mode, Mode::Browse) {
+            Mode::Edit(id) => {
+                if body.is_empty() {
+                    self.status = Some("edit cancelled: empty".into());
+                } else if self.open.store.edit_body(&id, body)? {
+                    self.mark_unsent();
+                    self.status = Some("annotation updated".into());
                 }
             }
-            ComposeAction::Edited => {}
+            Mode::Compose
+            | Mode::Browse
+            | Mode::ConfirmQuit
+            | Mode::Pick
+            | Mode::FileSearch
+            | Mode::Archive
+            | Mode::ReviewMenu => {
+                if !body.is_empty()
+                    && let Some(pending) = self.pending.take()
+                {
+                    self.annotate(pending.range, Kind::Comment, body)?;
+                    self.status = Some("comment saved".into());
+                }
+                self.clear_selection();
+            }
         }
         Ok(())
     }
@@ -410,7 +431,7 @@ impl App {
             MouseEventKind::ScrollUp => self.scroll_by(-3),
             MouseEventKind::Down(MouseButton::Left) => {
                 if self.send_button_hit(mouse.column, mouse.row) {
-                    return self.send_feedback();
+                    return self.send();
                 }
                 let hit = |rect: Option<ratatui::layout::Rect>| {
                     rect.is_some_and(|r| mouse.row == r.y && mouse.column >= r.x && mouse.column < r.right())
