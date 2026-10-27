@@ -229,7 +229,7 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (Quit, &[ch('q')]),
     (Interrupt, &[ctrl('c')]),
     (CycleFocus, &[named(KeyCode::Tab)]),
-    (Send, &[ch('E')]),
+    (Send, &[ch('E'), ctrl('s')]),
     (SendAndClose, &[ch('S')]),
     (ToggleTree, &[ch('t')]),
     (Reload, &[ch('r')]),
@@ -278,11 +278,10 @@ impl Keymap {
     /// with Ctrl held, so an exact Ctrl binding is tried first: `page-up = ["ctrl+k"]` must
     /// not lose `ctrl+k` to `up`'s plain `k` just because `up` comes first.
     pub(crate) fn action(&self, key: &KeyEvent, context: &[Action]) -> Option<Action> {
-        let exact_ctrl = |action| self.keys(action).iter().any(|k| k.ctrl && k.matches(key));
         context
             .iter()
             .copied()
-            .find(|&action| exact_ctrl(action))
+            .find(|&action| self.is_chord(action, key))
             .or_else(|| context.iter().copied().find(|&action| self.is(action, key)))
     }
 
@@ -293,6 +292,12 @@ impl Keymap {
     /// The action's first key as the hints spell it; empty when it is unbound.
     pub(crate) fn hint(&self, action: Action) -> String {
         self.keys(action).first().map(|key| key.hint()).unwrap_or_default()
+    }
+
+    /// Whether a Ctrl binding of `action` matches. A text box reads only these: a plain key
+    /// there is text.
+    pub(crate) fn is_chord(&self, action: Action, key: &KeyEvent) -> bool {
+        self.keys(action).iter().any(|k| k.ctrl && k.matches(key))
     }
 
     /// `key label` for a hint line, or nothing when the action is unbound, so an unbound

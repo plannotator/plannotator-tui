@@ -28,6 +28,10 @@ impl App {
                     Ok(())
                 }
                 Mode::ReviewMenu => self.menu_key(*key),
+                Mode::Compose | Mode::Edit(_) if self.keys.is_chord(Action::Send, key) => {
+                    self.save_compose()?;
+                    self.send_feedback()
+                }
                 Mode::Compose | Mode::Edit(_) => self.text_key(*key),
             },
             // A paste lands in the comment box verbatim, newlines included; anywhere else
@@ -369,35 +373,39 @@ impl App {
     fn text_key(&mut self, key: KeyEvent) -> Result<()> {
         match self.compose.handle_key(key) {
             ComposeAction::Cancel => self.mode = Mode::Browse,
-            ComposeAction::Save => {
-                let body = self.compose.value().trim().to_owned();
-                match std::mem::replace(&mut self.mode, Mode::Browse) {
-                    Mode::Edit(id) => {
-                        if body.is_empty() {
-                            self.status = Some("edit cancelled: empty".into());
-                        } else if self.open.store.edit_body(&id, body)? {
-                            self.mark_unsent();
-                            self.status = Some("annotation updated".into());
-                        }
-                    }
-                    Mode::Compose
-                    | Mode::Browse
-                    | Mode::ConfirmQuit
-                    | Mode::Pick
-                    | Mode::FileSearch
-                    | Mode::Archive
-                    | Mode::ReviewMenu => {
-                        if !body.is_empty()
-                            && let Some(pending) = self.pending.take()
-                        {
-                            self.annotate(pending.range, Kind::Comment, body)?;
-                            self.status = Some("comment saved".into());
-                        }
-                        self.clear_selection();
-                    }
+            ComposeAction::Save => self.save_compose()?,
+            ComposeAction::Edited => {}
+        }
+        Ok(())
+    }
+
+    /// Save the comment or edit being written and go back to browsing.
+    fn save_compose(&mut self) -> Result<()> {
+        let body = self.compose.value().trim().to_owned();
+        match std::mem::replace(&mut self.mode, Mode::Browse) {
+            Mode::Edit(id) => {
+                if body.is_empty() {
+                    self.status = Some("edit cancelled: empty".into());
+                } else if self.open.store.edit_body(&id, body)? {
+                    self.mark_unsent();
+                    self.status = Some("annotation updated".into());
                 }
             }
-            ComposeAction::Edited => {}
+            Mode::Compose
+            | Mode::Browse
+            | Mode::ConfirmQuit
+            | Mode::Pick
+            | Mode::FileSearch
+            | Mode::Archive
+            | Mode::ReviewMenu => {
+                if !body.is_empty()
+                    && let Some(pending) = self.pending.take()
+                {
+                    self.annotate(pending.range, Kind::Comment, body)?;
+                    self.status = Some("comment saved".into());
+                }
+                self.clear_selection();
+            }
         }
         Ok(())
     }

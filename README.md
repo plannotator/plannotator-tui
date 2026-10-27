@@ -209,7 +209,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `confirm` `back` | `Enter` `Esc` | finish, open, run; cancel, close |
 | `quit` `interrupt` | `q` `ctrl+c` | quit |
 | `cycle-focus` | `Tab` | tree · document · notes |
-| `send` `send-and-close` | `E` `S` | send; send and close a reply review |
+| `send` `send-and-close` | `E` `ctrl+s`, `S` | send; send and close a reply review. A Ctrl binding of `send` also works in the comment box, which it saves first |
 | `toggle-tree` `reload` `pick-message` | `t` `r` `p` | show/hide the tree; reload; choose another reply |
 | `quick-open` | `ctrl+p` | find a file by name in a folder review |
 | `review-menu` | `m` | the Review menu |
