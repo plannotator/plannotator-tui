@@ -272,6 +272,23 @@ browser app writes, so both tools share one history. To turn it off, set
 `PLANNOTATOR_FEEDBACK_HISTORY=0` (once the variable is set, only `1` or `true` enable) or put
 `"feedbackHistory": false` in `{data_dir}/config.json`; the variable wins over the file.
 
+## Hosts that deliver the feedback
+
+A host that runs plannotator-tui as a modal step, such as an editor or agent plugin, can
+deliver the feedback itself. It sets `PLANNOTATOR_TUI_SEND_INTENT` to a file path, runs the
+review, and reads that file when the TUI exits:
+
+- `send` (`E`, `ctrl+s`), `send-and-close` and the header button write `send` to the file and
+  quit. A Ctrl binding of `send` works mid-comment and saves the comment first.
+- `quit` with notes does the same; without notes it just quits.
+- `interrupt` (`ctrl+c`) quits without writing it, and the host decides what to do with the
+  notes.
+
+The notes stay pending and nothing is archived: the host exports them with `--export` and
+delivers them. The Review menu is off, since it tracks deliveries the TUI made itself. The
+keys follow `[keys]`, and the header and footer name the bound ones. Without the variable
+nothing changes.
+
 ## Headless
 
 ```sh

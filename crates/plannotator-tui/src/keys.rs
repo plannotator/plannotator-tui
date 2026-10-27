@@ -300,6 +300,11 @@ impl Keymap {
         self.keys(action).iter().any(|k| k.ctrl && k.matches(key))
     }
 
+    /// The action's first Ctrl binding as the hints spell it; empty when it has none.
+    pub(crate) fn chord_hint(&self, action: Action) -> String {
+        self.keys(action).iter().find(|k| k.ctrl).map(|key| key.hint()).unwrap_or_default()
+    }
+
     /// `key label` for a hint line, or nothing when the action is unbound, so an unbound
     /// action leaves no bare label behind.
     pub(crate) fn labelled(&self, action: Action, label: &str) -> Option<String> {

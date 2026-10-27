@@ -267,7 +267,12 @@ impl App {
     /// actually distinguishes it, so the hint is never a lie.
     fn compose_title(&self, verb: &str) -> String {
         let newline = if self.shift_enter { "shift+enter new line" } else { "alt+enter new line" };
-        format!(" {verb} \u{b7} enter saves \u{b7} {newline} \u{b7} esc cancels ")
+        // In a hosted review the send chord is the one-step way back, so the title names it.
+        let send = match self.keys.chord_hint(Action::Send) {
+            key if self.is_hosted() && !key.is_empty() => format!(" \u{b7} {key} sends"),
+            _ => String::new(),
+        };
+        format!(" {verb} \u{b7} enter saves{send} \u{b7} {newline} \u{b7} esc cancels ")
     }
 
     fn draw_compose(&self, frame: &mut Frame, title: &str) {
@@ -438,9 +443,18 @@ impl App {
         );
         let tab = bare(self.keys.hint(Action::CycleFocus));
         // `send-and-close` is bound only in a reply review, so only a reply review names it.
+        // A hosted review with notes sends them on the way out, so `quit` names the send.
+        let hosted = self.is_hosted();
+        let send = if hosted { None } else { key(Action::Send, "send") };
         let send_and_close =
-            if self.is_file_review() { None } else { key(Action::SendAndClose, "send+quit") };
-        let quit = [send_and_close, key(Action::Quit, "quit")];
+            if self.is_file_review() || hosted { None } else { key(Action::SendAndClose, "send+quit") };
+        let leave = if hosted && self.send_count() > 0 {
+            [key(Action::Quit, "send"), key(Action::Interrupt, "leave")]
+        } else {
+            [key(Action::Quit, "quit"), None]
+        };
+        let [first, second] = leave.clone();
+        let quit = [send_and_close, first, second];
         let help: Vec<Option<String>> = match self.focus {
             _ if self.pending.is_some() => vec![
                 key(Action::LooksGood, "looks good"),
@@ -452,10 +466,12 @@ impl App {
                 up_down,
                 key(Action::Confirm, "open"),
                 key(Action::ToggleHidden, "hidden"),
-                key(Action::Send, "send"),
+                send,
                 key(Action::ToggleTree, "hide"),
-                key(Action::Quit, "quit"),
-            ],
+            ]
+            .into_iter()
+            .chain(leave)
+            .collect(),
             Focus::Rail => [up_down, key(Action::Edit, "edit"), key(Action::Remove, "remove"), tab]
                 .into_iter()
                 .chain(quit)
@@ -473,7 +489,7 @@ impl App {
                 key(Action::MoveCursor, "move"),
                 key(Action::Visual, "select"),
                 key(Action::Comment, "comment"),
-                key(Action::Send, "send"),
+                send,
                 tab,
             ]
             .into_iter()

@@ -30,7 +30,7 @@ impl App {
                 Mode::ReviewMenu => self.menu_key(*key),
                 Mode::Compose | Mode::Edit(_) if self.keys.is_chord(Action::Send, key) => {
                     self.save_compose()?;
-                    self.send_feedback()
+                    self.send()
                 }
                 Mode::Compose | Mode::Edit(_) => self.text_key(*key),
             },
@@ -74,6 +74,19 @@ impl App {
         };
         match action {
             Some(Action::QuickOpen) => return self.start_file_search(),
+            // A host delivers the notes: every send hands them back, and so does leaving.
+            Some(Action::Send | Action::SendAndClose) if self.is_hosted() => {
+                self.hand_back();
+                return Ok(());
+            }
+            Some(Action::Quit) if self.is_hosted() => {
+                self.leave_hosted();
+                return Ok(());
+            }
+            Some(Action::Interrupt) if self.is_hosted() => {
+                self.quit = true;
+                return Ok(());
+            }
             Some(Action::Quit | Action::Interrupt) => {
                 self.request_quit();
                 return Ok(());
@@ -91,20 +104,20 @@ impl App {
                 }
                 return self.send_and_quit();
             }
-            Some(Action::ReviewMenu) if self.is_file_review() => {
+            Some(Action::ReviewMenu) if self.has_review_menu() => {
                 self.open_review_menu();
                 return Ok(());
             }
-            Some(Action::ResendAll) if self.is_file_review() => {
+            Some(Action::ResendAll) if self.has_review_menu() => {
                 return self.run_review_action(ReviewAction::ResendAll);
             }
-            Some(Action::FinishReview) if self.is_file_review() => {
+            Some(Action::FinishReview) if self.has_review_menu() => {
                 return self.run_review_action(ReviewAction::Finish);
             }
-            Some(Action::UndoFinish) if self.is_file_review() => {
+            Some(Action::UndoFinish) if self.has_review_menu() => {
                 return self.run_review_action(ReviewAction::Undo);
             }
-            Some(Action::Archive) if self.is_file_review() => {
+            Some(Action::Archive) if self.has_review_menu() => {
                 return self.run_review_action(ReviewAction::Archive);
             }
             Some(Action::ToggleTree) => {
@@ -418,7 +431,7 @@ impl App {
             MouseEventKind::ScrollUp => self.scroll_by(-3),
             MouseEventKind::Down(MouseButton::Left) => {
                 if self.send_button_hit(mouse.column, mouse.row) {
-                    return self.send_feedback();
+                    return self.send();
                 }
                 let hit = |rect: Option<ratatui::layout::Rect>| {
                     rect.is_some_and(|r| mouse.row == r.y && mouse.column >= r.x && mouse.column < r.right())

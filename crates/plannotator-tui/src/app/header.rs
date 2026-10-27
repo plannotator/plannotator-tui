@@ -34,7 +34,7 @@ impl App {
             return Vec::new();
         }
         let mut labels = vec![(Button::Send, self.send_label())];
-        if self.is_file_review() {
+        if self.has_review_menu() {
             labels.push((Button::Review, self.review_label()));
         }
         let mut right = width;
