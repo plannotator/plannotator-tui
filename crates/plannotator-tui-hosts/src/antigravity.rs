@@ -1,5 +1,5 @@
 //! Antigravity CLI (`agy`): one directory per conversation under the app data directory
-//! (`$ANTIGRAVITY_CLI_HOME`, default `~/.gemini/antigravity-cli`), its steps in
+//! (`$ANTIGRAVITY_CLI_HOME` or `$ANTIGRAVITY_APP_DATA_DIR`, default `~/.gemini/antigravity-cli`), its steps in
 //! `brain/<conversation id>/.system_generated/logs/transcript_full.jsonl`.
 //!
 //! Each line is one step: `USER_INPUT` steps carry the prompt in `content`, `PLANNER_RESPONSE`

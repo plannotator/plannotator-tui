@@ -36,7 +36,9 @@ impl Roots {
             codex_home: path("CODEX_HOME").unwrap_or_else(|| home.join(".codex")),
             copilot_home: path("COPILOT_HOME").unwrap_or_else(|| home.join(".copilot")),
             factory_config: path("FACTORY_CONFIG_DIR").unwrap_or_else(|| home.join(".factory")),
+            // agy 1.2.7 reads ANTIGRAVITY_APP_DATA_DIR; ANTIGRAVITY_CLI_HOME is the name reported in #70.
             antigravity_home: path("ANTIGRAVITY_CLI_HOME")
+                .or_else(|| path("ANTIGRAVITY_APP_DATA_DIR"))
                 .unwrap_or_else(|| home.join(antigravity::DEFAULT_APP_DATA_DIR)),
             pi_session_dir: path("PI_CODING_AGENT_SESSION_DIR"),
             pi_agent_dir: path("PI_CODING_AGENT_DIR"),
@@ -107,6 +109,14 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
+
+    #[test]
+    fn antigravity_app_data_dir_is_honoured() {
+        let roots = Roots::from_lookup(PathBuf::from("home"), |key| {
+            (key == "ANTIGRAVITY_APP_DATA_DIR").then(|| OsString::from("root/agy app"))
+        });
+        assert_eq!(roots.antigravity_home, PathBuf::from("root/agy app"));
+    }
 
     #[test]
     fn every_documented_root_override_is_honoured() {

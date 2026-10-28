@@ -380,7 +380,7 @@ when it runs its own Herdr integration; that id is looked up as `<id>.jsonl`, sl
 first.
 
 **Antigravity CLI** (2026-10-27, herdr-annotate#70). `agy` keeps one directory per
-conversation in its app data directory (`$ANTIGRAVITY_CLI_HOME`, else
+conversation in its app data directory (`$ANTIGRAVITY_CLI_HOME` or `$ANTIGRAVITY_APP_DATA_DIR`, else
 `~/.gemini/antigravity-cli`, `%USERPROFILE%` on Windows):
 `brain/<conversation id>/.system_generated/logs/transcript_full.jsonl`, one step per line.
 `transcript.jsonl` beside it truncates long `content` and is never read. A reply is a

@@ -41,7 +41,7 @@ pub enum Host {
     /// reports it as `cmd`.
     CommandCode,
     /// Antigravity CLI: `<app data>/brain/<conversation id>/.../transcript_full.jsonl`, the
-    /// app data directory `~/.gemini/antigravity-cli` unless `ANTIGRAVITY_CLI_HOME` moves it;
+    /// app data directory `~/.gemini/antigravity-cli` unless `ANTIGRAVITY_CLI_HOME` or `ANTIGRAVITY_APP_DATA_DIR` moves it;
     /// Herdr reports it as `agy` with the conversation id.
     Antigravity,
 }
