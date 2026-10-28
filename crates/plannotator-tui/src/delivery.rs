@@ -91,6 +91,26 @@ impl Delivery for Discard {
     }
 }
 
+/// A gated review with no agent pane: the decision reaches whoever ran the review, on
+/// stdout and in the result file, when the review ends. Sending only ends it, so like an
+/// agent it is a target that acts on the feedback, and quitting with notes unsent asks first.
+#[derive(Debug, Default)]
+pub(crate) struct Caller;
+
+impl Delivery for Caller {
+    fn describe(&self) -> String {
+        "caller".to_owned()
+    }
+
+    fn is_agent(&self) -> bool {
+        true
+    }
+
+    fn deliver(&self, _feedback: &str) -> Result<(), DeliveryError> {
+        Ok(())
+    }
+}
+
 /// An agent running in a Herdr pane. `herdr agent prompt` pastes the feedback as the
 /// agent's next message and presses Enter.
 #[derive(Debug)]

@@ -8,6 +8,7 @@ use plannotator_tui_schema::Provenance;
 use super::feedback::{Feedback, FeedbackPart, ReviewCounts, SendScope};
 use super::{App, Mode};
 use crate::delivery::{Clipboard, Delivery as _, DeliveryError};
+use crate::gate::{Decision, Gate};
 use crate::keys::Action;
 use crate::store::{Location, Store};
 
@@ -50,7 +51,8 @@ impl App {
         match self.delivery.deliver(&feedback.text) {
             Ok(()) => {
                 let files = feedback.parts.len();
-                self.archive_submission(&mut feedback);
+                let sent = (feedback.text.clone(), feedback.count);
+                self.archive_submission(&mut feedback, "feedback");
                 let errors = self.remember_delivery(&mut feedback, &target);
                 self.derive_send_state();
                 let verb = if self.delivery.is_agent() { "sent" } else { "copied" };
@@ -70,6 +72,12 @@ impl App {
                     );
                 }
                 self.status = Some(status);
+                // A gated review ends with the first send: one review, one decision.
+                if self.gate != Gate::Off {
+                    let (feedback, count) = sent;
+                    self.decision = Some(Decision::Annotated { feedback, count });
+                    self.quit = true;
+                }
             }
             Err(DeliveryError::Blocked(msg)) => {
                 let copied = if self.copy_fallback(&feedback.text) { " · copied to clipboard" } else { "" };
@@ -95,7 +103,7 @@ impl App {
 
     /// Keep the ids from the body we delivered. Attempt every file even when one record
     /// cannot be saved, and refresh counts from any intervening changes.
-    fn remember_delivery(&mut self, feedback: &mut Feedback, target: &str) -> Vec<String> {
+    pub(super) fn remember_delivery(&mut self, feedback: &mut Feedback, target: &str) -> Vec<String> {
         let mut errors = Vec::new();
         for mut part in feedback.parts.drain(..) {
             if let Err(err) = self.record_feedback_delivery(&mut part, target) {
@@ -142,7 +150,8 @@ impl App {
 
     /// The shared submission history records only the selected feedback. Finishing a
     /// review has its own complete copies in the annotation record and does not rely on it.
-    fn archive_submission(&self, feedback: &mut Feedback) {
+    /// `decision` is the archive's word for it: `feedback` for a send, or a gate's decision.
+    pub(super) fn archive_submission(&self, feedback: &mut Feedback, decision: &str) {
         use crate::archive::{self, Submission, Target};
         if !archive::enabled(|key| std::env::var(key).ok(), &self.data_dir) {
             return;
@@ -170,6 +179,7 @@ impl App {
             data_dir: &self.data_dir,
             project: &self.project,
             surface,
+            decision,
             origin,
             target,
             feedback: &feedback.text,

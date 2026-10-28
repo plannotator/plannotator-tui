@@ -34,6 +34,7 @@ pub(crate) enum Action {
     CycleFocus,
     Send,
     SendAndClose,
+    Approve,
     ToggleTree,
     Reload,
     OpenInEditor,
@@ -61,8 +62,8 @@ pub(crate) enum Action {
 }
 
 use Action::{
-    Archive, AttachImage, Back, Bottom, ClearAll, ClearBlock, Comment, Confirm, CycleFocus, Delete, Down,
-    Edit, FinishReview, Interrupt, Left, LineEnd, LineStart, LooksGood, MoveCursor, No, OpenInEditor,
+    Approve, Archive, AttachImage, Back, Bottom, ClearAll, ClearBlock, Comment, Confirm, CycleFocus, Delete,
+    Down, Edit, FinishReview, Interrupt, Left, LineEnd, LineStart, LooksGood, MoveCursor, No, OpenInEditor,
     PageDown, PageUp, PickMessage, QuickOpen, Quit, Reload, Remove, RemoveImage, ResendAll, ReviewMenu,
     Right, Send, SendAndClose, ToggleHidden, ToggleTree, Top, UndoFinish, Up, Visual, WordBack, WordForward,
     Yes,
@@ -75,6 +76,7 @@ pub(crate) const GLOBAL: &[Action] = &[
     CycleFocus,
     Send,
     SendAndClose,
+    Approve,
     ReviewMenu,
     ResendAll,
     FinishReview,
@@ -257,6 +259,7 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (CycleFocus, &[named(KeyCode::Tab)]),
     (Send, &[ch('E')]),
     (SendAndClose, &[ch('S')]),
+    (Approve, &[ch('A')]),
     (ToggleTree, &[ch('t')]),
     (Reload, &[ch('r')]),
     (OpenInEditor, &[ch('o')]),
@@ -297,7 +300,15 @@ impl Default for Keymap {
 impl<'de> Deserialize<'de> for Keymap {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut keymap = Self::default();
-        keymap.0.extend(BTreeMap::<Action, Vec<Key>>::deserialize(deserializer)?);
+        let entries = BTreeMap::<Action, Vec<Key>>::deserialize(deserializer)?;
+        let approve_set = entries.contains_key(&Approve);
+        keymap.0.extend(entries);
+        // `approve` arrived after configs were written and is live only in a gated review.
+        // Its default key yields to a config that gives that key to another action, so a
+        // config that loaded before still loads.
+        if !approve_set && keymap.check().is_err() {
+            keymap.0.insert(Approve, Vec::new());
+        }
         keymap.check().map_err(serde::de::Error::custom)?;
         Ok(keymap)
     }
@@ -389,6 +400,7 @@ impl Action {
             Self::CycleFocus => "cycle-focus",
             Self::Send => "send",
             Self::SendAndClose => "send-and-close",
+            Self::Approve => "approve",
             Self::ToggleTree => "toggle-tree",
             Self::Reload => "reload",
             Self::OpenInEditor => "open-in-editor",

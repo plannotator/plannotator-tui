@@ -426,3 +426,50 @@ omitted when empty, so a note without images keeps the server shape and older re
 unchanged. Feedback writes one `Image: <absolute path>` line per image: the whole line is the
 path, so spaces need no escaping, and agents open a path more readily than a `file://` URL.
 Nothing is copied or uploaded; uploading belongs to a future Workspaces sync.
+
+## 17. Gate mode: an explicit Approve and one decision per review (2026-10-28)
+
+Rebuilt from plannotator-tui#121. Quitting with no notes was ambiguous: a wrapper could not
+tell "approved" from "closed", and had to guess. `--gate` adds an Approve action (`A`, and a
+header button on the edge), separate from Send and quit, and makes the review end with one
+decision: `approved` (Approve; unsent notes ride along as approval notes), `annotated` (a
+successful Send) or `dismissed` (quit). Decision 2 still holds: approval is not a kind of
+annotation, it is this per-review object.
+
+The output contract is Plannotator's `annotate --gate`, read from
+`apps/hook/server/strict-annotate-result.ts`, `annotate-output.ts`, `host-result.ts` and
+`packages/shared/prompts.ts`, `feedback-archive.ts`, `packages/server/annotate.ts`:
+
+- Plaintext (`--gate`): `The user approved.`, or the `approvedWithNotes` prompt with a
+  `File:`/`Folder:` line when notes ride along; the feedback on a send; nothing on quit.
+- `--json`: one line, `{"decision":…,"feedback":…}`, plus `annotationCount` and `target`
+  as the browser adds them. `--json` alone decides without an Approve, as in the browser.
+- `--require-approval` exits 0 only on approval and 1 otherwise. `--result-file` publishes
+  the strict record (decision and feedback only) atomically: a `0600` temporary file beside
+  it, then a hard link, which fails rather than overwrite. Both need `--gate --json`, and
+  under either one every failure of the gate itself exits 2, so a typo never reads as a
+  rejection. Stdout is written before the file, as in the browser.
+- The feedback archive gets the browser's decision words: `approved`,
+  `approved-with-notes`, `feedback`, `dismissed`. A dismissal is archived only in a gated
+  review; an ordinary quit still records nothing.
+
+Where the TUI differs, and why:
+
+- A send ends a gated review. An ordinary review stays open across sends; a gate cannot,
+  because a script waits for exactly one answer.
+- The review draws on stdout, so a gated review refuses to start when stdout is not a
+  terminal (`$(…)` capture would hide it and wait forever). Scripts read `--result-file`.
+- With no agent pane the target is the caller (`Send 2 new ▸ caller`): sending copies
+  nothing to the clipboard, because the decision is the output.
+- Plannotator's prompts can be overridden in its `config.json`; this client always uses the
+  default wording. There is no free-text "Approve with a note…": a note on a block is the
+  same thing here. The content digest in #121's last point is not built.
+
+Inside Herdr, `herdr open --gate [--result-file PATH]` passes `PLANNOTATOR_TUI_GATE=1` and
+`PLANNOTATOR_TUI_RESULT_FILE` to the pane, which delivers the approval message (or the
+numbered feedback, as an ordinary send would) to the agent and publishes the result file.
+The launcher returns when the pane opens, so it has no exit-code contract; it checks the
+result path first so a taken name fails before anyone reviews.
+
+`approve` is a new rebindable action. Its default key yields when a config already gives
+`A` to an action that is live at the same time, so a config that loaded before still loads.

@@ -4,8 +4,9 @@
 
 #![allow(clippy::print_stdout, reason = "the CLI's job is to print")]
 
-use std::io::stdout;
+use std::io::{IsTerminal as _, Write as _, stdout};
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -18,13 +19,14 @@ use ratatui::crossterm::execute;
 
 use crate::app::App;
 use crate::config::Config;
-use crate::delivery::{Clipboard, Delivery, Discard, HerdrAgent};
+use crate::delivery::{Caller, Clipboard, Delivery, Discard, HerdrAgent};
 use crate::doc::Document;
+use crate::gate::{self, Decision, GateError, ReviewArgs};
 use crate::herdr::context::HerdrEnv;
 use crate::layout::DocLayout;
 
 const USAGE: &str = "usage:
-  plannotator-tui <file.md | folder>
+  plannotator-tui <file.md | folder> [--gate] [--json] [--require-approval] [--result-file <path>]
   plannotator-tui --export <file.md>
   plannotator-tui --bench <file.md>
   plannotator-tui --blocks <file.md>
@@ -34,6 +36,7 @@ const USAGE: &str = "usage:
   plannotator-tui config
   plannotator-tui --version
   plannotator-tui herdr open [file.md | folder] [--placement overlay|split|popup] [--deliver-to <pane>]
+                             [--gate] [--result-file <path>]
   plannotator-tui herdr last [--placement P] [--deliver-to <pane>] [--newest]
   plannotator-tui herdr terminal [--lines N] [--placement P] [--deliver-to <pane>] [--print]
   plannotator-tui herdr pane
@@ -57,18 +60,30 @@ pub(crate) fn delivery(interactive: bool) -> Box<dyn Delivery> {
     if !interactive {
         return Box::new(Discard);
     }
+    herdr_agent().unwrap_or_else(|| Box::new(Clipboard))
+}
+
+/// A gated review sends to the same agent pane; without one its decision goes to the caller.
+fn gate_delivery() -> Box<dyn Delivery> {
+    herdr_agent().unwrap_or_else(|| Box::new(Caller))
+}
+
+fn herdr_agent() -> Option<Box<dyn Delivery>> {
     let env = HerdrEnv::from_env();
     match env.delivery_target() {
         Some(target) if env.in_herdr => {
             let agent = target.agent.or_else(|| env.agent_in_pane(&target.pane));
-            Box::new(HerdrAgent::new(env.bin, target.pane, agent))
+            Some(Box::new(HerdrAgent::new(env.bin, target.pane, agent)))
         }
-        _ => Box::new(Clipboard),
+        _ => None,
     }
 }
 
 fn open_app(path: &PathBuf, width: usize, interactive: bool) -> Result<App> {
-    let delivery = delivery(interactive);
+    open_review(path, width, delivery(interactive))
+}
+
+fn open_review(path: &PathBuf, width: usize, delivery: Box<dyn Delivery>) -> Result<App> {
     if path.is_dir() {
         App::open_folder(path, width, delivery)
     } else {
@@ -107,7 +122,28 @@ fn annotate_options(rest: &[String]) -> Result<(Kind, usize)> {
     Ok((kind.unwrap_or(Kind::Comment), occurrence))
 }
 
-pub(crate) fn run(args: &[String]) -> Result<()> {
+pub(crate) fn run(args: &[String]) -> Result<ExitCode> {
+    if wants_decision(args) {
+        return review_command(args);
+    }
+    tool(args).map(|()| ExitCode::SUCCESS)
+}
+
+/// A review with a decision flag, which may come before the path. Without one the
+/// invocation means what it always has.
+fn wants_decision(args: &[String]) -> bool {
+    let decision_flag = |arg: &String| gate::FLAGS.contains(&arg.as_str());
+    match args.first() {
+        Some(first) if decision_flag(first) => true,
+        Some(first) if first.starts_with('-') || matches!(first.as_str(), "config" | "herdr" | "last") => {
+            false
+        }
+        Some(_) => args.iter().skip(1).any(decision_flag),
+        None => false,
+    }
+}
+
+fn tool(args: &[String]) -> Result<()> {
     let arg = |i: usize| args.get(i).map(String::as_str);
     let path = |i: usize| arg(i).map(|p| crate::workspace_paths::absolute(Path::new(p))).context(USAGE);
     match arg(0) {
@@ -173,9 +209,60 @@ fn show_config() -> Result<()> {
     Ok(())
 }
 
-/// `plannotator-tui herdr open [PATH] [--placement P] [--deliver-to PANE]`;
-/// `herdr last` takes `--newest` on top, which `open` has nothing to skip.
+/// `plannotator-tui <file | folder> [--gate] [--json] [--require-approval] [--result-file PATH]`:
+/// the review ends with one decision, printed on stdout and published to the result file
+/// (decision 17). Under a strict flag every failure is a [`GateError`].
+fn review_command(args: &[String]) -> Result<ExitCode> {
+    let strict = gate::is_strict(args);
+    gated_review(args).map_err(|err| if strict { GateError(err).into() } else { err })
+}
+
+fn gated_review(args: &[String]) -> Result<ExitCode> {
+    let options = ReviewArgs::parse(args).map_err(|err| anyhow::anyhow!("{err:#}\n{USAGE}"))?;
+    let path = crate::workspace_paths::absolute(&options.path);
+    anyhow::ensure!(path.exists(), "{}: no such file or folder", path.display());
+    let result_file = options.result_file.as_deref().map(crate::workspace_paths::absolute);
+    if let Some(file) = &result_file {
+        gate::check_result_file(file)?;
+    }
+    // The review draws on stdout. Redirected, nobody could see it and the gate would wait
+    // forever; the result file is how a script captures the decision.
+    anyhow::ensure!(
+        stdout().is_terminal(),
+        "stdout is not a terminal: the review is drawn there; read the decision from --result-file instead"
+    );
+    let mode = options.mode();
+    let decision = run_review(|width| {
+        let mut app = open_review(&path, width, gate_delivery())?;
+        app.gate = mode;
+        Ok(app)
+    })?
+    .unwrap_or(Decision::Dismissed);
+    // Stdout first, as Plannotator does: if the file cannot be published, the decision has
+    // still reached the caller once.
+    let mut out = stdout().lock();
+    if options.json {
+        let line = if options.strict() { decision.strict_json() } else { decision.json(&path) };
+        writeln!(out, "{line}")?;
+    } else if let Some(text) = decision.plain(&gate::context_line(&path, path.is_dir())) {
+        writeln!(out, "{text}")?;
+    }
+    out.flush()?;
+    if let Some(file) = &result_file {
+        gate::publish(file, &decision.strict_json())?;
+    }
+    Ok(ExitCode::from(decision.exit_code(options.require_approval)))
+}
+
+/// `plannotator-tui herdr open [PATH] [--placement P] [--deliver-to PANE] [--gate]
+/// [--result-file PATH]`; `herdr last` takes `--newest` on top, which `open` has nothing to
+/// skip. A gated open with a result file fails as a [`GateError`], like the direct gate.
 fn herdr_command(args: &[String]) -> Result<()> {
+    let strict = args.first().is_some_and(|sub| sub == "open") && gate::is_strict(args);
+    herdr_launch(args).map_err(|err| if strict { GateError(err).into() } else { err })
+}
+
+fn herdr_launch(args: &[String]) -> Result<()> {
     use crate::herdr::launch::{OpenArgs, agent_get, agent_identity, plan, plan_last, process_info, run};
     let sub = args.first().map(String::as_str);
     if sub == Some("pane") {
@@ -202,10 +289,23 @@ fn herdr_command(args: &[String]) -> Result<()> {
             "--newest" => {
                 anyhow::bail!("--newest is only for `herdr last`; `herdr open` has no picker to skip")
             }
+            "--gate" if sub == Some("open") => open.gate = true,
+            "--result-file" if sub == Some("open") => {
+                let value = rest.next().filter(|v| !v.starts_with("--"));
+                let value = value.context("missing value for --result-file")?;
+                open.result_file = Some(crate::workspace_paths::absolute(Path::new(value)));
+            }
+            "--gate" | "--result-file" => anyhow::bail!("{arg} is only for `herdr open`"),
             flag if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{USAGE}"),
             path if open.path.is_none() => open.path = Some(PathBuf::from(path)),
             extra => anyhow::bail!("unexpected argument {extra:?}\n{USAGE}"),
         }
+    }
+    if let Some(file) = &open.result_file {
+        anyhow::ensure!(open.gate, "--result-file requires --gate");
+        // The pane publishes when the review ends; a name that is already taken would only
+        // fail then, after the review.
+        gate::check_result_file(file)?;
     }
     let env = HerdrEnv::from_env();
     let config = Config::load()?;
@@ -286,7 +386,7 @@ fn herdr_pane() -> Result<()> {
         })
     } else {
         let path = env.file.clone().unwrap_or(std::env::current_dir().context("current directory")?);
-        interactive(&path)
+        if env.gate { gated_pane(&path, env.result_file.as_deref()) } else { interactive(&path) }
     };
     // The pane closes when we exit; an error that flashes by is an error nobody can read.
     if let Err(err) = &result {
@@ -326,12 +426,35 @@ fn last_command(args: &[String]) -> Result<()> {
     crate::last::run(&options)
 }
 
+/// A gated review in a Herdr pane: the agent hears the decision through delivery, and the
+/// result file, when asked for, records it. The pane has no caller reading its stdout.
+fn gated_pane(path: &PathBuf, result_file: Option<&Path>) -> Result<()> {
+    if let Some(file) = result_file {
+        gate::check_result_file(file)?;
+    }
+    let decision = run_review(|width| {
+        let mut app = open_review(path, width, gate_delivery())?;
+        app.gate = gate::Gate::Approve;
+        Ok(app)
+    })?
+    .unwrap_or(Decision::Dismissed);
+    match result_file {
+        Some(file) => gate::publish(file, &decision.strict_json()),
+        None => Ok(()),
+    }
+}
+
 fn interactive(path: &PathBuf) -> Result<()> {
     run_ui(|width| open_app(path, width, true))
 }
 
 /// Own the terminal for one app: `build` gets the document width the screen allows.
 pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
+    run_review(build).map(drop)
+}
+
+/// `run_ui`, returning how a gated review ended; `None` for an ordinary one.
+fn run_review(build: impl FnOnce(usize) -> Result<App>) -> Result<Option<Decision>> {
     // Settle the palette before the screen is ours: the background-colour query talks to
     // the terminal directly, and it must not race the alternate screen or the event loop.
     // A config that fails to parse never kept the plain TUI from starting; it still does
@@ -407,7 +530,7 @@ fn run_editor(
     Ok(outcome)
 }
 
-fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<()> {
+fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<Option<Decision>> {
     app.clipboard = true;
     let mut dirty = true;
     while !app.quit {
@@ -435,7 +558,7 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<(
             }
         }
     }
-    Ok(())
+    Ok(app.take_decision())
 }
 
 /// Headless timing of the expensive paths: parse, per-block render + align, and reflow.

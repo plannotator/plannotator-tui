@@ -133,7 +133,7 @@ struct Record<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     origin: Option<&'a str>,
     surface: &'a str,
-    decision: &'static str,
+    decision: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     target: Option<&'a Target>,
     #[serde(skip_serializing_if = "str::is_empty")]
@@ -150,6 +150,9 @@ pub(crate) struct Submission<'a> {
     pub(crate) project: &'a str,
     /// "annotate" | "annotate-folder" | "annotate-last".
     pub(crate) surface: &'a str,
+    /// "feedback" for a send; a gated review also writes "approved", "approved-with-notes"
+    /// and "dismissed".
+    pub(crate) decision: &'a str,
     /// Receiving agent host in Plannotator's spelling; absent for clipboard delivery.
     pub(crate) origin: Option<String>,
     pub(crate) target: Target,
@@ -186,7 +189,7 @@ fn try_append(submission: &Submission<'_>) -> std::io::Result<PathBuf> {
         project: submission.project,
         origin: submission.origin.as_deref(),
         surface: submission.surface,
-        decision: "feedback",
+        decision: submission.decision,
         target: (!submission.target.is_empty()).then_some(&submission.target),
         feedback: submission.feedback,
         annotations: &submission.annotations,
@@ -212,7 +215,8 @@ fn try_append(submission: &Submission<'_>) -> std::io::Result<PathBuf> {
 fn write_sidecar(project_dir: &Path, submission: &Submission<'_>, ts: &str) -> std::io::Result<String> {
     let records_dir = project_dir.join("records");
     std::fs::create_dir_all(&records_dir)?;
-    let base = format!("{}-{}-feedback-{CLIENT}", ts.replace([':', '.'], "-"), submission.surface);
+    let base =
+        format!("{}-{}-{}-{CLIENT}", ts.replace([':', '.'], "-"), submission.surface, submission.decision);
     let body = render_markdown(submission, ts);
     for n in 1..=100u32 {
         let name = if n == 1 { format!("{base}.md") } else { format!("{base}-{n}.md") };
@@ -259,7 +263,7 @@ fn render_markdown(submission: &Submission<'_>, ts: &str) -> String {
     let mut lines = vec![format!("# {title}"), String::new()];
     lines.push(format!("- Submitted: {ts}"));
     lines.push(format!("- Surface: {}", submission.surface));
-    lines.push("- Decision: feedback".to_owned());
+    lines.push(format!("- Decision: {}", submission.decision));
     lines.push(format!("- Project: {}", submission.project));
     if let Some(origin) = &submission.origin {
         lines.push(format!("- Origin: {origin}"));
@@ -325,6 +329,7 @@ mod tests {
             data_dir,
             project: "demo",
             surface: "annotate",
+            decision: "feedback",
             origin: Some("claude-code".to_owned()),
             target: Target::file(Path::new("/work/plan.md")),
             feedback,
@@ -469,5 +474,35 @@ mod tests {
         assert_eq!(value["target"]["agent"]["transcript"], "/t.jsonl");
         assert!(value["target"].get("filePath").is_none());
         let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn an_approval_with_notes_is_named_by_its_decision() {
+        let d = dir("approved-notes");
+        let sub = Submission { decision: "approved-with-notes", ..submission(&d, "1. tighten this") };
+        let index = try_append(&sub).unwrap();
+        let value: serde_json::Value =
+            serde_json::from_str(std::fs::read_to_string(index).unwrap().trim()).unwrap();
+        assert_eq!(value["decision"], "approved-with-notes");
+        let record = "records/2026-09-01T06-00-00-123Z-annotate-approved-with-notes-plannotator-tui.md";
+        assert_eq!(value["recordFile"], record);
+        let body = std::fs::read_to_string(d.join("feedback/demo").join(record)).unwrap();
+        assert!(body.contains("- Decision: approved-with-notes\n"), "{body}");
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn a_bare_approval_or_dismissal_is_a_decision_only_line() {
+        for decision in ["approved", "dismissed"] {
+            let d = dir(decision);
+            let sub = Submission { decision, annotations: Vec::new(), count: 0, ..submission(&d, "") };
+            let index = try_append(&sub).unwrap();
+            let value: serde_json::Value =
+                serde_json::from_str(std::fs::read_to_string(index).unwrap().trim()).unwrap();
+            assert_eq!(value["decision"], decision);
+            assert!(value.get("recordFile").is_none());
+            assert!(!d.join("feedback/demo/records").exists());
+            let _ = std::fs::remove_dir_all(d);
+        }
     }
 }

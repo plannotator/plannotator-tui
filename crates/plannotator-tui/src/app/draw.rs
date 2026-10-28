@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::{App, Focus, GUTTER, Geometry, Mode, TOOLBAR, glyph, label};
+use crate::gate::Gate;
 use crate::keys::Action;
 use crate::theme::palette;
 use crate::wrap::wrap_line;
@@ -487,6 +488,7 @@ impl App {
         let send_and_close =
             if self.is_file_review() { None } else { key(Action::SendAndClose, "send+quit") };
         let quit = [send_and_close, key(Action::Quit, "quit")];
+        let approve = (self.gate == Gate::Approve).then(|| key(Action::Approve, "approve")).flatten();
         // The image keys act on the current note; removing is offered only when it has one.
         let note = self.current_note();
         let has_images = note.as_deref().is_some_and(|id| self.open.store.has_images(id));
@@ -503,6 +505,7 @@ impl App {
                 key(Action::Confirm, "open"),
                 key(Action::ToggleHidden, "hidden"),
                 key(Action::Send, "send"),
+                approve,
                 key(Action::ToggleTree, "hide"),
                 key(Action::Quit, "quit"),
             ],
@@ -533,6 +536,7 @@ impl App {
                 note.is_some().then(|| key(Action::AttachImage, "image")).flatten(),
                 remove_image,
                 key(Action::Send, "send"),
+                approve,
                 tab,
             ]
             .into_iter()

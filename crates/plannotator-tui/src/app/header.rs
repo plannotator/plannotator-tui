@@ -1,5 +1,6 @@
-//! The header: the send button and, for file and folder reviews, the Review menu button.
-//! The two wrap onto another row only when a pane is too narrow for both.
+//! The header: the send button and, for file and folder reviews, the Review menu button; a
+//! gated review puts its Approve button on the edge. They wrap onto another row only when
+//! a pane is too narrow for them.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -9,6 +10,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::App;
 use super::send::SendState;
+use crate::gate::Gate;
 use crate::keys::Action;
 use crate::theme::palette;
 
@@ -17,23 +19,29 @@ use crate::theme::palette;
 const SEND_BG: Color = Color::Indexed(30);
 const SENT_BG: Color = Color::Indexed(22);
 const BLOCKED_BG: Color = Color::Indexed(58);
+const APPROVE_BG: Color = Color::Indexed(28);
 
 const REVIEW_LABEL: &str = "Review \u{25be}";
 
 #[derive(Debug, Clone, Copy)]
 enum Button {
+    Approve,
     Send,
     Review,
 }
 
 impl App {
     /// Buttons with their rects relative to the header, right to left: send on the edge,
-    /// the Review menu to its left.
+    /// the Review menu to its left. A gated review puts Approve on the edge, before send.
     fn header_buttons(&self, width: u16) -> Vec<(Button, String, Rect)> {
         if width == 0 {
             return Vec::new();
         }
-        let mut labels = vec![(Button::Send, self.send_label())];
+        let mut labels = Vec::new();
+        if self.gate == Gate::Approve {
+            labels.push((Button::Approve, self.approve_label()));
+        }
+        labels.push((Button::Send, self.send_label()));
         if self.is_file_review() {
             labels.push((Button::Review, self.review_label()));
         }
@@ -75,6 +83,10 @@ impl App {
             rect.x += area.x;
             rect.y += area.y;
             let style = match button {
+                Button::Approve => {
+                    self.geometry.approve_button = Some(rect);
+                    Style::new().fg(Color::Black).bg(APPROVE_BG).bold()
+                }
                 Button::Send => {
                     self.geometry.send_button = Some(rect);
                     self.button_style()

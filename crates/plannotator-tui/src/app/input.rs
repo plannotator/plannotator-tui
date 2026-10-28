@@ -10,6 +10,7 @@ use super::selection::Selection;
 use super::send::SendState;
 use super::{App, Focus, GUTTER, Mode, Pending, TOOLBAR};
 use crate::delivery::Delivery as _;
+use crate::gate::Gate;
 use crate::keys::{self, Action};
 
 impl App {
@@ -86,6 +87,7 @@ impl App {
                 return Ok(());
             }
             Some(Action::Send) => return self.send_feedback(),
+            Some(Action::Approve) if self.gate == Gate::Approve => return self.approve(),
             // A reply review sends every note, so one the agent already has closes like `q`.
             Some(Action::SendAndClose) if !self.is_file_review() => {
                 if self.send_state == SendState::Sent {
@@ -463,6 +465,9 @@ impl App {
                 let hit = |rect: Option<ratatui::layout::Rect>| {
                     rect.is_some_and(|r| mouse.row == r.y && mouse.column >= r.x && mouse.column < r.right())
                 };
+                if hit(self.geometry.approve_button) {
+                    return self.approve();
+                }
                 if hit(self.geometry.review_button) {
                     self.open_review_menu();
                     return Ok(());

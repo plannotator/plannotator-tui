@@ -1,6 +1,7 @@
 //! Application state. Input handling lives in `input`, drawing in `draw`; this module owns
 //! the data they share and the operations that change it.
 
+mod approve;
 mod archive_view;
 mod compose;
 mod disk;
@@ -34,6 +35,7 @@ use ratatui::layout::Rect;
 use crate::config::UiConfig;
 use crate::delivery::Delivery;
 use crate::doc::Document;
+use crate::gate::{Decision, Gate};
 use crate::keys::{Action, Keymap};
 use crate::layout::DocLayout;
 use crate::store::{Location, Store};
@@ -94,6 +96,8 @@ struct Geometry {
     bubbles: Vec<(Rect, String)>,
     /// The header's Send button; `None` when the header was too narrow for it.
     send_button: Option<Rect>,
+    /// The header's Approve button; only a gated review draws it.
+    approve_button: Option<Rect>,
     /// The header's Review button; only file and folder reviews draw it.
     review_button: Option<Rect>,
     undo_button: Option<Rect>,
@@ -162,6 +166,11 @@ pub(crate) struct App {
     tree_visible: Option<bool>,
     delivery: Box<dyn Delivery>,
     send_state: SendState,
+    /// What ending the review means; `Gate::Off` unless `--gate` or `--json` asked for a
+    /// decision.
+    pub(crate) gate: Gate,
+    /// How a gated review ended, once it has; quitting without one is a dismissal.
+    decision: Option<Decision>,
     folder_counts: HashMap<PathBuf, feedback::ReviewCounts>,
     /// Annotated files the folder counts could not read, in `review_files` order.
     unreadable_files: Vec<PathBuf>,
@@ -257,6 +266,8 @@ impl App {
             tree_visible: None,
             delivery,
             send_state,
+            gate: Gate::Off,
+            decision: None,
             folder_counts: HashMap::new(),
             unreadable_files: Vec::new(),
             undo_archive: Vec::new(),

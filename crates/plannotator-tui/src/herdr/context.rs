@@ -61,6 +61,10 @@ pub(crate) struct HerdrEnv {
     pub(crate) terminal_pane: Option<String>,
     /// `PLANNOTATOR_TUI_TERMINAL_LINES`: how many recent lines to read from that pane.
     pub(crate) terminal_lines: Option<u32>,
+    /// `PLANNOTATOR_TUI_GATE=1`: a gated review, from `herdr open --gate`.
+    pub(crate) gate: bool,
+    /// `PLANNOTATOR_TUI_RESULT_FILE`: where a gated review publishes its decision.
+    pub(crate) result_file: Option<PathBuf>,
 }
 
 impl HerdrEnv {
@@ -89,6 +93,8 @@ impl HerdrEnv {
             newest: env("PLANNOTATOR_TUI_NEWEST").as_deref() == Some("1"),
             terminal_pane: non_empty("PLANNOTATOR_TUI_TERMINAL_PANE"),
             terminal_lines: non_empty("PLANNOTATOR_TUI_TERMINAL_LINES").and_then(|v| v.parse().ok()),
+            gate: env("PLANNOTATOR_TUI_GATE").as_deref() == Some("1"),
+            result_file: non_empty("PLANNOTATOR_TUI_RESULT_FILE").map(PathBuf::from),
         }
     }
 
@@ -251,5 +257,14 @@ mod tests {
             env(&[("PLANNOTATOR_TUI_TERMINAL_PANE", "w1:p2"), ("PLANNOTATOR_TUI_TERMINAL_LINES", "80")]);
         assert_eq!(env.terminal_pane.as_deref(), Some("w1:p2"));
         assert_eq!(env.terminal_lines, Some(80));
+    }
+
+    #[test]
+    fn only_an_exact_gate_flag_gates_the_pane() {
+        let gated = env(&[("PLANNOTATOR_TUI_GATE", "1"), ("PLANNOTATOR_TUI_RESULT_FILE", "/tmp/d.json")]);
+        assert!(gated.gate);
+        assert_eq!(gated.result_file, Some(PathBuf::from("/tmp/d.json")));
+        assert!(!env(&[("PLANNOTATOR_TUI_GATE", "true")]).gate);
+        assert!(!env(&[]).gate);
     }
 }

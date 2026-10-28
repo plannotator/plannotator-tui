@@ -114,3 +114,23 @@ fn an_unbound_action_drops_out_of_the_hints() {
     assert_eq!(keymap.labelled(Quit, "quit"), None);
     assert_eq!(keymap.labelled(Send, "send").as_deref(), Some("E send"));
 }
+
+#[test]
+fn approve_is_shifted_a_and_distinct_from_looks_good() {
+    let keymap = Keymap::default();
+    assert_eq!(keymap.action(&press(KeyCode::Char('A'), KeyModifiers::SHIFT), GLOBAL), Some(Approve));
+    assert_eq!(keymap.action(&press(KeyCode::Char('a'), KeyModifiers::NONE), TOOLBAR), Some(LooksGood));
+    assert_eq!(keymap.action(&press(KeyCode::Char('a'), KeyModifiers::NONE), GLOBAL), None);
+}
+
+#[test]
+fn a_config_that_gave_approves_key_away_still_loads() {
+    // Written before `approve` existed: `A` is the user's, and approve is left unbound.
+    let keymap = parse("comment = [\"A\"]\n").expect("an older config keeps loading");
+    assert_eq!(keymap.action(&press(KeyCode::Char('A'), KeyModifiers::SHIFT), DOCUMENT), Some(Comment));
+    assert_eq!(keymap.hint(Approve), "");
+    // Naming approve opts into the check like any other action.
+    let err = parse("comment = [\"A\"]\napprove = [\"A\"]\n").expect_err("both live while browsing");
+    assert!(err.message().contains("approve"), "{}", err.message());
+    assert_eq!(parse("approve = [\"Y\"]\n").expect("rebinds").hint(Approve), "Y");
+}

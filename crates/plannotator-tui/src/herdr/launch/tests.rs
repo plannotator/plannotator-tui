@@ -446,3 +446,27 @@ fn terminal_review_of_a_shell_splits_beside_it_and_delivers_nowhere() {
     assert_eq!(target.map(String::as_str), Some("w1:p4"));
     assert!(args.contains(&"PLANNOTATOR_TUI_TERMINAL_PANE=w1:p4".to_owned()), "{args:?}");
 }
+
+#[test]
+fn a_gated_open_tells_the_pane_to_gate_and_where_to_publish() {
+    let root = temp_folder("gate");
+    let args = OpenArgs {
+        path: Some(PathBuf::from("docs/plan.md")),
+        gate: true,
+        result_file: Some(root.join("decision.json")),
+        ..OpenArgs::default()
+    };
+    let launch = plan(&env(Some("w2:p4"), None), &Config::default(), args, &root).expect("plans");
+    let gated = argv(&launch);
+    assert!(gated.windows(2).any(|pair| pair == ["--env", "PLANNOTATOR_TUI_GATE=1"]));
+    let published = format!("PLANNOTATOR_TUI_RESULT_FILE={}", root.join("decision.json").display());
+    assert!(gated.windows(2).any(|pair| pair == ["--env", published.as_str()]));
+
+    let args = OpenArgs { path: Some(PathBuf::from("docs/plan.md")), ..OpenArgs::default() };
+    let launch = plan(&env(Some("w2:p4"), None), &Config::default(), args, &root).expect("plans");
+    assert!(
+        !argv(&launch).iter().any(|a| a.contains("_GATE") || a.contains("RESULT_FILE")),
+        "ungated: unchanged"
+    );
+    std::fs::remove_dir_all(&root).expect("cleanup");
+}

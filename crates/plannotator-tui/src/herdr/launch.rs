@@ -19,6 +19,10 @@ pub(crate) struct OpenArgs {
     pub(crate) deliver_to: Option<String>,
     /// `last` only: open the newest reply without offering the picker first.
     pub(crate) newest: bool,
+    /// `open` only: a gated review, with Approve beside Send (decision 17).
+    pub(crate) gate: bool,
+    /// `open --gate` only: where the pane publishes the decision; absolute.
+    pub(crate) result_file: Option<PathBuf>,
 }
 
 /// A fully resolved launch.
@@ -45,6 +49,9 @@ pub(crate) struct Launch {
     pub(crate) newest: bool,
     /// Open a pane's recent terminal output instead of `file`.
     pub(crate) terminal: Option<TerminalRead>,
+    /// A gated review of `file`, and where its decision is published.
+    pub(crate) gate: bool,
+    pub(crate) result_file: Option<PathBuf>,
 }
 
 /// Which pane's output the opened pane reads, and how much of it.
@@ -290,6 +297,8 @@ pub(crate) fn plan(env: &HerdrEnv, config: &Config, args: OpenArgs, cwd: &Path) 
         session: None,
         newest: false,
         terminal: None,
+        gate: args.gate,
+        result_file: args.result_file,
     })
 }
 
@@ -341,6 +350,12 @@ pub(crate) fn argv(launch: &Launch) -> Vec<String> {
         }
         (None, None) => {
             out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_FILE={}", launch.file.display())]);
+            if launch.gate {
+                out.extend(["--env".to_owned(), "PLANNOTATOR_TUI_GATE=1".to_owned()]);
+            }
+            if let Some(file) = launch.result_file.as_ref().filter(|_| launch.gate) {
+                out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_RESULT_FILE={}", file.display())]);
+            }
         }
     }
     if let Some(target) = &launch.deliver {

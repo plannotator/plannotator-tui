@@ -97,6 +97,7 @@ dimmed. The keys also work without opening the menu.
 |---|---|
 | anywhere | `Tab` cycle tree · document · notes; `E` send; `t` tree; `r` reload; `o` open the file in `$EDITOR`; `q` quit |
 | reply review | `S` send and close |
+| gated review | `A` approve; `E` send and finish; `q` dismiss |
 | document | `j`/`k` block; `c` comment on the block; `x` clear its annotations; `X` clear every annotation on the document, after a `y`; `v` select with `hjkl` `w` `b` `0` `$`, `Enter` to finish; `i` move the cursor with those keys first, then `v` to select from there; `I`/`D` attach or remove an image on the block's note |
 | toolbar | `a` looks good · `c` comment · `d` delete · `Esc` |
 | notes | `j`/`k`; `e` edit; `x` remove; `I` attach an image, `D` remove the last; click a bubble |
@@ -105,6 +106,39 @@ dimmed. The keys also work without opening the menu.
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
+
+### Approval gate
+
+When a script or an agent must know whether you signed off, add `--gate`. The review gains
+an **Approve** action (`A`, and an `Approve (A)` button on the header's edge) beside Send and
+quit, and ends with one decision: Approve is `approved`, a successful Send is `annotated`, and
+quitting is `dismissed`. Notes you have not sent yet ride along with an approval
+(`Approve with 2 notes (A)`). Without `--gate` nothing changes.
+
+```sh
+plannotator-tui docs/plan.md --gate                    # prints the outcome when you finish
+plannotator-tui docs/plan.md --gate --json --require-approval --result-file /tmp/plan-decision.json
+```
+
+The output is the one `plannotator annotate --gate` prints. Plain `--gate` prints `The user
+approved.`, the approved-with-notes message (the notes plus the file they are about), the
+feedback, or nothing for a dismissal. `--json` prints one line instead,
+`{"decision":"approved|annotated|dismissed","feedback":"…"}`; `feedback` is absent from a
+bare approval and a dismissal, and the line also carries `annotationCount` and the reviewed
+`target`. `--json` without `--gate` decides between `annotated` and `dismissed` only.
+
+For a gate a script can trust, add either or both strict flags (they need `--gate --json`):
+
+- `--require-approval` exits 0 only on approval and 1 on `annotated` or `dismissed`.
+- `--result-file <path>` also writes `{"decision":…,"feedback":…}` to `<path>`, atomically,
+  and never over an existing file: the folder must exist and the file must not. A relative
+  path starts at the current directory.
+
+Under a strict flag a failure of the gate itself (a bad flag, a missing file, a result file
+that cannot be written) exits 2, never 1. The review draws on stdout, so a gated review
+refuses to start when stdout is not a terminal: read the decision from `--result-file`
+rather than capturing stdout. Each decision is also added to the feedback archive as
+`approved`, `approved-with-notes`, `feedback` or `dismissed`.
 
 `o` hands the terminal to `$VISUAL` (or `$EDITOR`, which may carry flags such as `code -w`)
 on the open file, at the current line for vim, nvim, nano, helix, emacs, micro and kak. When
@@ -138,6 +172,12 @@ if you install the add-on: `herdr plugin install plannotator/herdr-annotate/link
 [herdr]
 placement = "overlay"   # overlay (full tab, default) | split | popup
 ```
+
+`plannotator-tui herdr open plan.md --gate [--result-file <path>]` opens a gated review. Approve
+sends the agent `The user approved.` (or the approved-with-notes message), Send sends the
+numbered feedback as usual, and quitting sends nothing; the window closes on any of the three.
+With `--result-file` the pane also writes the decision JSON there. The command returns as soon
+as the pane opens, so a script waits for the file.
 
 `plannotator-tui herdr last --newest` opens the agent's newest reply without asking which
 one; without the flag the picker comes first, as it always has.
@@ -237,6 +277,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `quit` `interrupt` | `q` `ctrl+c` | quit |
 | `cycle-focus` | `Tab` | tree · document · notes |
 | `send` `send-and-close` | `E` `S` | send; send and close a reply review |
+| `approve` | `A` | approve a gated review (`--gate`) |
 | `toggle-tree` `reload` `pick-message` | `t` `r` `p` | show/hide the tree; reload; choose another reply |
 | `open-in-editor` | `o` | edit the open file in `$VISUAL` or `$EDITOR`, then reload it |
 | `quick-open` | `ctrl+p` | find a file by name in a folder review |

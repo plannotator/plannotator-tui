@@ -243,6 +243,8 @@ PLANNOTATOR_TUI_FILE            file or folder to open (launcher → pane)
 PLANNOTATOR_TUI_DELIVER_TO      pane id feedback goes to (launcher → pane)
 PLANNOTATOR_TUI_DELIVER_AGENT   agent name for the label, e.g. "claude" (launcher → pane)
 PLANNOTATOR_TUI_PLACEMENT       overlay | split | popup; beats the config file
+PLANNOTATOR_TUI_GATE            1: a gated review with Approve (launcher → pane; decision 17)
+PLANNOTATOR_TUI_RESULT_FILE     where a gated review publishes its decision (launcher → pane)
 PLANNOTATOR_TUI_CONFIG          path of the config file; beats XDG
 HERDR_*                   as above; HERDR_PANE_ID inside the pane is plannotator-tui's OWN pane
 ```
@@ -265,7 +267,7 @@ popup_width = "90%"          # popup only; cells or percent
 popup_height = "85%"
 ```
 
-### The launcher: `plannotator-tui herdr open [PATH] [--placement P] [--deliver-to PANE]`
+### The launcher: `plannotator-tui herdr open [PATH] [--placement P] [--deliver-to PANE] [--gate] [--result-file PATH]`
 
 One command for humans (via the manifest actions) and agents (via the skill). It reads
 the env above, resolves, and execs `herdr plugin pane open`. Resolution, in order:
@@ -278,6 +280,15 @@ the env above, resolves, and execs `herdr plugin pane open`. Resolution, in orde
 
 It passes `PLANNOTATOR_TUI_FILE`, `PLANNOTATOR_TUI_DELIVER_TO`, `PLANNOTATOR_TUI_DELIVER_AGENT` explicitly so
 the pane never has to guess. `argv` construction is a pure, tested function.
+
+`--gate` adds `PLANNOTATOR_TUI_GATE=1`: the pane shows Approve beside Send, and the review ends
+with one decision (decision 17). Approve delivers `The user approved.`, or Plannotator's
+approved-with-notes message when unsent notes ride along; Send delivers the numbered feedback
+as it always does; quitting delivers nothing. `--result-file PATH` (needs `--gate`) is resolved
+against the launcher's directory, checked before the pane opens (the folder must exist, the
+file must not), and passed as `PLANNOTATOR_TUI_RESULT_FILE`; the pane publishes
+`{"decision":…,"feedback":…}` there atomically when the review ends. The launcher returns
+once the pane is open, so a script waits for the file, not for the exit code.
 
 ### `plannotator-tui herdr terminal [--lines N] [--placement P] [--deliver-to PANE] [--print]`
 
