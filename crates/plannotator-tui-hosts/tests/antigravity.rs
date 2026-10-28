@@ -212,6 +212,7 @@ fn a_database_without_the_subagent_column_still_matches() {
         params![OLD],
     )
     .expect("row");
+    drop(c); // Windows cannot remove a database file that is still open.
     let found = antigravity::find_transcript(&app, Path::new("/w/p")).expect("found");
     assert_eq!(reply(&found), "legacy");
     std::fs::remove_dir_all(&app).expect("cleanup");
