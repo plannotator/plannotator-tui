@@ -51,11 +51,25 @@ fn machinery_meta_and_sidechain_entries_are_not_human_prompts() {
 }
 
 #[test]
-fn newest_first_and_n_is_honoured() {
+fn newest_first_and_n_counts_replies_not_prompts() {
     let two = parse_messages(TRANSCRIPT, 2);
-    assert_eq!(two.len(), 2);
+    let roles: Vec<Role> = two.iter().map(|m| m.role).collect();
+    assert_eq!(roles, [Role::Assistant, Role::Human, Role::Assistant]);
     assert_eq!(two[0].text, "assistant text 3");
-    assert_eq!((two[1].role, two[1].text.as_str()), (Role::Human, "user prompt 3"));
+    assert_eq!(two[1].text, "user prompt 3");
+}
+
+#[test]
+fn a_prompt_still_waiting_for_its_reply_does_not_crowd_out_the_reply_before_it() {
+    let waiting = concat!(
+        r#"{"parentUuid":"s7","isSidechain":false,"type":"user","#,
+        r#""message":{"role":"user","content":"a prompt not answered yet"},"uuid":"u9","#,
+        r#""timestamp":"2026-08-28T10:09:00.000Z"}"#,
+    );
+    let newest = parse_messages(&format!("{TRANSCRIPT}\n{waiting}\n"), 1);
+    let replies: Vec<&str> =
+        newest.iter().filter(|m| m.role == Role::Assistant).map(|m| m.text.as_str()).collect();
+    assert_eq!(replies, ["assistant text 3"], "{newest:?}");
 }
 
 #[test]

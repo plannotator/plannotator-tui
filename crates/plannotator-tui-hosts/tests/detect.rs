@@ -71,6 +71,28 @@ fn antigravity_is_selected_by_herdrs_label_or_its_names() {
     }
 }
 
+/// `agy` exports `ANTIGRAVITY_AGENT=1` and the conversation id into the shells it runs.
+#[test]
+fn antigravitys_shell_markers_select_it_ahead_of_markers_that_leak_into_every_shell() {
+    let id = "4f1c9e2a-7b3d-4c8e-9a10-2b6d8e0f1a3c";
+    assert_eq!(detect_host(env(&[("ANTIGRAVITY_AGENT", "1")])).expect("host"), Host::Antigravity);
+    assert_eq!(detect_host(env(&[("ANTIGRAVITY_CONVERSATION_ID", id)])).expect("host"), Host::Antigravity);
+    assert_eq!(
+        detect_host(env(&[("ANTIGRAVITY_AGENT", "1"), ("GEMINI_CLI", "1"), ("OMPCODE", "1")])).expect("host"),
+        Host::Antigravity
+    );
+    assert_eq!(
+        detect_host(env(&[("ANTIGRAVITY_AGENT", " ")])).expect("host"),
+        Host::ClaudeCode,
+        "blank is unset"
+    );
+    assert_eq!(
+        detect_host(env(&[("PLANNOTATOR_TUI_HOST", "codex"), ("ANTIGRAVITY_AGENT", "1")])).expect("host"),
+        Host::Codex,
+        "the override still wins"
+    );
+}
+
 #[test]
 fn the_copilot_marker_selects_copilot_and_droid_needs_the_override() {
     assert_eq!(detect_host(env(&[("COPILOT_CLI", "1")])).expect("host"), Host::Copilot);

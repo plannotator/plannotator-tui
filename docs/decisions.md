@@ -100,7 +100,8 @@ reference for `plannotator-tui-hosts`; knowledge copied, not code.
 **Host detection is an env-var chain, then a fallback.** `PLANNOTATOR_ORIGIN` override
 (validated) > `CODEX_THREAD_ID` > `COPILOT_CLI` > `OPENCODE` > `GEMINI_CLI` > `OMPCODE`
 (last: OMP exports it into every shell it spawns) > default Claude Code. We mirror it with
-`PLANNOTATOR_TUI_HOST` as the override. `cwd` is never identity.
+`PLANNOTATOR_TUI_HOST` as the override, and add `ANTIGRAVITY_AGENT` / `ANTIGRAVITY_CONVERSATION_ID`
+(exported into `agy`'s shells) right after `COPILOT_CLI`. `cwd` is never identity.
 
 **Claude Code session resolution — the deterministic part.** Claude Code writes
 `~/.claude/sessions/<pid>.json` per running session: `{pid, sessionId, cwd, startedAt, …}`

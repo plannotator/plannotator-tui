@@ -15,7 +15,8 @@ pub const DB_FILE: &str = "state.db";
 
 const WHAT: &str = "Hermes";
 
-/// The newest `n` user and assistant messages of `session_id`, newest first.
+/// The user and assistant messages of `session_id`, newest first, through the `n`th newest
+/// assistant reply.
 ///
 /// The database is opened read-only and never written. A plain read-only open sees the
 /// live WAL; when the shared-memory index cannot be opened, the read falls back to
@@ -28,11 +29,11 @@ pub fn messages_for_session(db: &Path, session_id: &str, n: usize) -> Result<Vec
             "SELECT id, role, content, timestamp FROM messages \
              WHERE session_id = ?1 AND role IN ('assistant', 'user') AND active = 1 \
              AND content IS NOT NULL AND trim(content) <> '' \
-             ORDER BY timestamp DESC, id DESC LIMIT ?2",
+             ORDER BY timestamp DESC, id DESC",
         )
         .map_err(|e| sql_error(WHAT, &e))?;
     let rows = statement
-        .query_map(params![session_id, n as i64], |row| {
+        .query_map(params![session_id], |row| {
             let id: i64 = row.get(0)?;
             let role: String = row.get(1)?;
             let content: Option<String> = row.get(2)?;
@@ -41,7 +42,11 @@ pub fn messages_for_session(db: &Path, session_id: &str, n: usize) -> Result<Vec
         })
         .map_err(|e| sql_error(WHAT, &e))?;
     let mut messages = Vec::new();
+    let mut replies = 0;
     for row in rows {
+        if replies >= n {
+            break;
+        }
         let (id, role, content, timestamp) = row.map_err(|e| sql_error(WHAT, &e))?;
         let Some(text) = content.filter(|c| !c.trim().is_empty()) else { continue };
         let role = match role.as_str() {
@@ -49,6 +54,7 @@ pub fn messages_for_session(db: &Path, session_id: &str, n: usize) -> Result<Vec
             "user" => Role::Human,
             _ => continue,
         };
+        replies += usize::from(role == Role::Assistant);
         messages.push(Message { id: id.to_string(), role, text, at: timestamp.map(iso) });
     }
     if messages.is_empty() {

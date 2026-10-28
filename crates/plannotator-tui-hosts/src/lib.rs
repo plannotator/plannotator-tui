@@ -124,6 +124,28 @@ pub struct Message {
     pub at: Option<String>,
 }
 
+/// Newest-first messages up to and including the `n`th assistant reply. `n` counts replies,
+/// never prompts: `last` offers replies, so a prompt still waiting for its answer must not
+/// crowd out the reply before it. Prompts newer than that reply are kept for context.
+pub(crate) fn through_replies(newest_first: impl IntoIterator<Item = Message>, n: usize) -> Vec<Message> {
+    let mut out = Vec::new();
+    let mut replies = 0;
+    for message in newest_first {
+        if replies >= n {
+            break;
+        }
+        replies += usize::from(message.role == Role::Assistant);
+        out.push(message);
+    }
+    out
+}
+
+/// Does `messages` hold an assistant reply? A transcript with prompts only (a conversation
+/// just started) has nothing to annotate, so discovery passes over it.
+pub(crate) fn has_reply(messages: &[Message]) -> bool {
+    messages.iter().any(|message| message.role == Role::Assistant)
+}
+
 /// Which rung of a discovery ladder chose a session, so a caller can say whether the
 /// result identifies the agent's own session or is the best guess for its folder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -242,6 +264,10 @@ pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostErr
     }
     if set("COPILOT_CLI") {
         return Ok(Host::Copilot);
+    }
+    // Antigravity CLI exports both into the shells it runs, the id naming the conversation.
+    if set(antigravity::AGENT_ENV) || set(antigravity::CONVERSATION_ENV) {
+        return Ok(Host::Antigravity);
     }
     let ai_agent = env("AI_AGENT").map(|v| v.trim().to_ascii_lowercase());
     // Oh My Pi exports `OMPCODE=1` (and `CLAUDECODE=1`) into the shells it spawns and no

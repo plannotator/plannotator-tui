@@ -28,6 +28,10 @@ pub const DEFAULT_APP_DATA_DIR: &str = ".gemini/antigravity-cli";
 pub const SUMMARIES_DB: &str = "conversation_summaries.db";
 /// One line per prompt, relative to the app data directory.
 pub const HISTORY_FILE: &str = "history.jsonl";
+/// Set to `1` in the shells `agy` runs.
+pub const AGENT_ENV: &str = "ANTIGRAVITY_AGENT";
+/// The conversation id of the `agy` session that runs the shell.
+pub const CONVERSATION_ENV: &str = "ANTIGRAVITY_CONVERSATION_ID";
 
 const WHAT: &str = "Antigravity";
 
@@ -58,7 +62,7 @@ pub fn conversation_of(transcript: &Path) -> Option<String> {
         .flatten()
 }
 
-/// The conversation for `cwd` with the newest transcript that holds a message: one whose
+/// The conversation for `cwd` with the newest transcript that holds a reply: one whose
 /// workspace is `cwd`, else one whose workspace contains it. Workspaces come from the summaries
 /// database and the prompt history together; when the database cannot be read the error says
 /// so, and the history alone decides.
@@ -136,7 +140,7 @@ fn history_workspaces(history: &Path) -> Vec<(String, String)> {
         .collect()
 }
 
-/// The last-written transcript among `ids` that holds at least one message. Ids that are not
+/// The last-written transcript among `ids` that holds at least one reply. Ids that are not
 /// one safe path component are skipped, whatever wrote them.
 fn newest_with_messages<'a>(app_data: &Path, ids: impl Iterator<Item = &'a str>) -> Option<PathBuf> {
     let mut ranked: Vec<(Option<std::time::SystemTime>, PathBuf)> = ids
@@ -147,18 +151,17 @@ fn newest_with_messages<'a>(app_data: &Path, ids: impl Iterator<Item = &'a str>)
         .collect();
     ranked.sort_by(|(a_time, a), (b_time, b)| b_time.cmp(a_time).then_with(|| a.cmp(b)));
     ranked.dedup_by(|(_, a), (_, b)| a == b);
-    ranked
-        .into_iter()
-        .map(|(_, path)| path)
-        .find(|path| std::fs::read_to_string(path).is_ok_and(|text| !parse_messages(&text, 1).is_empty()))
+    ranked.into_iter().map(|(_, path)| path).find(|path| {
+        std::fs::read_to_string(path).is_ok_and(|text| crate::has_reply(&parse_messages(&text, 1)))
+    })
 }
 
-/// The newest `n` prompts and replies, newest first. A reply is a `PLANNER_RESPONSE` step's
-/// `content` as written; a prompt is a `USER_INPUT` step's `content`, wrappers and all (only
-/// replies are shown). A line that does not parse, such as one still being written, is
-/// skipped.
+/// Prompts and replies, newest first, through the `n`th newest reply. A reply is a
+/// `PLANNER_RESPONSE` step's `content` as written; a prompt is a `USER_INPUT` step's
+/// `content`, wrappers and all (only replies are shown). A line that does not parse, such as
+/// one still being written, is skipped.
 pub fn parse_messages(jsonl: &str, n: usize) -> Vec<Message> {
-    jsonl.lines().rev().filter_map(step_message).take(n).collect()
+    crate::through_replies(jsonl.lines().rev().filter_map(step_message), n)
 }
 
 fn step_message(line: &str) -> Option<Message> {

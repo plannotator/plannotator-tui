@@ -340,6 +340,55 @@ fn antigravity_reads_the_conversation_herdr_names_or_the_one_started_in_the_cwd(
     std::fs::remove_dir_all(&app).expect("cleanup");
 }
 
+/// Run from a shell `agy` started, its exported conversation id picks the transcript exactly,
+/// with no host named and a newer conversation in the same folder.
+#[test]
+fn inside_an_agy_shell_the_exported_conversation_id_is_read() {
+    let id = "4f1c9e2a-7b3d-4c8e-9a10-2b6d8e0f1a3c";
+    let newer = "22222222-2222-4222-8222-222222222222";
+    let app = temp_dir("agy shell");
+    let relative = |id: &str| format!("brain/{id}/.system_generated/logs/transcript_full.jsonl");
+    let target = app.join(relative(id));
+    std::fs::create_dir_all(target.parent().expect("logs")).expect("logs dir");
+    std::fs::copy(fixtures().join("antigravity").join(relative(id)), &target).expect("copy");
+    let other = app.join(relative(newer));
+    std::fs::create_dir_all(other.parent().expect("logs")).expect("logs dir");
+    std::fs::write(&other, "{\"step_index\":1,\"type\":\"PLANNER_RESPONSE\",\"content\":\"NEWER\"}\n")
+        .expect("newer");
+    std::fs::write(
+        app.join("history.jsonl"),
+        format!(
+            "{{\"workspace\":\"/w/proj\",\"conversationId\":\"{id}\"}}\n{{\"workspace\":\"/w/proj\",\"conversationId\":\"{newer}\"}}\n"
+        ),
+    )
+    .expect("history");
+    let run = |conversation: &str| {
+        bin()
+            .env_remove("PLANNOTATOR_TUI_HOST")
+            .env_remove("CODEX_THREAD_ID")
+            .env_remove("COPILOT_CLI")
+            .env_remove("ANTIGRAVITY_CLI_HOME")
+            .env("ANTIGRAVITY_APP_DATA_DIR", &app)
+            .env("ANTIGRAVITY_AGENT", "1")
+            .env("ANTIGRAVITY_CONVERSATION_ID", conversation)
+            .env("PLANNOTATOR_TUI_CWD", "/w/proj")
+            .args(["last", "--print"])
+            .output()
+            .expect("runs")
+    };
+    let exact = run(id);
+    assert_eq!(
+        String::from_utf8_lossy(&exact.stdout).trim_end(),
+        "Done: both settings are applied in `retroarch.cfg`.",
+        "{}",
+        String::from_utf8_lossy(&exact.stderr)
+    );
+    let missing = run("33333333-3333-4333-8333-333333333333");
+    assert_eq!(String::from_utf8_lossy(&missing.stdout), "", "an unknown id never falls back to the folder");
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("no Antigravity conversation 33333333"));
+    std::fs::remove_dir_all(&app).expect("cleanup");
+}
+
 #[test]
 fn hermes_reads_the_session_named_by_id_from_hermes_home() {
     let home = std::env::temp_dir().join(format!("plannotator-tui-hermes-home-{}", std::process::id()));

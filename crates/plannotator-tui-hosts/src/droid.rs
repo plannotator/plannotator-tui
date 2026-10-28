@@ -45,7 +45,7 @@ pub fn find_transcript(factory_dir: &Path, cwd: &Path) -> Option<PathBuf> {
     cwd.ancestors().find_map(|dir| newest_log(&slug_dir(&sessions_dir, dir)?))
 }
 
-/// The newest `n` assistant and human messages, newest first, in file order.
+/// Assistant and human messages, newest first, in file order, through the `n`th newest reply.
 pub fn parse_messages(jsonl: &str, n: usize) -> Vec<Message> {
     parse_messages_file_order(jsonl, n)
 }

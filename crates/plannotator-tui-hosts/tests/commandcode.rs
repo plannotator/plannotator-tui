@@ -11,6 +11,7 @@ const FIXTURE_ID: &str = "0198f0a1-7c2e-7b10-9a4d-3c5e8f1a2b3c";
 const OLD: &str = "11111111-1111-4111-8111-111111111111";
 const NEW: &str = "22222222-2222-4222-8222-222222222222";
 const EMPTY: &str = "33333333-3333-4333-8333-333333333333";
+const PROMPT_ONLY: &str = "44444444-4444-4444-8444-444444444444";
 
 fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/commandcode")
@@ -101,8 +102,15 @@ fn the_last_written_session_with_a_reply_wins() {
     session(&dir, OLD, "/w/proj", "resumed", 1_000_060);
     session(&dir, NEW, "/w/proj", "idle", 1_000_000);
     session(&dir, EMPTY, "/w/proj", "", 1_000_120);
+    // Just started: the prompt is written, the reply is not. Nothing here to annotate yet.
+    let waiting = session(&dir, PROMPT_ONLY, "/w/proj", "", 1_000_180);
+    let prompt = r#"{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":[{"type":"text","text":"go"}]}}"#;
+    let header = std::fs::read_to_string(&waiting).expect("header");
+    std::fs::write(&waiting, format!("{header}{prompt}\n")).expect("prompt");
+    let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_180);
+    std::fs::File::options().write(true).open(&waiting).expect("open").set_modified(at).expect("mtime");
     let found = commandcode::find_transcript(&root, Path::new("/w/proj")).expect("session");
-    assert_eq!(newest_reply(&found), "resumed", "last write wins and a session without messages is skipped");
+    assert_eq!(newest_reply(&found), "resumed", "last write wins and a session without a reply is skipped");
     std::fs::remove_dir_all(&root).expect("cleanup");
 }
 

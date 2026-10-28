@@ -92,7 +92,22 @@ fn replies_are_planner_responses_with_content_newest_first() {
     let prompts = messages.iter().filter(|m| m.role == Role::Human).count();
     assert_eq!(prompts, 2);
     assert_eq!(messages.first().and_then(|m| m.at.as_deref()), Some("2026-10-21T06:01:15Z"));
-    assert_eq!(antigravity::parse_messages(&text, 1).len(), 1, "pick caps the count");
+    assert_eq!(antigravity::parse_messages(&text, 1).len(), 1, "pick caps the replies");
+}
+
+/// The newest step is a prompt still being answered: one pick is still the reply before it.
+#[test]
+fn n_counts_replies_so_a_waiting_prompt_does_not_hide_the_last_reply() {
+    let path = antigravity::transcript_path(&fixtures(), FIXTURE_ID);
+    let text = std::fs::read_to_string(&path).expect("fixture");
+    let waiting = format!("{text}{}\n", r#"{"step_index":8,"type":"USER_INPUT","content":"and the audio?"}"#);
+    let newest = antigravity::parse_messages(&waiting, 1);
+    let roles: Vec<Role> = newest.iter().map(|m| m.role).collect();
+    assert_eq!(roles, [Role::Human, Role::Assistant]);
+    assert_eq!(
+        newest.last().map(|m| m.text.as_str()),
+        Some("Done: both settings are applied in `retroarch.cfg`.")
+    );
 }
 
 #[test]
@@ -159,14 +174,24 @@ fn an_exact_workspace_beats_a_newer_one_that_merely_contains_the_cwd() {
     std::fs::remove_dir_all(&app).expect("cleanup");
 }
 
+/// An empty transcript, or a conversation just started whose only step is the prompt, has
+/// nothing to annotate: the previous conversation in the folder is the answer.
 #[test]
-fn a_conversation_without_messages_is_passed_over() {
+fn a_conversation_without_a_reply_is_passed_over() {
     let app = temp_dir("empty");
     conversation(&app, OLD, "older reply", 1_000);
     let empty = antigravity::transcript_path(&app, NEW);
     std::fs::create_dir_all(empty.parent().expect("logs")).expect("logs dir");
     std::fs::write(&empty, "").expect("empty transcript");
-    summaries(&app, &[(OLD, r#"["file:///w/p"]"#, ""), (NEW, r#"["file:///w/p"]"#, "")]);
+    conversation(&app, OTHER, "", 3_000);
+    summaries(
+        &app,
+        &[
+            (OLD, r#"["file:///w/p"]"#, ""),
+            (NEW, r#"["file:///w/p"]"#, ""),
+            (OTHER, r#"["file:///w/p"]"#, ""),
+        ],
+    );
     let found = antigravity::find_transcript(&app, Path::new("/w/p")).expect("found");
     assert_eq!(reply(&found), "older reply");
     std::fs::remove_dir_all(&app).expect("cleanup");

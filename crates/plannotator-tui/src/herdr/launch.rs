@@ -114,13 +114,23 @@ pub(crate) fn agent_pid(process_info_json: &str) -> Option<(u32, String)> {
     let leader = info.get("foreground_process_group_id").and_then(serde_json::Value::as_u64)?;
     let process = processes.iter().find(|p| pid_of(p) == Some(leader as u32))?;
     let name = name_of(process);
-    let host = name.rsplit('/').next().unwrap_or(&name).to_owned();
+    let host = program_name(&name).to_owned();
     pid_of(process).map(|pid| (pid, if host.is_empty() { "claude".to_owned() } else { host }))
+}
+
+/// A process name without its directory (`/` or `\`) or Windows `.exe` suffix:
+/// `C:\tools\agy.exe` and `/usr/bin/agy` are both `agy`.
+fn program_name(name: &str) -> &str {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    match base.rsplit_once('.') {
+        Some((stem, extension)) if extension.eq_ignore_ascii_case("exe") => stem,
+        _ => base,
+    }
 }
 
 /// Agents whose transcripts the hosts crate can read, by process name.
 fn known_host(name: &str) -> Option<&'static str> {
-    match name.rsplit('/').next().unwrap_or(name) {
+    match program_name(name) {
         "claude" => Some("claude"),
         "codex" => Some("codex"),
         "pi" => Some("pi"),

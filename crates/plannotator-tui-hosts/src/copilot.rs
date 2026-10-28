@@ -66,36 +66,31 @@ pub fn find_session(
         .or_else(|| sessions.first().map(|s| pick(s, Match::Newest)))
 }
 
-/// Human prompts and assistant replies from `events.jsonl`, newest first, at most `n`.
-/// `assistant.message` carries its text as a plain string; empty ones are skipped.
+/// Human prompts and assistant replies from `events.jsonl`, newest first, through the `n`th
+/// newest reply. `assistant.message` carries its text as a plain string; empty ones are
+/// skipped.
 pub fn parse_messages(events_jsonl: &str, n: usize) -> Vec<Message> {
-    let mut out: Vec<Message> = Vec::new();
-    for line in events_jsonl.lines().rev() {
-        if out.len() >= n {
-            break;
-        }
-        let Ok(event) = serde_json::from_str::<Value>(line.trim()) else { continue };
-        let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
-        let role = match kind {
-            "assistant.message" => Role::Assistant,
-            "user.message" => Role::Human,
-            _ => continue,
-        };
-        let data = event.get("data");
-        let Some(text) = data.and_then(|d| d.get("content")).and_then(Value::as_str) else { continue };
-        if text.trim().is_empty() {
-            continue;
-        }
-        let id = data
-            .and_then(|d| d.get("messageId"))
-            .or_else(|| event.get("id"))
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
-        let at = event.get("timestamp").and_then(Value::as_str).map(str::to_owned);
-        out.push(Message { id, role, text: text.to_owned(), at });
-    }
-    out
+    crate::through_replies(events_jsonl.lines().rev().filter_map(event_message), n)
+}
+
+fn event_message(line: &str) -> Option<Message> {
+    let event = serde_json::from_str::<Value>(line.trim()).ok()?;
+    let role = match event.get("type").and_then(Value::as_str)? {
+        "assistant.message" => Role::Assistant,
+        "user.message" => Role::Human,
+        _ => return None,
+    };
+    let data = event.get("data");
+    let text =
+        data.and_then(|d| d.get("content")).and_then(Value::as_str).filter(|t| !t.trim().is_empty())?;
+    let id = data
+        .and_then(|d| d.get("messageId"))
+        .or_else(|| event.get("id"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let at = event.get("timestamp").and_then(Value::as_str).map(str::to_owned);
+    Some(Message { id, role, text: text.to_owned(), at })
 }
 
 struct Session {

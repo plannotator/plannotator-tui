@@ -101,7 +101,7 @@ pub fn find_transcript(sessions_dir: &Path, cwd: &Path) -> Option<PathBuf> {
     newest_with_messages(all)
 }
 
-/// The last-written candidate that holds at least one message. Ranked by modification
+/// The last-written candidate that holds at least one reply. Ranked by modification
 /// time, newest first; a file whose metadata cannot be read ranks after every file that
 /// has one, and ties fall back to the timestamp in the filename, so a directory whose
 /// files all share an mtime keeps the old ordering.
@@ -116,7 +116,7 @@ pub(crate) fn newest_with_messages(mut files: Vec<PathBuf>) -> Option<PathBuf> {
     ranked
         .into_iter()
         .map(|(_, path)| path)
-        .find(|p| std::fs::read_to_string(p).is_ok_and(|text| !parse_messages(&text, 1).is_empty()))
+        .find(|p| std::fs::read_to_string(p).is_ok_and(|text| crate::has_reply(&parse_messages(&text, 1))))
 }
 
 fn modified(path: &Path) -> Option<std::time::SystemTime> {
@@ -200,18 +200,15 @@ fn iso_timestamp(value: &Value) -> Option<String> {
     }
 }
 
-/// The newest `n` messages on the active branch, newest first. The branch is the
-/// `parentId` chain from the newest entry with an id to the root — what pi's own
+/// Messages on the active branch, newest first, through the `n`th newest reply. The branch
+/// is the `parentId` chain from the newest entry with an id to the root — what pi's own
 /// `getBranch()` returns; entries orphaned by a rewind are absent. A chain that cannot be
 /// reconstructed (missing parent, cycle) yields nothing rather than the wrong messages.
 pub fn parse_messages(jsonl: &str, n: usize) -> Vec<Message> {
     let entries: Vec<Entry> = jsonl.lines().filter_map(Entry::parse).collect();
     let Some(active) = active_branch(&entries) else { return Vec::new() };
-    entries
-        .iter()
-        .rev()
-        .filter(|e| e.id.as_ref().is_some_and(|i| active.contains(i)))
-        .filter_map(|e| {
+    let messages =
+        entries.iter().rev().filter(|e| e.id.as_ref().is_some_and(|i| active.contains(i))).filter_map(|e| {
             let (role, text) = e.message.as_ref()?;
             let role = match role.as_str() {
                 "assistant" => Role::Assistant,
@@ -224,9 +221,8 @@ pub fn parse_messages(jsonl: &str, n: usize) -> Vec<Message> {
                 text: text.clone(),
                 at: e.timestamp.clone(),
             })
-        })
-        .take(n)
-        .collect()
+        });
+    crate::through_replies(messages, n)
 }
 
 fn active_branch(entries: &[Entry]) -> Option<std::collections::HashSet<String>> {

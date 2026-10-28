@@ -127,7 +127,8 @@ fn has_table(connection: &rusqlite::Connection, name: &str) -> Result<bool, Host
         .map_err(|e| sql_error(WHAT, &e))
 }
 
-/// The newest `n` user and assistant messages of `session_id` that carry text, newest first.
+/// The user and assistant messages of `session_id` that carry text, newest first, through the
+/// `n`th newest assistant reply.
 pub fn messages_for_session(
     db: &Path,
     session_id: &str,
@@ -173,7 +174,7 @@ fn messages_v1(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, Ho
         let (id, message_data, part_data) = row.map_err(|e| sql_error(WHAT, &e))?;
         if current.as_ref().is_none_or(|c| c.0 != id) {
             flush(&mut current, &mut messages);
-            if messages.len() >= n {
+            if replies(&messages) >= n {
                 break;
             }
             let Some((role, at)) = message_meta(&message_data) else { continue };
@@ -185,7 +186,7 @@ fn messages_v1(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, Ho
             parts.push(text);
         }
     }
-    if messages.len() < n {
+    if replies(&messages) < n {
         flush(&mut current, &mut messages);
     }
     if messages.is_empty() {
@@ -219,7 +220,7 @@ fn messages_v2(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, Ho
         .map_err(|e| sql_error(WHAT, &e))?;
     let mut messages = Vec::new();
     for row in rows {
-        if messages.len() >= n {
+        if replies(&messages) >= n {
             break;
         }
         let (id, kind, data, created) = row.map_err(|e| sql_error(WHAT, &e))?;
@@ -260,6 +261,11 @@ fn messages_v2(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, Ho
         )));
     }
     Ok(messages)
+}
+
+/// How many of `messages` are assistant replies: `n` counts those, not prompts.
+fn replies(messages: &[Message]) -> usize {
+    messages.iter().filter(|message| message.role == Role::Assistant).count()
 }
 
 /// Role and creation time from a `message.data` payload; `None` for roles we do not render.

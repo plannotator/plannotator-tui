@@ -17,9 +17,9 @@ use super::roots::Roots;
 /// How a transcript was chosen, so the UI can say when nothing identified it exactly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Discovery {
-    /// An explicit path, an exact session id, a thread id, the session registered for the
-    /// agent's pid, or the file the agent process itself has open: this transcript is the
-    /// session, not a guess.
+    /// An explicit path, an exact session id, a thread or conversation id, the session
+    /// registered for the agent's pid, or the file the agent process itself has open: this
+    /// transcript is the session, not a guess.
     Exact,
     /// The newest transcript filed under the agent's working directory. Sessions that share
     /// one directory are indistinguishable here.
@@ -74,6 +74,14 @@ pub(super) fn read(
             Ok((path, messages, Discovery::Folder))
         }
         Host::Antigravity => {
+            // Inside an `agy` shell its exported conversation id is exact, as Codex's thread id is.
+            let conversation =
+                std::env::var(antigravity::CONVERSATION_ENV).ok().filter(|id| !id.trim().is_empty());
+            if let Some(id) = conversation {
+                let session = exact::resolve(host, &id, cwd, roots)?;
+                let (path, messages) = readers::exact(host, &id, session, pick)?;
+                return Ok((path, messages, Discovery::Exact));
+            }
             let path = antigravity::find_transcript(&roots.antigravity_home, cwd)?;
             let messages = readers::antigravity_messages(&path, pick)?;
             Ok((path, messages, Discovery::Folder))

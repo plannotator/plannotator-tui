@@ -76,6 +76,16 @@ fn newest_active_assistant_reply_comes_first_and_n_is_honoured() {
     assert_eq!(messages[3].role, Role::Human);
     assert_eq!(messages[0].at.as_deref(), Some("1970-01-01T00:05:00.000Z"));
     assert_eq!(hermes::messages_for_session(&db, "s1", 2).expect("two").len(), 2);
+    // A prompt still waiting for its reply does not use up the one reply asked for.
+    writer
+        .execute(
+            "INSERT INTO messages (session_id, role, content, timestamp) VALUES ('s1', 'user', 'and now?', 600.0)",
+            [],
+        )
+        .expect("prompt");
+    let waiting = hermes::messages_for_session(&db, "s1", 1).expect("one reply");
+    let texts: Vec<&str> = waiting.iter().map(|m| m.text.as_str()).collect();
+    assert_eq!(texts, ["and now?", "newest reply"]);
     // Windows cannot delete a database another handle still holds open.
     drop(writer);
     std::fs::remove_dir_all(&dir).expect("cleanup");

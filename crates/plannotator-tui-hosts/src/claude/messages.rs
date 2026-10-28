@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use super::entries::Entry;
 use crate::{Message, Role};
 
-/// The newest `n` rendered messages, newest first.
+/// Rendered messages, newest first, through the `n`th newest reply.
 ///
 /// The active branch is the `parentUuid` chain from the newest entry that has a uuid.
 /// File order is used instead when that chain cannot be trusted (missing ids, a dangling
@@ -25,14 +25,14 @@ pub fn parse_messages(jsonl: &str, n: usize) -> Vec<Message> {
         }
         None => render_all(&entries),
     };
-    rendered.into_iter().rev().take(n).collect()
+    crate::through_replies(rendered.into_iter().rev(), n)
 }
 
-/// The newest `n` rendered messages in plain file order, newest first — for transcripts
-/// in Claude's shape that have no rewind tree (Droid).
+/// Rendered messages in plain file order, newest first, through the `n`th newest reply — for
+/// transcripts in Claude's shape that have no rewind tree (Droid).
 pub fn parse_messages_file_order(jsonl: &str, n: usize) -> Vec<Message> {
     let entries: Vec<Entry> = jsonl.lines().filter_map(Entry::parse).collect();
-    render_all(&entries).into_iter().rev().take(n).collect()
+    crate::through_replies(render_all(&entries).into_iter().rev(), n)
 }
 
 fn render_all(entries: &[Entry]) -> Vec<Message> {

@@ -280,9 +280,10 @@ fn text_parts_join_in_order_and_injected_or_empty_ones_are_skipped() {
     assert_eq!(messages[0].id, "msg_5");
     assert_eq!(messages[0].at.as_deref(), Some("1970-01-01T00:00:00.050Z"));
     assert_eq!(messages[1].role, Role::Human);
-    // n counts messages with text; the aborted assistant turn does not consume a slot.
+    // n counts replies with text; the prompt between them and the aborted assistant turn
+    // do not consume a slot.
     let two = opencode::messages_for_session(&db, "ses_main", Schema::V1, 2).expect("two");
-    assert_eq!(two.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["msg_5", "msg_4"]);
+    assert_eq!(two.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["msg_5", "msg_4", "msg_2"]);
     match opencode::messages_for_session(&db, "ses_empty", Schema::V1, 25) {
         Err(HostError::NoMessages(msg)) => assert!(msg.contains("ses_empty"), "{msg}"),
         other => panic!("expected NoMessages, got {other:?}"),

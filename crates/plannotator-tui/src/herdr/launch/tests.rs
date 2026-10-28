@@ -211,6 +211,29 @@ fn the_agent_pid_is_the_named_agent_process_else_the_group_leader() {
     assert_eq!(agent_pid("{}"), None);
 }
 
+/// Windows reports `agy.exe`, sometimes with a `\`-separated path; every known agent and the
+/// group leader's reported name are matched without either.
+#[test]
+fn windows_process_names_match_without_their_directory_or_exe_suffix() {
+    for (name, host) in [
+        ("agy.exe", "agy"),
+        (r"C:\Users\me\AppData\Local\agy\agy.exe", "agy"),
+        ("/usr/local/bin/agy", "agy"),
+        ("claude.EXE", "claude"),
+        (r"C:\tools\codex.exe", "codex"),
+        ("opencode.exe", "opencode"),
+        ("pi.exe", "pi"),
+    ] {
+        let info =
+            PROCESS_INFO.replace(r#""name":"claude""#, &format!(r#""name":{}"#, serde_json::json!(name)));
+        assert_eq!(agent_pid(&info), Some((91279, host.into())), "{name}");
+    }
+    let leader = PROCESS_INFO.replace(r#""name":"claude""#, r#""name":"C:\\bin\\aider.exe""#);
+    assert_eq!(agent_pid(&leader), Some((91279, "aider".into())), "an unknown leader is named the same way");
+    let dotted = PROCESS_INFO.replace(r#""name":"claude""#, r#""name":"agy.sh""#);
+    assert_eq!(agent_pid(&dotted), Some((91279, "agy.sh".into())), "only .exe is a suffix to drop");
+}
+
 #[test]
 fn a_last_launch_carries_the_pid_and_host_instead_of_a_file() {
     let context = HerdrContext {

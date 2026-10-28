@@ -9,7 +9,7 @@ use crate::{Match, SessionMeta};
 
 const MAX_ANCESTOR_HOPS: usize = 8;
 
-/// The ladder, most precise first; the first candidate that yields a message wins, and
+/// The ladder, most precise first; the first candidate that yields a reply wins, and
 /// the returned [`Match`] says which rung it came from:
 /// 1. `sessions/<pid>.json` for `start_pid` and up to eight of its ancestors — with a ghost
 ///    check: a newer transcript in the same project dir that no running session claims is a
@@ -76,7 +76,7 @@ fn transcript_for_session(
     {
         return Some(ghost);
     }
-    (own_mtime.is_some() && has_messages(&own)).then_some(own)
+    (own_mtime.is_some() && holds_reply(&own)).then_some(own)
 }
 
 /// The project dir for `cwd`, exact name first, then case-insensitively (Windows lowercases).
@@ -91,7 +91,7 @@ pub(super) fn project_dir(projects_dir: &Path, cwd: &Path) -> Option<PathBuf> {
     })
 }
 
-/// Newest transcript in `dir` that renders at least one message. With `unregistered`, only
+/// Newest transcript in `dir` that renders at least one reply. With `unregistered`, only
 /// transcripts whose session id is not in that set count.
 fn newest_with_messages(dir: &Path, unregistered: Option<&HashSet<&str>>) -> Option<PathBuf> {
     let mut files: Vec<(SystemTime, PathBuf)> = std::fs::read_dir(dir)
@@ -106,11 +106,11 @@ fn newest_with_messages(dir: &Path, unregistered: Option<&HashSet<&str>>) -> Opt
         .filter_map(|p| Some((mtime(&p)?, p)))
         .collect();
     files.sort_by_key(|(when, _)| std::cmp::Reverse(*when));
-    files.into_iter().map(|(_, p)| p).find(|p| has_messages(p))
+    files.into_iter().map(|(_, p)| p).find(|p| holds_reply(p))
 }
 
-fn has_messages(path: &Path) -> bool {
-    std::fs::read_to_string(path).is_ok_and(|text| !parse_messages(&text, 1).is_empty())
+fn holds_reply(path: &Path) -> bool {
+    std::fs::read_to_string(path).is_ok_and(|text| crate::has_reply(&parse_messages(&text, 1)))
 }
 
 fn mtime(path: &Path) -> Option<SystemTime> {
