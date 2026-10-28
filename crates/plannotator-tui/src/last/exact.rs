@@ -3,7 +3,9 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use plannotator_tui_hosts::{Host, claude, codex, commandcode, copilot, droid, omp, opencode, pi};
+use plannotator_tui_hosts::{
+    Host, antigravity, claude, codex, commandcode, copilot, droid, omp, opencode, pi,
+};
 
 use super::roots::Roots;
 
@@ -59,6 +61,12 @@ pub(super) fn resolve(host: Host, session_id: &str, cwd: &Path, roots: &Roots) -
             commandcode::find_transcript_by_id(&root, cwd, id)?
                 .map(ExactSession::File)
                 .with_context(|| format!("no Command Code session {id} in {}", root.display()))
+        }
+        Host::Antigravity => {
+            let root = roots.antigravity_home.join("brain");
+            antigravity::find_transcript_by_id(&roots.antigravity_home, id)?
+                .map(ExactSession::File)
+                .with_context(|| format!("no Antigravity conversation {id} in {}", root.display()))
         }
         Host::Hermes => Ok(ExactSession::Hermes(roots.hermes_database())),
         Host::OpenCode => {

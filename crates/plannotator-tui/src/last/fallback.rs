@@ -7,7 +7,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 #[cfg(unix)]
 use plannotator_tui_hosts::copilot;
-use plannotator_tui_hosts::{Host, Match, Message, claude, commandcode, droid, opencode, pi};
+use plannotator_tui_hosts::{Host, Match, Message, antigravity, claude, commandcode, droid, opencode, pi};
 
 use super::LastOptions;
 use super::exact;
@@ -71,6 +71,11 @@ pub(super) fn read(
         Host::CommandCode => {
             let path = find_commandcode_transcript(cwd, roots)?;
             let messages = readers::commandcode_messages(&path, pick)?;
+            Ok((path, messages, Discovery::Folder))
+        }
+        Host::Antigravity => {
+            let path = antigravity::find_transcript(&roots.antigravity_home, cwd)?;
+            let messages = readers::antigravity_messages(&path, pick)?;
             Ok((path, messages, Discovery::Folder))
         }
         Host::Omp => bail!(

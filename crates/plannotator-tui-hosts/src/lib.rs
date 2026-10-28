@@ -5,6 +5,7 @@
 //! `projects_dir`, a process-table snapshot, and an env lookup. The rules come from
 //! Plannotator's `last` implementation (see `docs/decisions.md`, decision 9).
 
+pub mod antigravity;
 pub mod claude;
 pub mod codex;
 pub mod commandcode;
@@ -39,6 +40,10 @@ pub enum Host {
     /// Command Code: pi's format under `~/.commandcode/projects/<slug>/<uuid>.jsonl`; Herdr
     /// reports it as `cmd`.
     CommandCode,
+    /// Antigravity CLI: `<app data>/brain/<conversation id>/.../transcript_full.jsonl`, the
+    /// app data directory `~/.gemini/antigravity-cli` unless `ANTIGRAVITY_CLI_HOME` moves it;
+    /// Herdr reports it as `agy` with the conversation id.
+    Antigravity,
 }
 
 impl Host {
@@ -54,11 +59,12 @@ impl Host {
             Self::Hermes => "hermes",
             Self::OpenCode => "opencode",
             Self::CommandCode => "cmd",
+            Self::Antigravity => "agy",
         }
     }
 
     /// Every host with a transcript reader, for messages that list them.
-    pub const ALL: [Host; 9] = [
+    pub const ALL: [Host; 10] = [
         Host::ClaudeCode,
         Host::Codex,
         Host::Pi,
@@ -68,6 +74,7 @@ impl Host {
         Host::Hermes,
         Host::OpenCode,
         Host::CommandCode,
+        Host::Antigravity,
     ];
 }
 
@@ -83,6 +90,10 @@ pub fn sniff(head: &str) -> Option<Host> {
     }
     if any(r#""type":"assistant.message""#) || any(r#""type":"session.start""#) {
         return Some(Host::Copilot);
+    }
+    // Antigravity: numbered steps, prompts and replies typed in capitals.
+    if any(r#""step_index""#) && (any(r#""type":"USER_INPUT""#) || any(r#""type":"PLANNER_RESPONSE""#)) {
+        return Some(Host::Antigravity);
     }
     if any(r#""type":"response_item""#) || any(r#""type":"event_msg""#) || any(r#""type":"session_meta""#) {
         return Some(Host::Codex);
@@ -178,15 +189,17 @@ impl From<std::io::Error> for HostError {
 }
 
 /// The host-assigned session id a transcript's name carries, when the host's naming
-/// scheme makes it unambiguous: Claude Code, Droid and Command Code file a session as `<uuid>.jsonl`,
-/// a Codex rollout ends in its thread uuid, and a Copilot session is a directory named by
-/// its uuid. Anything that is not uuid-shaped yields `None`: an arbitrary path handed in
-/// with `--session` must never be mistaken for an id, and a path is never one.
+/// scheme makes it unambiguous: Claude Code, Droid and Command Code file a session as
+/// `<uuid>.jsonl`, a Codex rollout ends in its thread uuid, a Copilot session is a directory
+/// named by its uuid, and an Antigravity transcript sits under `brain/<uuid>/`. Anything that
+/// is not uuid-shaped yields `None`: an arbitrary path handed in with `--session` must never
+/// be mistaken for an id, and a path is never one.
 pub fn session_id_of(host: Host, transcript: &Path) -> Option<String> {
     let candidate = match host {
         Host::ClaudeCode | Host::Droid | Host::CommandCode => transcript.file_stem()?.to_str()?.to_owned(),
         Host::Codex => codex::thread_of(transcript)?,
         Host::Copilot => transcript.file_name()?.to_str()?.to_owned(),
+        Host::Antigravity => antigravity::conversation_of(transcript)?,
         Host::Pi | Host::Omp | Host::Hermes | Host::OpenCode => return None,
     };
     is_uuid(&candidate).then_some(candidate)
@@ -220,6 +233,7 @@ pub fn detect_host(env: impl Fn(&str) -> Option<String>) -> Result<Host, HostErr
             "hermes" | "hermes-cli" | "hermes_cli" => return Ok(Host::Hermes),
             "opencode" | "open-code" | "open_code" => return Ok(Host::OpenCode),
             "cmd" | "command-code" | "command_code" | "commandcode" => return Ok(Host::CommandCode),
+            "agy" | "antigravity" | "antigravity-cli" | "antigravity_cli" => return Ok(Host::Antigravity),
             _ => {}
         }
     }

@@ -379,6 +379,29 @@ host and the pane's cwd selects the session. Command Code reports its session id
 when it runs its own Herdr integration; that id is looked up as `<id>.jsonl`, slug directory
 first.
 
+**Antigravity CLI** (2026-10-27, herdr-annotate#70). `agy` keeps one directory per
+conversation in its app data directory (`$ANTIGRAVITY_CLI_HOME`, else
+`~/.gemini/antigravity-cli`, `%USERPROFILE%` on Windows):
+`brain/<conversation id>/.system_generated/logs/transcript_full.jsonl`, one step per line.
+`transcript.jsonl` beside it truncates long `content` and is never read. A reply is a
+`PLANNER_RESPONSE` step's non-empty `content`, verbatim; a step that only calls tools has
+none. Prompts are `USER_INPUT` steps wrapped in `<USER_REQUEST>`/`<ADDITIONAL_METADATA>`,
+returned as written because only replies are shown. Each step's `step_index` is its message
+id. Herdr labels the agent `agy` and reports the conversation id as `agent_session`
+(`kind: id`), which names the transcript directly. Without an id, the conversation is chosen
+by folder, and a transcript does not record its folder. Two other files do:
+`conversation_summaries.db` (`workspace_uris`, a JSON array of `file://` URIs, per
+`conversation_id`) and `history.jsonl` (each prompt's `workspace`, and its `conversationId`
+from the second prompt on). Both are read, the database read-only through the same
+`immutable` fallback as the other `SQLite` hosts. Subagent rows (`parent_conversation_id`
+set) are skipped. A conversation whose workspace is the cwd wins over one whose workspace only
+contains it, and the newest transcript by last write wins within each. When the database is
+missing or unreadable, the history alone decides. A transcript nobody ties to the cwd is never
+shown, so an unverified newer conversation does not stand in for this folder's. The error
+names both files and the database failure. Verified against `agy` 1.2.7's files on macOS and
+the sample in herdr-annotate#70. The `presence/<id>.lock` files outlive their sessions and are
+not used.
+
 
 ## 15. The cursor can roam before selecting (2026-09-18)
 

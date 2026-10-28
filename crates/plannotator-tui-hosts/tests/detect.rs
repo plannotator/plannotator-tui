@@ -65,6 +65,13 @@ fn command_code_is_selected_by_herdrs_label_or_its_names_only() {
 }
 
 #[test]
+fn antigravity_is_selected_by_herdrs_label_or_its_names() {
+    for name in ["agy", "Antigravity", "antigravity-cli", "antigravity_cli"] {
+        assert_eq!(detect_host(env(&[("PLANNOTATOR_TUI_HOST", name)])).expect("host"), Host::Antigravity);
+    }
+}
+
+#[test]
 fn the_copilot_marker_selects_copilot_and_droid_needs_the_override() {
     assert_eq!(detect_host(env(&[("COPILOT_CLI", "1")])).expect("host"), Host::Copilot);
     assert_eq!(
@@ -86,5 +93,6 @@ fn labels_are_the_short_names_herdr_uses() {
     assert_eq!(Host::Hermes.label(), "hermes");
     assert_eq!(Host::OpenCode.label(), "opencode");
     assert_eq!(Host::CommandCode.label(), "cmd");
-    assert_eq!(Host::ALL.len(), 9);
+    assert_eq!(Host::Antigravity.label(), "agy");
+    assert_eq!(Host::ALL.len(), 10);
 }

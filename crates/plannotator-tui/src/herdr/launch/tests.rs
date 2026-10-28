@@ -263,6 +263,25 @@ fn herdrs_cmd_label_selects_command_code_while_the_pid_comes_from_the_process() 
     assert!(argv(&launch).contains(&"PLANNOTATOR_TUI_HOST=cmd".to_owned()));
 }
 
+/// Antigravity under Herdr: agent `agy` with the conversation id as its session.
+#[test]
+fn herdrs_agy_label_and_conversation_id_select_antigravity_exactly() {
+    let agent_get = r#"{"id":"cli:agent:get","result":{"agent":{"agent":"agy","agent_session":{"agent":"agy","kind":"id","source":"herdr:antigravity_cli","value":"4f1c9e2a-7b3d-4c8e-9a10-2b6d8e0f1a3c"},"pane_id":"w1:p1"},"type":"agent_info"}}"#;
+    let launch = plan_last(
+        &env(Some("w1:p1"), None),
+        &Config::default(),
+        OpenArgs::default(),
+        Path::new("/"),
+        None,
+        Some(agent_get),
+    )
+    .expect("plans");
+    assert_eq!(launch.message, Some(AgentMessage { host: "agy".into(), pid: None }));
+    let args = argv(&launch);
+    assert!(args.contains(&"PLANNOTATOR_TUI_HOST=agy".to_owned()));
+    assert!(args.contains(&"PLANNOTATOR_TUI_SESSION_ID=4f1c9e2a-7b3d-4c8e-9a10-2b6d8e0f1a3c".to_owned()));
+}
+
 const AGENT_GET_PATH: &str = r#"{"id":"cli:agent:get","result":{"agent":{"agent":"omp","agent_session":{"agent":"omp","kind":"path","source":"herdr:omp","value":"~/.omp/agent/sessions/--w--/2026-08-29T01-00-00-000Z_0199.jsonl"},"pane_id":"w1:p1"},"type":"agent_info"}}"#;
 const AGENT_GET_ID: &str = r#"{"id":"cli:agent:get","result":{"agent":{"agent":"hermes","agent_session":{"agent":"hermes","kind":"id","source":"herdr:hermes","value":"sess_abc123"},"pane_id":"w1:p1"},"type":"agent_info"}}"#;
 const AGENT_GET_PI: &str = r#"{"id":"cli:agent:get","result":{"agent":{"agent":"pi","agent_session":{"agent":"pi","kind":"path","source":"herdr:pi","value":"~/.pi/agent/sessions/--w--/session.jsonl"},"pane_id":"w1:p1"},"type":"agent_info"}}"#;

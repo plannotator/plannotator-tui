@@ -125,6 +125,7 @@ fn known_host(name: &str) -> Option<&'static str> {
         "codex" => Some("codex"),
         "pi" => Some("pi"),
         "opencode" => Some("opencode"),
+        "agy" => Some("agy"),
         _ => None,
     }
 }

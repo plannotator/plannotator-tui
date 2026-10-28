@@ -286,6 +286,60 @@ fn command_code_reads_the_session_started_in_the_agents_cwd() {
     std::fs::remove_dir_all(&home).expect("cleanup");
 }
 
+/// Herdr's conversation id reads its transcript directly; without one, the conversation the
+/// prompt history ties to the pane's cwd is read.
+#[test]
+fn antigravity_reads_the_conversation_herdr_names_or_the_one_started_in_the_cwd() {
+    let id = "4f1c9e2a-7b3d-4c8e-9a10-2b6d8e0f1a3c";
+    let app = temp_dir("agy");
+    let relative = format!("brain/{id}/.system_generated/logs/transcript_full.jsonl");
+    let target = app.join(&relative);
+    std::fs::create_dir_all(target.parent().expect("logs")).expect("logs dir");
+    std::fs::copy(fixtures().join("antigravity").join(&relative), &target).expect("copy");
+    let newest = "Done: both settings are applied in `retroarch.cfg`.";
+    let by_id = bin()
+        .env("ANTIGRAVITY_CLI_HOME", &app)
+        .env("PLANNOTATOR_TUI_CWD", "/w/unrelated")
+        .args(["last", "--host", "agy", "--session-id", id, "--print"])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        String::from_utf8_lossy(&by_id.stdout).trim_end(),
+        newest,
+        "{}",
+        String::from_utf8_lossy(&by_id.stderr)
+    );
+    let unvouched = bin()
+        .env("ANTIGRAVITY_CLI_HOME", &app)
+        .env("PLANNOTATOR_TUI_CWD", "/w/proj")
+        .args(["last", "--host", "agy", "--print"])
+        .output()
+        .expect("runs");
+    assert!(unvouched.status.success(), "exit 0 is the contract");
+    assert_eq!(String::from_utf8_lossy(&unvouched.stdout), "");
+    assert!(
+        String::from_utf8_lossy(&unvouched.stderr).contains("no Antigravity conversation started in /w/proj")
+    );
+    std::fs::write(
+        app.join("history.jsonl"),
+        format!("{{\"display\":\"Apply it.\",\"timestamp\":1,\"workspace\":\"/w/proj\",\"conversationId\":\"{id}\"}}\n"),
+    )
+    .expect("history");
+    let by_cwd = bin()
+        .env("ANTIGRAVITY_CLI_HOME", &app)
+        .env("PLANNOTATOR_TUI_CWD", "/w/proj")
+        .args(["last", "--host", "agy", "--print"])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        String::from_utf8_lossy(&by_cwd.stdout).trim_end(),
+        newest,
+        "{}",
+        String::from_utf8_lossy(&by_cwd.stderr)
+    );
+    std::fs::remove_dir_all(&app).expect("cleanup");
+}
+
 #[test]
 fn hermes_reads_the_session_named_by_id_from_hermes_home() {
     let home = std::env::temp_dir().join(format!("plannotator-tui-hermes-home-{}", std::process::id()));
