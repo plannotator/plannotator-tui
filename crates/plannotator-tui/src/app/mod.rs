@@ -488,6 +488,16 @@ impl App {
         Ok(())
     }
 
+    /// `copy`: the waiting selection's source text to the clipboard. It stays selected.
+    fn copy_pending(&mut self) {
+        let Some(pending) = &self.pending else { return };
+        let Some(text) = self.open.doc.source.get(pending.range.clone()) else { return };
+        if self.clipboard {
+            let _ = crate::delivery::Clipboard.deliver(text);
+        }
+        self.status = Some("copied to clipboard".to_owned());
+    }
+
     /// Begin editing the body of the annotation under the rail cursor.
     fn edit_selected_annotation(&mut self) {
         let placed = self.open.store.placed();

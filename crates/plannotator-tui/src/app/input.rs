@@ -234,6 +234,10 @@ impl App {
     fn document_key(&mut self, key: KeyEvent) -> Result<()> {
         let page = i64::from(self.geometry.doc.height.max(1));
         // With a selection waiting, the toolbar keys win.
+        if self.pending.is_some() && self.keys.action(&key, keys::TOOLBAR) == Some(Action::CopySelection) {
+            self.copy_pending();
+            return Ok(());
+        }
         if self.pending.is_some()
             && let Some(action) = self.keys.action(&key, keys::TOOLBAR)
             && let Some(&(_, _, _, kind)) = TOOLBAR.iter().find(|item| item.2 == action)
@@ -627,6 +631,7 @@ impl App {
         let end_char = source.get(hi..).and_then(|s| s.chars().next()).map_or(1, char::len_utf8);
         let range = lo..hi + end_char;
         if self.clipboard
+            && self.ui.copy_on_select
             && let Some(text) = source.get(range.clone())
         {
             let _ = crate::delivery::Clipboard.deliver(text);

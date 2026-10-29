@@ -498,6 +498,7 @@ impl App {
                 key(Action::LooksGood, "looks good"),
                 key(Action::Comment, "comment"),
                 key(Action::Delete, "delete"),
+                (!self.ui.copy_on_select).then(|| key(Action::CopySelection, "copy")).flatten(),
                 key(Action::Back, "clear"),
             ],
             Focus::Tree => vec![

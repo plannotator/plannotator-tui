@@ -99,7 +99,7 @@ dimmed. The keys also work without opening the menu.
 | reply review | `S` send and close |
 | gated review | `A` approve; `E` send and finish; `q` dismiss |
 | document | `j`/`k` block; `c` comment on the block; `x` clear its annotations; `X` clear every annotation on the document, after a `y`; `v` select with `hjkl` `w` `b` `0` `$`, `Enter` to finish; `i` move the cursor with those keys first, then `v` to select from there; `I`/`D` attach or remove an image on the block's note |
-| toolbar | `a` looks good · `c` comment · `d` delete · `Esc` |
+| toolbar | `a` looks good · `c` comment · `d` delete · `y` copy · `Esc` |
 | notes | `j`/`k`; `e` edit; `x` remove; `I` attach an image, `D` remove the last; click a bubble |
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
@@ -245,6 +245,15 @@ All three default to `0`, which fills the terminal as before. The margin and `ma
 yield before the app drops below 80 columns, so a narrow pane keeps its notes rail; a
 narrow pane also lets the document shrink below `doc_width`.
 
+A mouse selection is copied to the clipboard when you release the button. To leave the
+clipboard alone, as with Herdr's `ui.copy_on_select = false`, turn it off and press `y` on
+the selection when you want a copy:
+
+```toml
+[ui]
+copy_on_select = false
+```
+
 ### Keys
 
 Every key is rebindable under `[keys]`: an action, and the keys that run it.
@@ -290,6 +299,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `comment` `clear-block` | `c` `x` | on the block; clear its annotations |
 | `clear-all` | `X` | every annotation on the document, after `yes` |
 | `looks-good` `delete` | `a` `d` | toolbar, with `comment` |
+| `copy` | `y` | copy the selection waiting in the toolbar |
 | `yes` `no` | `y` `n`, `Y` `N` | the send-before-quitting and clear-all questions |
 
 Actions forwarded by Herdr Mirror default to a split beside the invoking remote

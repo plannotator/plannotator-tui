@@ -57,16 +57,19 @@ pub(crate) enum Action {
     ClearAll,
     LooksGood,
     Delete,
+    /// Copy the waiting selection to the clipboard.
+    #[serde(rename = "copy")]
+    CopySelection,
     Yes,
     No,
 }
 
 use Action::{
-    Approve, Archive, AttachImage, Back, Bottom, ClearAll, ClearBlock, Comment, Confirm, CycleFocus, Delete,
-    Down, Edit, FinishReview, Interrupt, Left, LineEnd, LineStart, LooksGood, MoveCursor, No, OpenInEditor,
-    PageDown, PageUp, PickMessage, QuickOpen, Quit, Reload, Remove, RemoveImage, ResendAll, ReviewMenu,
-    Right, Send, SendAndClose, ToggleHidden, ToggleTree, Top, UndoFinish, Up, Visual, WordBack, WordForward,
-    Yes,
+    Approve, Archive, AttachImage, Back, Bottom, ClearAll, ClearBlock, Comment, Confirm, CopySelection,
+    CycleFocus, Delete, Down, Edit, FinishReview, Interrupt, Left, LineEnd, LineStart, LooksGood, MoveCursor,
+    No, OpenInEditor, PageDown, PageUp, PickMessage, QuickOpen, Quit, Reload, Remove, RemoveImage, ResendAll,
+    ReviewMenu, Right, Send, SendAndClose, ToggleHidden, ToggleTree, Top, UndoFinish, Up, Visual, WordBack,
+    WordForward, Yes,
 };
 
 /// Browsing, before the focused pane gets the key.
@@ -115,7 +118,7 @@ pub(crate) const MOTION: &[Action] = &[Left, Right, Down, Up, WordForward, WordB
 /// While a keyboard selection grows; any other key is a motion.
 pub(crate) const VISUAL: &[Action] = &[Back, Confirm, Visual];
 /// While a finished selection waits for its kind.
-pub(crate) const TOOLBAR: &[Action] = &[LooksGood, Comment, Delete];
+pub(crate) const TOOLBAR: &[Action] = &[LooksGood, Comment, Delete, CopySelection];
 pub(crate) const CONFIRM_QUIT: &[Action] = &[Yes, Confirm, No, Back];
 /// Before `clear-all` empties the document. Only `yes` clears: `confirm` would let a slip
 /// followed by Enter wipe every note.
@@ -282,9 +285,14 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (ClearAll, &[ch('X')]),
     (LooksGood, &[ch('a')]),
     (Delete, &[ch('d')]),
+    (CopySelection, &[ch('y')]),
     (Yes, &[ch('y'), ch('Y')]),
     (No, &[ch('n'), ch('N')]),
 ];
+
+/// Actions added after configs were written: `approve` (live only in a gated review) and
+/// `copy` (on a waiting selection).
+const LATE: &[Action] = &[Approve, CopySelection];
 
 /// The keys bound to each action. A `[keys]` entry replaces that action's keys and leaves the
 /// others at their defaults; an empty list unbinds the action.
@@ -301,13 +309,17 @@ impl<'de> Deserialize<'de> for Keymap {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut keymap = Self::default();
         let entries = BTreeMap::<Action, Vec<Key>>::deserialize(deserializer)?;
-        let approve_set = entries.contains_key(&Approve);
+        let user_keys: Vec<Key> = entries.values().flatten().copied().collect();
+        let unset: Vec<Action> = LATE.iter().copied().filter(|late| !entries.contains_key(late)).collect();
         keymap.0.extend(entries);
-        // `approve` arrived after configs were written and is live only in a gated review.
-        // Its default key yields to a config that gives that key to another action, so a
-        // config that loaded before still loads.
-        if !approve_set && keymap.check().is_err() {
-            keymap.0.insert(Approve, Vec::new());
+        // Their default keys yield to a config that gives those keys to another action, so
+        // a config that loaded before they existed still loads.
+        for late in unset {
+            let taken =
+                keymap.0.get(&late).is_some_and(|keys| keys.iter().any(|key| user_keys.contains(key)));
+            if taken && keymap.check().is_err() {
+                keymap.0.insert(late, Vec::new());
+            }
         }
         keymap.check().map_err(serde::de::Error::custom)?;
         Ok(keymap)
@@ -423,6 +435,7 @@ impl Action {
             Self::ClearAll => "clear-all",
             Self::LooksGood => "looks-good",
             Self::Delete => "delete",
+            Self::CopySelection => "copy",
             Self::Yes => "yes",
             Self::No => "no",
         }

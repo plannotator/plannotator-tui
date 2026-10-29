@@ -24,7 +24,7 @@ pub(crate) struct Config {
 }
 
 /// Which palette the app starts from; `[colors]` adjusts individual roles of it.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct UiConfig {
     /// `auto` asks the terminal for its background colour; `light` and `dark` skip the
@@ -37,6 +37,21 @@ pub(crate) struct UiConfig {
     /// Widest the document's text gets; spare columns sit between it and the rail. Zero
     /// lets the document take every column the rail leaves.
     pub(crate) doc_width: u16,
+    /// Copy a mouse selection to the clipboard on release. Off leaves the clipboard alone
+    /// until `copy` (`y`) on the waiting selection.
+    pub(crate) copy_on_select: bool,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            theme: ThemeSetting::default(),
+            horizontal_margin: 0,
+            max_width: 0,
+            doc_width: 0,
+            copy_on_select: true,
+        }
+    }
 }
 
 /// How plannotator-tui opens inside Herdr.
@@ -263,6 +278,12 @@ mod tests {
             Config::parse("[ui]\nhorizontal_margin = 2\nmax_width = 168\ndoc_width = 120\n").expect("parses");
         assert_eq!((config.ui.horizontal_margin, config.ui.max_width, config.ui.doc_width), (2, 168, 120));
         assert_eq!(Config::parse(&config.to_toml().expect("serializes")).expect("parses"), config);
+    }
+
+    #[test]
+    fn copy_on_select_defaults_on_and_turns_off() {
+        assert!(Config::default().ui.copy_on_select);
+        assert!(!Config::parse("[ui]\ncopy_on_select = false\n").expect("parses").ui.copy_on_select);
     }
 
     #[test]

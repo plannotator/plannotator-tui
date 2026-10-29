@@ -134,3 +134,14 @@ fn a_config_that_gave_approves_key_away_still_loads() {
     assert!(err.message().contains("approve"), "{}", err.message());
     assert_eq!(parse("approve = [\"Y\"]\n").expect("rebinds").hint(Approve), "Y");
 }
+
+#[test]
+fn copy_is_y_on_a_waiting_selection_and_yields_to_an_older_config() {
+    let keymap = Keymap::default();
+    assert_eq!(keymap.action(&press(KeyCode::Char('y'), KeyModifiers::NONE), TOOLBAR), Some(CopySelection));
+    // Written before `copy` existed: `y` is the user's comment key, and copy is left unbound.
+    let keymap = parse("comment = [\"y\"]\n").expect("an older config keeps loading");
+    assert_eq!(keymap.hint(CopySelection), "");
+    assert_eq!(keymap.hint(Approve), "A");
+    assert_eq!(parse("copy = [\"Y\"]\n").expect("rebinds").hint(CopySelection), "Y");
+}
