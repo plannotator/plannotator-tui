@@ -129,6 +129,65 @@ fn claude_config_override_is_used_for_an_exact_id() {
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 
+/// A session kept in `profile`, looked up by id with no `CLAUDE_CONFIG_DIR` and `config` as
+/// the config file. Returns the output and the reply the session ends with.
+fn exact_claude_lookup_in_profile(tag: &str, profile: &str, config: &str) -> (std::process::Output, String) {
+    let root = temp_dir(tag);
+    let home = root.join("home");
+    let cwd = root.join("work tree");
+    let id = "d2fcdbb5-0814-432c-8427-f1fcc75f603d";
+    std::fs::create_dir_all(home.join(".claude/projects")).expect("default config");
+    let transcript = home.join(profile).join("projects/-elsewhere").join(format!("{id}.jsonl"));
+    std::fs::create_dir_all(transcript.parent().expect("parent")).expect("project");
+    std::fs::copy(fixtures().join("claude-code.jsonl"), &transcript).expect("fixture copy");
+    let text = std::fs::read_to_string(&transcript).expect("fixture");
+    let expected = claude::parse_messages(&text, 25)
+        .into_iter()
+        .find(|message| message.role == Role::Assistant)
+        .expect("assistant")
+        .text;
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    let config_file = root.join("config.toml");
+    std::fs::write(&config_file, config).expect("config");
+    let out = bin()
+        .current_dir(&cwd)
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("PLANNOTATOR_TUI_CONFIG", &config_file)
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .env("PLANNOTATOR_TUI_CWD", &cwd)
+        .args(["last", "--host", "claude", "--session-id", id, "--print"])
+        .output()
+        .expect("runs");
+    std::fs::remove_dir_all(root).expect("cleanup");
+    (out, expected)
+}
+
+#[test]
+fn an_exact_claude_id_is_found_in_a_listed_profile_dir() {
+    let (out, expected) = exact_claude_lookup_in_profile(
+        "claude listed profile",
+        "work-profile",
+        "[last]\nclaude_profile_dirs = [\"~/work-profile\"]\n",
+    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), expected.trim_end());
+}
+
+#[test]
+fn an_exact_claude_id_survives_a_config_file_with_an_error() {
+    let (out, expected) =
+        exact_claude_lookup_in_profile("claude broken config", ".claude", "[herdr]\nplacment = \"popup\"\n");
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), expected.trim_end());
+}
+
+#[test]
+fn an_exact_claude_id_in_an_unlisted_profile_dir_is_not_found() {
+    let (out, _) = exact_claude_lookup_in_profile("claude unlisted profile", ".claude-max", "");
+    assert!(out.stdout.is_empty(), "{}", String::from_utf8_lossy(&out.stdout));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no Claude Code session"));
+}
+
 #[test]
 fn print_reads_a_copilot_session_directory() {
     let dir = fixtures().join("copilot/session-state/aaaa1111-0000-4000-8000-000000000001");

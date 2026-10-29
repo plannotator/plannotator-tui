@@ -19,6 +19,7 @@ use crate::theme::{Colors, ThemeSetting};
 pub(crate) struct Config {
     pub(crate) herdr: HerdrConfig,
     pub(crate) ui: UiConfig,
+    pub(crate) last: LastConfig,
     pub(crate) keys: Keymap,
     pub(crate) colors: Colors,
 }
@@ -52,6 +53,15 @@ impl Default for UiConfig {
             copy_on_select: true,
         }
     }
+}
+
+/// How `plannotator-tui last` finds a session.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct LastConfig {
+    /// Claude Code config dirs to also search for a known session id, in order, for agents
+    /// whose `CLAUDE_CONFIG_DIR` does not reach this process. `~/` means the home directory.
+    pub(crate) claude_profile_dirs: Vec<String>,
 }
 
 /// How plannotator-tui opens inside Herdr.
@@ -278,6 +288,13 @@ mod tests {
             Config::parse("[ui]\nhorizontal_margin = 2\nmax_width = 168\ndoc_width = 120\n").expect("parses");
         assert_eq!((config.ui.horizontal_margin, config.ui.max_width, config.ui.doc_width), (2, 168, 120));
         assert_eq!(Config::parse(&config.to_toml().expect("serializes")).expect("parses"), config);
+    }
+
+    #[test]
+    fn claude_profile_dirs_default_to_none_and_are_listed_in_order() {
+        assert!(Config::default().last.claude_profile_dirs.is_empty());
+        let config = Config::parse("[last]\nclaude_profile_dirs = [\"~/b\", \"/a\"]\n").expect("parses");
+        assert_eq!(config.last.claude_profile_dirs, ["~/b", "/a"]);
     }
 
     #[test]
