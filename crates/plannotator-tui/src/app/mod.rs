@@ -495,7 +495,7 @@ impl App {
         if self.clipboard {
             let _ = crate::delivery::Clipboard.deliver(text);
         }
-        self.status = Some("copied to clipboard".to_owned());
+        self.status = Some("copied".to_owned());
     }
 
     /// Begin editing the body of the annotation under the rail cursor.
