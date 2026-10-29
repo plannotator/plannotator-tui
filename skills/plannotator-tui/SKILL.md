@@ -1,12 +1,14 @@
 ---
 name: plannotator-tui
-description: Open a Markdown plan or document for the human to review and annotate in a Herdr pane; their feedback arrives as your next message. Use when you have written a plan, spec, or design document that needs human review before you act on it. Draft; not yet wired into an installer.
+description: Open a Markdown plan or document for the human to review and annotate in a Herdr or Rex pane; their feedback arrives as your next message. Use when you have written a plan, spec, or design document that needs human review before you act on it. Draft; not yet wired into an installer.
 ---
 
 # plannotator-tui: hand a document to the human for review
 
-Only when `HERDR_ENV=1` (you are running inside Herdr). Otherwise tell the human where the
-file is and ask them to review it.
+Only when `HERDR_ENV=1` (you are running inside Herdr) or `REX_BLOCK` is set (inside Rex).
+Otherwise tell the human where the file is and ask them to review it. Inside Rex, use
+`plannotator-tui rex open` wherever this says `plannotator-tui herdr open`; `--gate` works the
+same.
 
 1. Write the document to a file. Do not paste it into chat as well.
 2. Open it for review, from your own pane:

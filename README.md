@@ -307,6 +307,32 @@ pane. Mirror does not preserve overlay presentation, and Herdr 0.8.2 opens an
 overlay in its server's active tab, which can differ from the tab you are viewing.
 An explicit `--placement` or `PLANNOTATOR_TUI_PLACEMENT` still takes precedence.
 
+## Inside Rex
+
+Bind keys or actions in Rex to the launchers below. Each opens plannotator-tui in a split beside
+the focused pane: the agent's recent replies, its newest reply, the pane's folder, or the pane's
+recent output. The header button sends the review to the agent in that pane as its next message:
+`Send 3 new ▸ claude in a1d6db (E)`. A pane with no agent copies instead.
+
+Each launcher opens the split and exits:
+
+```sh
+plannotator-tui rex last [--newest]         # the agent's replies
+plannotator-tui rex open [file.md | folder] # a document, or the pane's folder
+plannotator-tui rex terminal [--lines N]    # the pane's recent output; --print writes it out
+plannotator-tui rex find [--lines N]        # the newest .md file the pane's output names
+```
+
+The pane is `--block <id>`, else `REX_BLOCK`, so an agent that runs a launcher in its own
+shell reviews itself; that is how it hands you a plan. `--paste` puts the feedback in the
+agent's prompt without pressing Enter and focuses the agent's pane, so you can edit it first;
+the header says `claude prompt in a1d6db`. `rex open --gate [--result-file <path>]` adds
+Approve for a sign-off, as `herdr open --gate` does. A send waits while Rex reports the agent blocked on
+a permission prompt or a question, as it does in Herdr. It also needs the agent to report its
+state to Rex (Claude Code and Codex do): until it has, the review copies instead, since Enter
+could answer a dialog Rex cannot see, and `--paste` still works. Rex does not report its theme to
+programs, so with a light Rex theme set `[ui] theme = "light"`.
+
 ## Agent replies
 
 `plannotator-tui last` finds the transcript of the agent that launched your shell and shows a

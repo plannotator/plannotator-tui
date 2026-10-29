@@ -136,7 +136,7 @@ fn program_name(name: &str) -> &str {
 }
 
 /// Agents whose transcripts the hosts crate can read, by process name.
-fn known_host(name: &str) -> Option<&'static str> {
+pub(crate) fn known_host(name: &str) -> Option<&'static str> {
     match program_name(name) {
         "claude" => Some("claude"),
         "codex" => Some("codex"),
