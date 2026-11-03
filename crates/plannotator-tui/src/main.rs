@@ -11,6 +11,7 @@ mod editor;
 mod export;
 mod file_search;
 mod gate;
+mod hc;
 mod herdr;
 mod keys;
 mod last;
