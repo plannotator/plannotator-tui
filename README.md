@@ -307,6 +307,43 @@ pane. Mirror does not preserve overlay presentation, and Herdr 0.8.2 opens an
 overlay in its server's active tab, which can differ from the tab you are viewing.
 An explicit `--placement` or `PLANNOTATOR_TUI_PLACEMENT` still takes precedence.
 
+## Inside herdr-core
+
+[herdr-core](https://github.com/herdrdev/herdr-core) (`hc`) runs the terminals and
+[herdr-app](https://github.com/herdrdev/herdr-app) is its window. Neither has Herdr's plugins, so
+plannotator-tui is started by a command rather than a manifest. Run it in an hc terminal:
+
+```sh
+plannotator-tui hc last [--newest] [--session <transcript>]   # the agent's replies
+plannotator-tui hc open [file.md | folder]                    # a document, or the terminal's folder
+plannotator-tui hc open plan.md --gate [--result-file <path>] # adds Approve, as `herdr open --gate`
+```
+
+Each starts plannotator-tui in a terminal of its own, `annotate-<terminal>`, and shows it in
+herdr-app: over the tab for `overlay` and `popup` (the default), or in a pane beside the focused
+one for `split`, from `--placement` or `[herdr] placement`. The review starts once herdr-app shows
+it: until herdr-app tells a new terminal its colours, the terminal answers a colour query with the
+core's dark default, so asking sooner would draw a dark palette on a light window. Without herdr-app
+the review starts at once and cannot know your colours (the launcher prints the `hc attach`
+command); set `[ui] theme` then. The terminal is removed when the review
+ends, and hc does not type a note about it into the agent's prompt. One review per terminal at a
+time.
+
+The terminal is `--terminal <t>` (an address or a name), else `HC_TERMINAL_ID`, so an agent that
+runs a launcher in its own terminal reviews itself; that is how it hands you a plan. The header
+button sends the review to the agent as its next message with `hc send`: `Send 3 new ▸ pi in t7 (E)`.
+A terminal with no agent copies instead.
+
+A send needs the agent to still be the terminal's foreground program and to have reported its state
+to hc (OSC 7501), because Enter could answer a dialog hc cannot see. `hc send` also refuses an agent
+that reports it is blocked, and the review says so and copies; `E` retries.
+
+hc has no exact session for an agent, so `hc last` reads the newest transcript in the agent's folder.
+Another agent in that folder may have written one more recently; `--session` names the right
+transcript. Terminals on another machine and `terminal` reviews (a terminal's recent output) are not
+supported yet. The feedback travels as one argument to `hc send`, so the OS caps its size (128 KiB
+on Linux); a longer review fails with that reason and is copied.
+
 ## Agent replies
 
 `plannotator-tui last` finds the transcript of the agent that launched your shell and shows a

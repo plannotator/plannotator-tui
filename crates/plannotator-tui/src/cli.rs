@@ -22,10 +22,11 @@ use crate::config::Config;
 use crate::delivery::{Caller, Clipboard, Delivery, Discard, HerdrAgent};
 use crate::doc::Document;
 use crate::gate::{self, Decision, GateError, ReviewArgs};
+use crate::hc::agent::HcAgent;
 use crate::herdr::context::HerdrEnv;
 use crate::layout::DocLayout;
 
-const USAGE: &str = "usage:
+pub(crate) const USAGE: &str = "usage:
   plannotator-tui <file.md | folder> [--gate] [--json] [--require-approval] [--result-file <path>]
   plannotator-tui --export <file.md>
   plannotator-tui --bench <file.md>
@@ -40,6 +41,10 @@ const USAGE: &str = "usage:
   plannotator-tui herdr last [--placement P] [--deliver-to <pane>] [--newest]
   plannotator-tui herdr terminal [--lines N] [--placement P] [--deliver-to <pane>] [--print]
   plannotator-tui herdr pane
+  plannotator-tui hc open [file.md | folder] [--terminal <t>] [--placement overlay|split|popup]
+                          [--gate] [--result-file <path>]
+  plannotator-tui hc last [--terminal <t>] [--placement P] [--newest] [--session <transcript>]
+  plannotator-tui hc pane (open <path> [--gate [--result-file <path>]] | last <last args>)
   plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes|opencode|cmd|agy] [--pid N] [--session <transcript>]
                        [--session-id <id>] [--stdin] [--print] [--pick N] [--newest]";
 
@@ -54,21 +59,25 @@ fn open_file(path: &PathBuf) -> Result<DocumentSource> {
 }
 
 /// A file opens on its own; a folder opens in folder mode on its first markdown file.
-/// Interactive runs send to the Herdr agent pane named by the environment, else the
-/// clipboard; headless runs send nowhere.
+/// Interactive runs send to the hc terminal or Herdr agent pane named by the environment, else
+/// the clipboard; headless runs send nowhere.
 pub(crate) fn delivery(interactive: bool) -> Box<dyn Delivery> {
     if !interactive {
         return Box::new(Discard);
     }
-    herdr_agent().unwrap_or_else(|| Box::new(Clipboard))
+    agent_pane().unwrap_or_else(|| Box::new(Clipboard))
 }
 
 /// A gated review sends to the same agent pane; without one its decision goes to the caller.
 fn gate_delivery() -> Box<dyn Delivery> {
-    herdr_agent().unwrap_or_else(|| Box::new(Caller))
+    agent_pane().unwrap_or_else(|| Box::new(Caller))
 }
 
-fn herdr_agent() -> Option<Box<dyn Delivery>> {
+/// The hc terminal or Herdr agent pane the environment names, if any.
+fn agent_pane() -> Option<Box<dyn Delivery>> {
+    if let Some(agent) = HcAgent::from_lookup(|k| std::env::var(k).ok()) {
+        return Some(Box::new(agent));
+    }
     let env = HerdrEnv::from_env();
     match env.delivery_target() {
         Some(target) if env.in_herdr => {
@@ -135,7 +144,9 @@ fn wants_decision(args: &[String]) -> bool {
     let decision_flag = |arg: &String| gate::FLAGS.contains(&arg.as_str());
     match args.first() {
         Some(first) if decision_flag(first) => true,
-        Some(first) if first.starts_with('-') || matches!(first.as_str(), "config" | "herdr" | "last") => {
+        Some(first)
+            if first.starts_with('-') || matches!(first.as_str(), "config" | "herdr" | "hc" | "last") =>
+        {
             false
         }
         Some(_) => args.iter().skip(1).any(decision_flag),
@@ -189,6 +200,7 @@ fn tool(args: &[String]) -> Result<()> {
         }
         Some("config") => show_config(),
         Some("herdr") => herdr_command(args.get(1..).unwrap_or_default()),
+        Some("hc") => crate::hc::cli::run(args.get(1..).unwrap_or_default()),
         Some("last") => last_command(args.get(1..).unwrap_or_default()),
         Some(flag) if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{USAGE}"),
         Some(_) => interactive(&path(0)?),
@@ -390,19 +402,24 @@ fn herdr_pane() -> Result<()> {
     };
     // The pane closes when we exit; an error that flashes by is an error nobody can read.
     if let Err(err) = &result {
-        #[allow(clippy::print_stderr, reason = "the pane is the only place this can be read")]
-        {
-            eprintln!("plannotator-tui: {err:#}\n\npress enter to close");
-        }
-        let mut line = String::new();
-        let _ = std::io::stdin().read_line(&mut line);
+        wait_on_error(err);
     }
     result
 }
 
+/// Show `err` in a pane that is about to close, until Enter.
+pub(crate) fn wait_on_error(err: &anyhow::Error) {
+    #[allow(clippy::print_stderr, reason = "the pane is the only place this can be read")]
+    {
+        eprintln!("plannotator-tui: {err:#}\n\npress enter to close");
+    }
+    let mut line = String::new();
+    let _ = std::io::stdin().read_line(&mut line);
+}
+
 /// `plannotator-tui last [--host H] [--pid N] [--session PATH] [--stdin] [--print] [--pick N]
 /// [--newest]`.
-fn last_command(args: &[String]) -> Result<()> {
+pub(crate) fn last_command(args: &[String]) -> Result<()> {
     use crate::last::LastOptions;
     let mut options = LastOptions { pick: 25, ..LastOptions::default() };
     let mut rest = args.iter();
@@ -426,9 +443,9 @@ fn last_command(args: &[String]) -> Result<()> {
     crate::last::run(&options)
 }
 
-/// A gated review in a Herdr pane: the agent hears the decision through delivery, and the
+/// A gated review in a Herdr or hc pane: the agent hears the decision through delivery, and the
 /// result file, when asked for, records it. The pane has no caller reading its stdout.
-fn gated_pane(path: &PathBuf, result_file: Option<&Path>) -> Result<()> {
+pub(crate) fn gated_pane(path: &PathBuf, result_file: Option<&Path>) -> Result<()> {
     if let Some(file) = result_file {
         gate::check_result_file(file)?;
     }
@@ -444,7 +461,7 @@ fn gated_pane(path: &PathBuf, result_file: Option<&Path>) -> Result<()> {
     }
 }
 
-fn interactive(path: &PathBuf) -> Result<()> {
+pub(crate) fn interactive(path: &PathBuf) -> Result<()> {
     run_ui(|width| open_app(path, width, true))
 }
 
