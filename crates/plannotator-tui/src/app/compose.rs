@@ -3,17 +3,13 @@
 //! Enter saves; Shift+Enter (where the terminal's keyboard protocol distinguishes it),
 //! Alt+Enter and Ctrl+J insert a new line; Esc cancels. The usual readline keys edit by word
 //! and by line, and Up and Down move between display rows. The buffer is a char vec with a
-//! cursor, wrapped to the box width for display only — the saved body keeps exactly the
-//! newlines the user typed.
+//! cursor, wrapped at word boundaries to the box width for display only — the saved body
+//! keeps exactly the newlines the user typed.
 
 use std::ops::Range;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use unicode_width::UnicodeWidthChar;
-
-pub(super) const COMPOSE_WIDTH: u16 = 48;
-/// The box width less its two borders and one column of left padding.
-const WRAP_WIDTH: usize = COMPOSE_WIDTH as usize - 3;
 
 /// What a keystroke did to the compose box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,7 +48,9 @@ impl Compose {
         self.value().trim() != self.initial.trim()
     }
 
-    pub(super) fn handle_key(&mut self, key: KeyEvent) -> ComposeAction {
+    /// Apply one keystroke. `wrap_width` is the width the box last wrapped to, which Up and
+    /// Down move within.
+    pub(super) fn handle_key(&mut self, key: KeyEvent, wrap_width: usize) -> ComposeAction {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         match key.code {
@@ -90,8 +88,8 @@ impl Compose {
             KeyCode::Right if ctrl || alt => self.cursor = self.next_word_end(),
             KeyCode::Left => self.cursor = self.cursor.saturating_sub(1),
             KeyCode::Right => self.cursor = (self.cursor + 1).min(self.chars.len()),
-            KeyCode::Up => self.move_vertical(-1),
-            KeyCode::Down => self.move_vertical(1),
+            KeyCode::Up => self.move_vertical(-1, wrap_width),
+            KeyCode::Down => self.move_vertical(1, wrap_width),
             KeyCode::Home => self.cursor = self.line_start(),
             KeyCode::End => self.cursor = self.line_end(),
             KeyCode::Char(c) if !ctrl && !alt => self.insert(c),
@@ -167,8 +165,8 @@ impl Compose {
 
     /// Move to the display row above or below, landing on the nearest display column. The
     /// first and last rows have nowhere further to go, so the cursor stays put.
-    fn move_vertical(&mut self, delta: isize) {
-        let rows = self.rows();
+    fn move_vertical(&mut self, delta: isize, wrap_width: usize) {
+        let rows = self.rows(wrap_width);
         let (row, col) = self.cursor_position(&rows);
         let Some(target_row) = row.checked_add_signed(delta) else { return };
         let Some(target) = rows.get(target_row) else { return };
@@ -187,23 +185,39 @@ impl Compose {
         self.cursor = if wraps && cursor == target.end { cursor.saturating_sub(1) } else { cursor };
     }
 
-    /// The range of `chars` each display row shows. Explicit newlines always break; a full
-    /// row wraps to the next.
-    fn rows(&self) -> Vec<Range<usize>> {
+    /// The range of `chars` each display row shows at `width`. Explicit newlines always
+    /// break; a word that does not fit moves to the next row, and one wider than a whole row
+    /// splits. Every char stays on a row so the cursor can reach it: spaces at a break hang
+    /// past the edge rather than opening the next row.
+    fn rows(&self, width: usize) -> Vec<Range<usize>> {
+        let width = width.max(1);
         let mut rows = Vec::new();
         let (mut start, mut used) = (0, 0);
+        let mut word_start = None;
         for (i, &c) in self.chars.iter().enumerate() {
             if c == '\n' {
                 rows.push(start..i);
                 start = i + 1;
                 used = 0;
+                word_start = None;
                 continue;
             }
             let w = width_of(c);
-            if used + w > WRAP_WIDTH {
-                rows.push(start..i);
-                start = i;
-                used = 0;
+            if c.is_whitespace() {
+                word_start = Some(i + 1);
+            } else if used + w > width {
+                let at = word_start.take().unwrap_or(i);
+                if at > start {
+                    rows.push(start..at);
+                    start = at;
+                    used = self.chars.get(at..i).unwrap_or_default().iter().copied().map(width_of).sum();
+                }
+                // A wide char can overflow even a row holding only its own word.
+                if used + w > width && i > start {
+                    rows.push(start..i);
+                    start = i;
+                    used = 0;
+                }
             }
             used += w;
         }
@@ -220,9 +234,9 @@ impl Compose {
         (row, before.iter().copied().map(width_of).sum())
     }
 
-    /// The buffer as display rows, with the cursor's (row, col) in them.
-    pub(super) fn wrapped(&self) -> (Vec<String>, usize, usize) {
-        let rows = self.rows();
+    /// The buffer as display rows at `width`, with the cursor's (row, col) in them.
+    pub(super) fn wrapped(&self, width: usize) -> (Vec<String>, usize, usize) {
+        let rows = self.rows(width);
         let (cursor_row, cursor_col) = self.cursor_position(&rows);
         let lines = rows
             .iter()
@@ -236,8 +250,60 @@ impl Compose {
 mod tests {
     use super::*;
 
+    const WRAP_WIDTH: usize = 45;
+
     fn press(compose: &mut Compose, code: KeyCode) {
-        compose.handle_key(KeyEvent::new(code, KeyModifiers::CONTROL));
+        compose.handle_key(KeyEvent::new(code, KeyModifiers::CONTROL), WRAP_WIDTH);
+    }
+
+    #[test]
+    fn a_word_that_does_not_fit_moves_whole_to_the_next_row() {
+        let (lines, _, _) = Compose::with_text("the quick brown fox").wrapped(10);
+        assert_eq!(lines, ["the quick ", "brown fox"]);
+    }
+
+    #[test]
+    fn a_word_wider_than_a_row_splits() {
+        let (lines, _, _) = Compose::with_text("hi aaaaaaaaaaaaaaa").wrapped(10);
+        assert_eq!(lines, ["hi ", "aaaaaaaaaa", "aaaaa"]);
+    }
+
+    #[test]
+    fn wrapping_keeps_every_character_of_the_buffer() {
+        let text = "spaces   at   a   break and 日本語の長い行 keep their place";
+        let (lines, _, _) = Compose::with_text(text).wrapped(7);
+        assert_eq!(lines.concat(), text);
+    }
+
+    #[test]
+    fn wide_characters_never_overflow_a_row() {
+        let (lines, _, _) = Compose::with_text("a 日本語日本語").wrapped(5);
+        assert_eq!(lines, ["a ", "日本", "語日", "本語"]);
+    }
+
+    #[test]
+    fn spaces_past_the_edge_stay_on_the_row_they_follow() {
+        let (lines, row, col) = Compose::with_text("0123456789  ").wrapped(10);
+        assert_eq!(lines, ["0123456789  "]);
+        assert_eq!((row, col), (0, 12));
+    }
+
+    #[test]
+    fn the_cursor_follows_a_word_as_it_wraps() {
+        let mut compose = Compose::with_text("0123456 ");
+        compose.insert_text("abcdef");
+        assert_eq!(compose.wrapped(10), (vec!["0123456 ".to_owned(), "abcdef".to_owned()], 1, 6));
+    }
+
+    #[test]
+    fn up_and_down_cross_a_word_wrap_without_sticking() {
+        let mut compose = Compose::with_text("the quick brown fox");
+        compose.cursor = 0;
+        compose.handle_key(KeyEvent::from(KeyCode::Down), 10);
+        assert_eq!(compose.wrapped(10).1, 1);
+        compose.handle_key(KeyEvent::from(KeyCode::End), 10);
+        compose.handle_key(KeyEvent::from(KeyCode::Up), 10);
+        assert_eq!(compose.wrapped(10).1, 0, "the end of the long row maps back onto the first");
     }
 
     #[test]
@@ -290,7 +356,7 @@ mod tests {
     }
 
     fn send(compose: &mut Compose, code: KeyCode, modifiers: KeyModifiers) {
-        compose.handle_key(KeyEvent::new(code, modifiers));
+        compose.handle_key(KeyEvent::new(code, modifiers), WRAP_WIDTH);
     }
 
     #[test]
@@ -400,7 +466,7 @@ mod tests {
         let mut compose = Compose::with_text(&text);
         compose.cursor = 0;
         send(&mut compose, KeyCode::Down, KeyModifiers::NONE);
-        let (_, row, col) = compose.wrapped();
+        let (_, row, col) = compose.wrapped(WRAP_WIDTH);
         assert_eq!((row, col), (1, 0));
     }
 
@@ -409,7 +475,7 @@ mod tests {
         let text = "a".repeat(WRAP_WIDTH * 2);
         let mut compose = Compose::with_text(&text);
         send(&mut compose, KeyCode::Up, KeyModifiers::NONE);
-        let (_, row, col) = compose.wrapped();
+        let (_, row, col) = compose.wrapped(WRAP_WIDTH);
         assert_eq!((row, col), (0, WRAP_WIDTH - 1));
     }
 
