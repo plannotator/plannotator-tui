@@ -600,6 +600,139 @@ fn roaming_moves_by_row_so_a_selection_can_start_mid_block() {
     assert_eq!(app.selected, 1);
 }
 
+/// A paragraph with a hard break (two rows of "alpha beta" text), then a list.
+fn two_row_paragraph_app() -> App {
+    let source = DocumentSource::new(
+        "alpha beta gamma\\\nsecond line\n\n- one\n- two\n".to_owned(),
+        "doc.md",
+        true,
+        Provenance::Stdin,
+    );
+    let mut app = App::open(source, 60, Box::new(Discard)).expect("app opens");
+    app.data_dir = scratch_data_dir();
+    draw(&mut app);
+    app
+}
+
+fn press_char(app: &mut App, c: char) {
+    app.handle_event(&key(KeyCode::Char(c), KeyModifiers::NONE)).expect("key");
+}
+
+fn selected_text(app: &App) -> Option<&str> {
+    let pending = app.pending.as_ref()?;
+    app.open.doc.source.get(pending.range.clone())
+}
+
+#[test]
+fn e_extends_a_selection_to_each_word_end_including_its_last_character() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'v');
+    press_char(&mut app, 'e');
+    assert_eq!(app.cursor, (0, 4));
+    press_char(&mut app, 'e');
+    assert_eq!(app.cursor, (0, 9));
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("enter");
+    assert_eq!(selected_text(&app), Some("alpha beta"));
+}
+
+#[test]
+fn e_at_the_last_word_end_of_a_row_stays_put() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'i');
+    for _ in 0..5 {
+        press_char(&mut app, 'e');
+    }
+    assert_eq!(app.cursor, (0, 15));
+}
+
+#[test]
+fn shift_v_selects_the_whole_row_whatever_the_column() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'i');
+    press_char(&mut app, 'w');
+    press_char(&mut app, 'V');
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("enter");
+    assert_eq!(selected_text(&app), Some("alpha beta gamma"));
+}
+
+#[test]
+fn line_selection_extends_by_whole_rows_in_either_direction() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'V');
+    press_char(&mut app, 'j');
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("enter");
+    assert_eq!(selected_text(&app), Some("alpha beta gamma\\\nsecond line"));
+    assert_eq!(app.pending.as_ref().map(|p| p.at), Some((0, 0)));
+
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("clear");
+    press_char(&mut app, 'V');
+    press_char(&mut app, 'k');
+    press_char(&mut app, 'V');
+    assert_eq!(selected_text(&app), Some("alpha beta gamma\\\nsecond line"), "V finishes it too");
+    assert_eq!(app.pending.as_ref().map(|p| p.at), Some((0, 0)), "the toolbar anchors at the start");
+}
+
+#[test]
+fn a_and_d_mark_the_selected_block_directly() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'a');
+    press_char(&mut app, 'j');
+    press_char(&mut app, 'd');
+    let kinds: Vec<Kind> = app.open.store.placed().iter().map(|p| p.annotation.anchor.kind()).collect();
+    assert_eq!(kinds, [Kind::LooksGood, Kind::Delete]);
+    assert!(app.pending.is_none(), "no toolbar is left waiting");
+}
+
+#[test]
+fn esc_from_a_block_comment_returns_to_the_block_not_to_a_toolbar() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'c');
+    assert_eq!(app.mode, Mode::Compose);
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    assert_eq!(app.mode, Mode::Browse);
+    assert!(app.pending.is_none());
+    let rows = draw(&mut app);
+    assert!(!rows.iter().any(|r| r.contains("looks good (a)")), "{rows:#?}");
+}
+
+#[test]
+fn discarding_a_block_comment_returns_to_the_block_not_to_a_toolbar() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'c');
+    press_char(&mut app, 'x');
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    press_char(&mut app, 'y');
+    assert!(app.pending.is_none());
+}
+
+#[test]
+fn esc_from_a_comment_on_a_selection_or_double_click_keeps_its_toolbar() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'v');
+    press_char(&mut app, 'e');
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("enter");
+    press_char(&mut app, 'c');
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    assert!(app.pending.is_some(), "a keyboard selection goes back to its toolbar");
+
+    let mut app = two_row_paragraph_app();
+    app.handle_event(&click_at(5, 1)).expect("click");
+    app.handle_event(&click_at(5, 1)).expect("double click");
+    assert!(app.pending.is_some(), "the double click offered the toolbar");
+    press_char(&mut app, 'c');
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    assert!(app.pending.is_some(), "a double-clicked block goes back to its toolbar");
+}
+
+#[test]
+fn a_document_key_wins_over_looks_good_and_delete_on_a_block() {
+    let mut app = two_row_paragraph_app();
+    app.keys = toml::from_str("looks-good = [\"j\"]\n").expect("a config from before a was live on blocks");
+    press_char(&mut app, 'j');
+    assert_eq!(app.selected, 1, "j still moves down");
+    assert!(app.open.store.placed().is_empty(), "and marks nothing");
+}
+
 #[test]
 fn a_block_key_ends_roaming() {
     let mut app = app(Box::new(Discard));

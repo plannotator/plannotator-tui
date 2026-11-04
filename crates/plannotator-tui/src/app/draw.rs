@@ -493,6 +493,14 @@ impl App {
         let note = self.current_note();
         let has_images = note.as_deref().is_some_and(|id| self.open.store.has_images(id));
         let remove_image = has_images.then(|| key(Action::RemoveImage, "remove image")).flatten();
+        // One hint for both: the footer has to fit 80 columns.
+        let marks = [Action::LooksGood, Action::Delete]
+            .map(|action| self.keys.hint(action))
+            .into_iter()
+            .filter(|hint| !hint.is_empty())
+            .collect::<Vec<_>>()
+            .join("/");
+        let marks = bare(marks).map(|keys| format!("{keys} mark"));
         let help: Vec<Option<String>> = match self.focus {
             _ if self.pending.is_some() => vec![
                 key(Action::LooksGood, "looks good"),
@@ -534,6 +542,7 @@ impl App {
                 key(Action::MoveCursor, "move"),
                 key(Action::Visual, "select"),
                 key(Action::Comment, "comment"),
+                marks,
                 note.is_some().then(|| key(Action::AttachImage, "image")).flatten(),
                 remove_image,
                 key(Action::Send, "send"),

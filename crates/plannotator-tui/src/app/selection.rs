@@ -8,6 +8,8 @@ pub(super) struct Selection {
     anchor: (usize, usize),
     head: (usize, usize),
     pub(super) dragging: bool,
+    /// Covers whole rows, whichever columns the anchor and head are on.
+    whole_rows: bool,
 }
 
 impl Selection {
@@ -17,23 +19,31 @@ impl Selection {
     }
 
     pub(super) fn start(at: (usize, usize)) -> Self {
-        Self { anchor: at, head: at, dragging: true }
+        Self { anchor: at, head: at, dragging: true, whole_rows: false }
+    }
+
+    pub(super) fn start_rows(at: (usize, usize)) -> Self {
+        Self { anchor: at, head: at, dragging: true, whole_rows: true }
     }
 
     pub(super) fn finished(anchor: (usize, usize), head: (usize, usize)) -> Self {
-        Self { anchor, head, dragging: false }
+        Self { anchor, head, dragging: false, whole_rows: false }
     }
 
     pub(super) fn set_head(&mut self, head: (usize, usize)) {
         self.head = head;
     }
 
+    /// Start and end in reading order. A whole-row selection reads from column 0 of its first
+    /// row; only `columns_on` knows how wide its last row is.
     pub(super) fn ordered(&self) -> ((usize, usize), (usize, usize)) {
-        if self.anchor <= self.head { (self.anchor, self.head) } else { (self.head, self.anchor) }
+        let (a, b) =
+            if self.anchor <= self.head { (self.anchor, self.head) } else { (self.head, self.anchor) };
+        if self.whole_rows { ((a.0, 0), b) } else { (a, b) }
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        self.anchor == self.head
+        !self.whole_rows && self.anchor == self.head
     }
 
     /// Columns of `row` covered by the selection, if any.
@@ -41,6 +51,9 @@ impl Selection {
         let (a, b) = self.ordered();
         if row < a.0 || row > b.0 {
             return None;
+        }
+        if self.whole_rows {
+            return (row_width > 0).then_some(0..row_width);
         }
         let start = if row == a.0 { a.1 } else { 0 };
         let end = if row == b.0 { b.1 + 1 } else { row_width };

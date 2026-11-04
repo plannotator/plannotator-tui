@@ -21,6 +21,7 @@ pub(crate) enum Action {
     Right,
     WordForward,
     WordBack,
+    WordEnd,
     LineStart,
     LineEnd,
     PageDown,
@@ -51,6 +52,7 @@ pub(crate) enum Action {
     AttachImage,
     RemoveImage,
     Visual,
+    VisualLine,
     MoveCursor,
     Comment,
     ClearBlock,
@@ -68,8 +70,8 @@ use Action::{
     Approve, Archive, AttachImage, Back, Bottom, ClearAll, ClearBlock, Comment, Confirm, CopySelection,
     CycleFocus, Delete, Down, Edit, FinishReview, Interrupt, Left, LineEnd, LineStart, LooksGood, MoveCursor,
     No, OpenInEditor, PageDown, PageUp, PickMessage, QuickOpen, Quit, Reload, Remove, RemoveImage, ResendAll,
-    ReviewMenu, Right, Send, SendAndClose, ToggleHidden, ToggleTree, Top, UndoFinish, Up, Visual, WordBack,
-    WordForward, Yes,
+    ReviewMenu, Right, Send, SendAndClose, ToggleHidden, ToggleTree, Top, UndoFinish, Up, Visual, VisualLine,
+    WordBack, WordEnd, WordForward, Yes,
 };
 
 /// Browsing, before the focused pane gets the key.
@@ -97,6 +99,7 @@ pub(crate) const RAIL: &[Action] = &[Down, Up, Confirm, Edit, Remove, AttachImag
 pub(crate) const DOCUMENT: &[Action] = &[
     Back,
     Visual,
+    VisualLine,
     MoveCursor,
     Down,
     Up,
@@ -113,10 +116,14 @@ pub(crate) const DOCUMENT: &[Action] = &[
     AttachImage,
     RemoveImage,
 ];
+/// Marking the selected block, tried only when no `DOCUMENT` action claims the key. They sit
+/// outside `SHARED` so a config that gave `a` or `d` to a document action keeps loading.
+pub(crate) const BLOCK_MARKS: &[Action] = &[LooksGood, Delete];
 /// Cursor motions, in visual mode and while moving the cursor (`move-cursor`).
-pub(crate) const MOTION: &[Action] = &[Left, Right, Down, Up, WordForward, WordBack, LineStart, LineEnd];
+pub(crate) const MOTION: &[Action] =
+    &[Left, Right, Down, Up, WordForward, WordBack, WordEnd, LineStart, LineEnd];
 /// While a keyboard selection grows; any other key is a motion.
-pub(crate) const VISUAL: &[Action] = &[Back, Confirm, Visual];
+pub(crate) const VISUAL: &[Action] = &[Back, Confirm, Visual, VisualLine];
 /// While a finished selection waits for its kind.
 pub(crate) const TOOLBAR: &[Action] = &[LooksGood, Comment, Delete, CopySelection];
 pub(crate) const CONFIRM_QUIT: &[Action] = &[Yes, Confirm, No, Back];
@@ -249,6 +256,7 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (Right, &[ch('l'), named(KeyCode::Right)]),
     (WordForward, &[ch('w')]),
     (WordBack, &[ch('b')]),
+    (WordEnd, &[ch('e')]),
     (LineStart, &[ch('0'), named(KeyCode::Home)]),
     (LineEnd, &[ch('$'), named(KeyCode::End)]),
     (PageDown, &[ctrl('d'), named(KeyCode::PageDown)]),
@@ -279,6 +287,7 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (AttachImage, &[ch('I')]),
     (RemoveImage, &[ch('D')]),
     (Visual, &[ch('v')]),
+    (VisualLine, &[ch('V')]),
     (MoveCursor, &[ch('i')]),
     (Comment, &[ch('c')]),
     (ClearBlock, &[ch('x')]),
@@ -290,9 +299,9 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (No, &[ch('n'), ch('N')]),
 ];
 
-/// Actions added after configs were written: `approve` (live only in a gated review) and
-/// `copy` (on a waiting selection).
-const LATE: &[Action] = &[Approve, CopySelection];
+/// Actions added after configs were written: `approve` (live only in a gated review), `copy`
+/// (on a waiting selection), `word-end` and `visual-line`.
+const LATE: &[Action] = &[Approve, CopySelection, WordEnd, VisualLine];
 
 /// The keys bound to each action. A `[keys]` entry replaces that action's keys and leaves the
 /// others at their defaults; an empty list unbinds the action.
@@ -399,6 +408,7 @@ impl Action {
             Self::Right => "right",
             Self::WordForward => "word-forward",
             Self::WordBack => "word-back",
+            Self::WordEnd => "word-end",
             Self::LineStart => "line-start",
             Self::LineEnd => "line-end",
             Self::PageDown => "page-down",
@@ -429,6 +439,7 @@ impl Action {
             Self::AttachImage => "attach-image",
             Self::RemoveImage => "remove-image",
             Self::Visual => "visual",
+            Self::VisualLine => "visual-line",
             Self::MoveCursor => "move-cursor",
             Self::Comment => "comment",
             Self::ClearBlock => "clear-block",
