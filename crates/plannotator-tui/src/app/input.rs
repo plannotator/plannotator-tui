@@ -317,9 +317,11 @@ impl App {
     fn start_visual(&mut self, selection: Selection) {
         self.clear_selection();
         self.selection = Some(selection);
+        let copy = (!self.ui.copy_on_select).then(|| self.keys.hint(Action::CopySelection));
         let marks = TOOLBAR
             .map(|item| self.keys.hint(item.2))
             .into_iter()
+            .chain(copy)
             .filter(|hint| !hint.is_empty())
             .collect::<Vec<_>>()
             .join("/");
@@ -343,7 +345,10 @@ impl App {
                 }
             }
             _ => {
-                if let Some(kind) = self.toolbar_kind(&key) {
+                if self.keys.action(&key, keys::TOOLBAR) == Some(Action::CopySelection) {
+                    self.finish_selection();
+                    self.copy_pending();
+                } else if let Some(kind) = self.toolbar_kind(&key) {
                     self.finish_selection();
                     return self.act(kind);
                 }

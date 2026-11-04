@@ -770,9 +770,39 @@ fn a_key_that_does_nothing_during_a_mouse_drag_keeps_the_selection() {
     let doc = app.geometry.doc;
     click(&mut app, MouseEventKind::Down(MouseButton::Left), doc.x, doc.y);
     click(&mut app, MouseEventKind::Drag(MouseButton::Left), doc.x + 3, doc.y);
-    press_char(&mut app, 'y');
+    press_char(&mut app, 'z');
     click(&mut app, MouseEventKind::Up(MouseButton::Left), doc.x + 3, doc.y);
     assert_eq!(selected_text(&app), Some("alph"));
+}
+
+#[test]
+fn y_copies_a_selection_still_being_extended_and_keeps_it_selected() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'V');
+    press_char(&mut app, 'y');
+    assert_eq!(app.status.as_deref(), Some("copied"));
+    assert_eq!(selected_text(&app), Some("alpha beta gamma"));
+    assert!(app.open.store.placed().is_empty());
+}
+
+#[test]
+fn y_on_a_selection_that_never_moved_copies_nothing() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'v');
+    press_char(&mut app, 'y');
+    assert!(app.selection.is_none() && app.pending.is_none());
+    assert_eq!(app.status, None);
+}
+
+#[test]
+fn the_visual_hint_names_the_copy_key_only_when_selecting_does_not_copy() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'v');
+    assert!(app.status.as_deref().is_some_and(|s| s.contains(" a/c/d to act")), "{:?}", app.status);
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    app.ui.copy_on_select = false;
+    press_char(&mut app, 'v');
+    assert!(app.status.as_deref().is_some_and(|s| s.contains(" a/c/d/y to act")), "{:?}", app.status);
 }
 
 #[test]
