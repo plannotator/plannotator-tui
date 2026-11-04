@@ -713,6 +713,37 @@ fn a_and_d_mark_the_selected_block_directly() {
 }
 
 #[test]
+fn repeating_a_mark_on_a_block_adds_nothing() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'a');
+    press_char(&mut app, 'a');
+    assert_eq!(app.open.store.len(), 1);
+    assert_eq!(app.status.as_deref(), Some("looks good already saved"));
+    assert!(app.pending.is_none(), "no toolbar is left waiting");
+
+    app.open.store.resolve_all(&app.open.doc);
+    press_char(&mut app, 'a');
+    assert_eq!(app.open.store.len(), 1, "a mark reloaded from disk counts too");
+
+    press_char(&mut app, 'd');
+    assert_eq!(app.open.store.len(), 2, "the other mark is a different note");
+}
+
+#[test]
+fn repeating_a_mark_on_the_same_selection_adds_nothing() {
+    let mut app = two_row_paragraph_app();
+    for _ in 0..2 {
+        press_char(&mut app, 'i');
+        press_char(&mut app, '0');
+        press_char(&mut app, 'v');
+        press_char(&mut app, 'e');
+        app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("enter");
+        press_char(&mut app, 'a');
+    }
+    assert_eq!(app.open.store.len(), 1);
+}
+
+#[test]
 fn esc_from_a_block_comment_returns_to_the_block_not_to_a_toolbar() {
     let mut app = two_row_paragraph_app();
     press_char(&mut app, 'c');

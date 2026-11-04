@@ -483,9 +483,17 @@ impl App {
                 self.compose = Compose::default();
             }
             Kind::LooksGood | Kind::Delete => {
-                self.annotate(pending.range, kind, String::new())?;
+                let placed = self.open.store.placed();
+                let repeated = placed.iter().any(|p| p.kind() == kind && *p.range == pending.range);
+                drop(placed);
+                let outcome = if repeated {
+                    "already saved"
+                } else {
+                    self.annotate(pending.range, kind, String::new())?;
+                    "saved"
+                };
                 self.clear_selection();
-                self.status = Some(format!("{} saved", label(kind)));
+                self.status = Some(format!("{} {outcome}", label(kind)));
             }
         }
         Ok(())
