@@ -806,6 +806,38 @@ fn the_visual_hint_names_the_copy_key_only_when_selecting_does_not_copy() {
 }
 
 #[test]
+fn ctrl_a_marks_nothing() {
+    let mut app = two_row_paragraph_app();
+    app.handle_event(&key(KeyCode::Char('a'), KeyModifiers::CONTROL)).expect("ctrl+a");
+    assert!(app.open.store.placed().is_empty());
+}
+
+#[test]
+fn ctrl_d_marks_nothing_on_a_selection_being_extended() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'v');
+    press_char(&mut app, 'e');
+    app.handle_event(&key(KeyCode::Char('d'), KeyModifiers::CONTROL)).expect("ctrl+d");
+    assert!(app.open.store.placed().is_empty());
+    assert!(app.selection.is_some(), "the selection keeps growing");
+}
+
+#[test]
+fn a_mark_bound_to_ctrl_still_fires_on_a_block_and_on_a_selection() {
+    let mut app = two_row_paragraph_app();
+    app.keys = toml::from_str("looks-good = [\"ctrl+z\"]\n").expect("keys");
+    app.handle_event(&key(KeyCode::Char('z'), KeyModifiers::CONTROL)).expect("ctrl+z");
+    assert_eq!(app.open.store.len(), 1);
+
+    let mut app = two_row_paragraph_app();
+    app.keys = toml::from_str("delete = [\"ctrl+d\"]\n").expect("keys");
+    press_char(&mut app, 'v');
+    press_char(&mut app, 'e');
+    app.handle_event(&key(KeyCode::Char('d'), KeyModifiers::CONTROL)).expect("ctrl+d");
+    assert_eq!(app.open.store.len(), 1);
+}
+
+#[test]
 fn a_motion_bound_to_a_mark_key_still_moves_a_selection() {
     let mut app = two_row_paragraph_app();
     app.keys = toml::from_str("word-end = [\"a\"]\n").expect("keys");
