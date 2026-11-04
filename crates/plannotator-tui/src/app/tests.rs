@@ -636,6 +636,35 @@ fn e_extends_a_selection_to_each_word_end_including_its_last_character() {
 }
 
 #[test]
+fn word_motions_count_a_wide_character_as_two_columns() {
+    let source =
+        DocumentSource::new("日本語 テキスト abc def\n".to_owned(), "doc.md", true, Provenance::Stdin);
+    let mut app = App::open(source, 60, Box::new(Discard)).expect("app opens");
+    app.data_dir = scratch_data_dir();
+    draw(&mut app);
+    press_char(&mut app, 'i');
+    press_char(&mut app, 'w');
+    assert_eq!(app.cursor, (0, 7));
+    press_char(&mut app, 'e');
+    assert_eq!(app.cursor, (0, 14));
+    press_char(&mut app, 'w');
+    assert_eq!(app.cursor, (0, 16));
+    press_char(&mut app, 'b');
+    assert_eq!(app.cursor, (0, 7));
+}
+
+#[test]
+fn a_word_starts_after_an_ideographic_space() {
+    let source = DocumentSource::new("a\u{3000}b c\n".to_owned(), "doc.md", true, Provenance::Stdin);
+    let mut app = App::open(source, 60, Box::new(Discard)).expect("app opens");
+    app.data_dir = scratch_data_dir();
+    draw(&mut app);
+    press_char(&mut app, 'i');
+    press_char(&mut app, 'w');
+    assert_eq!(app.cursor, (0, 3));
+}
+
+#[test]
 fn e_at_the_last_word_end_of_a_row_stays_put() {
     let mut app = two_row_paragraph_app();
     press_char(&mut app, 'i');

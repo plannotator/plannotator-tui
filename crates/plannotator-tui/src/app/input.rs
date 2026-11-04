@@ -3,6 +3,8 @@
 use anyhow::Result;
 use plannotator_tui_schema::Kind;
 use ratatui::crossterm::event::{Event, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::text::Line;
+use unicode_width::UnicodeWidthChar;
 
 use super::compose::ComposeAction;
 use super::menu::ReviewAction;
@@ -12,6 +14,12 @@ use super::{App, Focus, GUTTER, Mode, Pending, TOOLBAR};
 use crate::delivery::Delivery as _;
 use crate::gate::Gate;
 use crate::keys::{self, Action};
+
+/// A row's characters indexed by screen column, as the cursor is: a wide one fills two.
+fn chars_by_column(line: &Line<'_>) -> Vec<char> {
+    let text = line.to_string();
+    text.chars().flat_map(|c| std::iter::repeat_n(c, c.width().unwrap_or(0))).collect()
+}
 
 impl App {
     pub(crate) fn handle_event(&mut self, event: &Event) -> Result<()> {
@@ -405,7 +413,7 @@ impl App {
     /// stay put.
     fn move_word_end(&mut self) {
         let Some(row) = self.open.layout.row(self.cursor.0) else { return };
-        let chars: Vec<char> = row.line.to_string().chars().collect();
+        let chars = chars_by_column(&row.line);
         let is_end = |i: usize| {
             chars.get(i).is_some_and(|c| !c.is_whitespace())
                 && chars.get(i + 1).is_none_or(|c| c.is_whitespace())
@@ -418,11 +426,10 @@ impl App {
     /// Jump to the next (+1) or previous (-1) word start on the current row.
     fn move_word(&mut self, direction: i64) {
         let Some(row) = self.open.layout.row(self.cursor.0) else { return };
-        let text = row.line.to_string();
-        let chars: Vec<char> = text.chars().collect();
+        let chars = chars_by_column(&row.line);
         let is_boundary = |i: usize| {
             let here = chars.get(i).is_some_and(|c| !c.is_whitespace());
-            let before = i == 0 || chars.get(i - 1).is_some_and(char::is_ascii_whitespace);
+            let before = i == 0 || chars.get(i - 1).is_some_and(|c| c.is_whitespace());
             here && before
         };
         let col = self.cursor.1;
