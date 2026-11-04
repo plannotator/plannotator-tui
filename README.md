@@ -100,6 +100,7 @@ dimmed. The keys also work without opening the menu.
 | gated review | `A` approve; `E` send and finish; `q` dismiss |
 | document | `j`/`k` block; `c` comment on the block; `a` looks good; `d` delete; `x` clear its annotations; `X` clear every annotation on the document, after a `y`; `v` select with `hjkl` `w` `b` `e` `0` `$`, then `a`, `c` or `d` to act on it, `y` to copy it, or `Enter` for the toolbar; `V` select whole rows; `i` move the cursor with those keys first, then `v` to select from there; `I`/`D` attach or remove an image on the block's note |
 | toolbar | `a` looks good · `c` comment · `d` delete · `y` copy · `Esc` |
+| comment box | `Enter` save; `Shift+Enter`, `Alt+Enter` or `Ctrl+J` new line; `↑`/`↓` move by display row; `Ctrl+←`/`Ctrl+→`, `Alt+←`/`Alt+→` or `Alt+B`/`Alt+F` jump by word; `Ctrl+A`/`Ctrl+E` line start/end; `Ctrl+W`, `Alt+Backspace` or `Ctrl+Backspace` delete the previous word; `Alt+D` or `Ctrl+Delete` delete the next word; `Ctrl+U`/`Ctrl+K` delete to line start/end; `Esc` cancel, asking first if the text changed |
 | notes | `j`/`k`; `e` edit; `x` remove; `I` attach an image, `D` remove the last; click a bubble |
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
