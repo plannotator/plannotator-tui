@@ -42,13 +42,15 @@ fn priority(kind: Kind) -> u8 {
     }
 }
 
+const FOOTER_MAX_ROWS: usize = 3;
+
 impl App {
     pub(crate) fn draw(&mut self, frame: &mut Frame) {
         let area = self.viewport(frame.area());
         let [header, body, footer] = Layout::vertical([
             Constraint::Length(self.header_height(area.width)),
             Constraint::Min(1),
-            Constraint::Length(1),
+            Constraint::Length(self.footer_height(area.width)),
         ])
         .areas(area);
 
@@ -77,12 +79,20 @@ impl App {
             Constraint::Length(rail_width),
         ])
         .areas(body);
+        let old_height = self.geometry.doc.height;
         self.geometry = Geometry { tree, doc, ..Geometry::default() };
 
-        if self.open.layout.width != usize::from(doc.width) {
-            self.open.layout.reflow(usize::from(doc.width));
+        // A layout is at least one column wide, so an empty pane must not count as a resize.
+        let layout_width = usize::from(doc.width).max(1);
+        if self.open.layout.width != layout_width {
+            self.open.layout.reflow(layout_width);
             self.clear_selection();
             self.scroll_by(0);
+            // Clearing the selection can change the footer's height, so lay out again.
+            return self.draw(frame);
+        }
+        if doc.height < old_height {
+            self.keep_focus_in_view(old_height);
         }
 
         self.draw_header(frame, header);
@@ -422,16 +432,54 @@ impl App {
             frame.render_widget(Paragraph::new(Line::from(Span::raw(question).bold())), area);
             return;
         }
-        if self.mode == Mode::Browse && !self.undo_archive.is_empty() {
-            let label = self.keys.labelled(Action::UndoFinish, "Undo finish");
-            let label = format!(" {} ", label.as_deref().unwrap_or("Undo finish"));
+        let (text, hint_rows) = self.footer_text(area.width);
+        // A pane too short for any footer has no row to put the button on.
+        if let Some(label) = self.undo_label().filter(|_| area.height > 0) {
             let width = (label.width() as u16).min(area.width);
-            let rect = Rect { x: area.right() - width, y: area.y, width, height: area.height };
+            let y = area.bottom().saturating_sub(1);
+            let rect = Rect { x: area.right() - width, y, width, height: 1 };
             frame
                 .render_widget(Paragraph::new(label.as_str()).style(Style::new().fg(palette().accent)), rect);
             self.geometry.undo_button = Some(rect);
             area.width = area.width.saturating_sub(width);
         }
+        // Paired from the bottom, so a pane too short for every row keeps the one with the text.
+        for (index, (hints, y)) in hint_rows.iter().rev().zip((area.y..area.bottom()).rev()).enumerate() {
+            let row = Rect { y, height: 1, ..area };
+            let hints = if hints.is_empty() { String::new() } else { format!("{hints} ") };
+            let help_area = if index == 0 {
+                let [text_area, help_area] =
+                    Layout::horizontal([Constraint::Min(0), Constraint::Length(hints.width() as u16)])
+                        .areas(row);
+                frame.render_widget(Paragraph::new(Line::from(Span::raw(text.as_str()).dim())), text_area);
+                help_area
+            } else {
+                row
+            };
+            frame
+                .render_widget(Paragraph::new(Line::from(Span::raw(hints).dim()).right_aligned()), help_area);
+        }
+    }
+
+    /// The footer's rows at `width`; the questions that take it over need one.
+    fn footer_height(&self, width: u16) -> u16 {
+        if matches!(self.mode, Mode::ConfirmQuit | Mode::ConfirmClearAll) {
+            return 1;
+        }
+        self.footer_text(width).1.len() as u16
+    }
+
+    /// The button that undoes a finished review, as drawn at the end of the footer.
+    fn undo_label(&self) -> Option<String> {
+        if self.mode != Mode::Browse || self.undo_archive.is_empty() {
+            return None;
+        }
+        let label = self.keys.labelled(Action::UndoFinish, "Undo finish");
+        Some(format!(" {} ", label.as_deref().unwrap_or("Undo finish")))
+    }
+
+    /// The footer's left text and its key hints in rows; the last row sits beside the text.
+    fn footer_text(&self, viewport_width: u16) -> (String, Vec<String>) {
         let orphans = self.open.store.orphans();
         // The status leads: it is the transient half of the line, and the name and counters
         // it pushes right are on screen for the whole session anyway.
@@ -451,35 +499,23 @@ impl App {
                 None => format!("block {}/{}", self.selected + 1, self.open.doc.blocks.len()),
             },
         ]);
-        if self.viewport(frame.area()).width < RAIL_MIN_TOTAL_WIDTH {
+        if viewport_width < RAIL_MIN_TOTAL_WIDTH {
             parts.push("rail hidden: widen to ≥80 cols".into());
         }
-        // The mark hint is the first to go: at 80 columns it would push the annotation count
-        // off the line.
-        let counted = parts.iter().take(self.status.iter().count() + 2).cloned().collect::<Vec<_>>();
-        let counted = format!(" {} · ", counted.join(" · ")).width();
-        let joined = |help: Vec<String>| {
-            if help.is_empty() { String::new() } else { format!("{} ", help.join(" · ")) }
-        };
-        let mut help = joined(self.footer_help(true));
-        if counted + help.width() > usize::from(area.width) {
-            help = joined(self.footer_help(false));
-        }
-        // The status must stay readable at any width, so the key help yields columns to it
-        // (and is clipped) rather than the other way round.
-        let status_width = self.status.as_ref().map_or(0, |s| s.width() + 1) as u16;
-        let help_width = (help.width() as u16).min(area.width.saturating_sub(status_width.max(10)));
-        let [left_area, right_area] =
-            Layout::horizontal([Constraint::Min(10), Constraint::Length(help_width)]).areas(area);
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::raw(format!(" {}", parts.join(" · "))).dim())),
-            left_area,
-        );
-        frame.render_widget(Paragraph::new(Line::from(Span::raw(help).dim()).right_aligned()), right_area);
+        let text = format!(" {}", parts.join(" · "));
+        let undo = self.undo_label().map_or(0, |label| label.width());
+        // One column stays free after the hints, and one between them and the text.
+        let width = usize::from(viewport_width).saturating_sub(undo + 1);
+        let beside_text = width.saturating_sub(text.width() + 1);
+        (text, flow_hints(&self.footer_help(), width, beside_text))
     }
 
     /// The key help for the focused pane, in the user's keys.
-    fn footer_help(&self, with_marks: bool) -> Vec<String> {
+    fn footer_help(&self) -> Vec<String> {
+        // A text box takes every key and its border names the ones it answers.
+        if matches!(self.mode, Mode::Compose | Mode::Edit(_) | Mode::AttachImage(_)) {
+            return Vec::new();
+        }
         // Each hint names its action's first key; an unbound action drops out of the line.
         let key = |action, label| self.keys.labelled(action, label);
         let bare = |hint: String| (!hint.is_empty()).then_some(hint);
@@ -509,7 +545,7 @@ impl App {
             .filter(|hint| !hint.is_empty())
             .collect::<Vec<_>>()
             .join("/");
-        let marks = bare(marks).filter(|_| with_marks).map(|keys| format!("{keys} mark"));
+        let marks = bare(marks).map(|keys| format!("{keys} mark"));
         let help: Vec<Option<String>> = match self.focus {
             _ if self.pending.is_some() => vec![
                 key(Action::LooksGood, "looks good"),
@@ -568,6 +604,35 @@ impl App {
             if self.tree.is_some() && self.pending.is_none() { key(Action::QuickOpen, "find") } else { None };
         help.into_iter().chain([find]).flatten().collect()
     }
+}
+
+/// Hints in the fewest rows that hold them all, up to `FOOTER_MAX_ROWS`; past that, the last
+/// ones are dropped. Rows are `width` wide, except the last, which has `last_width`.
+fn flow_hints(hints: &[String], width: usize, last_width: usize) -> Vec<String> {
+    let fill = |rows: usize| {
+        let mut left = hints.iter().peekable();
+        let filled: Vec<String> = (1..=rows)
+            .map(|row| {
+                let limit = if row == rows { last_width } else { width };
+                let mut line = String::new();
+                while let Some(hint) = left.peek() {
+                    let joined =
+                        if line.is_empty() { (*hint).clone() } else { format!("{line} \u{b7} {hint}") };
+                    if joined.width() > limit {
+                        break;
+                    }
+                    line = joined;
+                    left.next();
+                }
+                line
+            })
+            .collect();
+        (filled, left.next().is_none())
+    };
+    (1..FOOTER_MAX_ROWS)
+        .map(fill)
+        .find_map(|(filled, complete)| complete.then_some(filled))
+        .unwrap_or_else(|| fill(FOOTER_MAX_ROWS).0)
 }
 
 /// The tail of an id, enough to tell bubbles apart: `anno_…F0123` → `F0123`.

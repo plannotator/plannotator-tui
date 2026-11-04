@@ -247,7 +247,8 @@ fn a_status_leads_the_footer_and_the_name_counters_and_key_help_stay() {
         footer.trim_start().starts_with("comment saved · plan.md · 1 annotations · block 1/"),
         "footer was {footer:?}"
     );
-    assert!(footer.trim_end().ends_with("· q quit"), "key help is still drawn: {footer:?}");
+    let help = row(&rows, 18);
+    assert!(help.trim_end().ends_with("· q quit"), "key help is still drawn: {help:?}");
     // Once the status is cleared the same line continues with the name.
     app.status = None;
     let rows = draw_sized(&mut app, 140, 20);
@@ -880,6 +881,133 @@ fn repeating_a_mark_on_the_same_selection_adds_nothing() {
 }
 
 #[test]
+fn the_footer_names_no_browse_keys_while_a_text_box_is_open() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'c');
+    let screen = draw(&mut app).join("\n");
+    assert!(!screen.contains("· d delete") && !screen.contains("esc clear"), "{screen}");
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+
+    press_char(&mut app, 'a');
+    app.handle_event(&key(KeyCode::Tab, KeyModifiers::NONE)).expect("tab");
+    let screen = draw(&mut app).join("\n");
+    assert!(screen.contains("e edit"), "the rail names its keys: {screen}");
+    press_char(&mut app, 'e');
+    let screen = draw(&mut app).join("\n");
+    assert!(!screen.contains("e edit"), "{screen}");
+}
+
+#[test]
+fn a_footer_too_long_for_one_row_flows_upward_and_loses_nothing() {
+    let mut app = two_row_paragraph_app();
+    let rows = draw_sized(&mut app, 140, 20);
+    assert_eq!(20 - app.geometry.doc.bottom(), 1, "one row while it fits: {rows:#?}");
+
+    let rows = draw_sized(&mut app, 60, 20);
+    let height = 20 - app.geometry.doc.bottom();
+    assert!(height > 1, "{rows:#?}");
+    let footer: Vec<String> = rows.iter().skip(usize::from(20 - height)).cloned().collect();
+    let text = footer.join("\n");
+    for expected in ["i move", "v select", "q quit"] {
+        assert!(text.contains(expected), "{expected} missing from {text}");
+    }
+    assert!(
+        footer.last().is_some_and(|last| last.trim_start().starts_with("doc.md · 0 annotations · block 1/")),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_footer_that_grows_keeps_the_marked_block_in_view() {
+    let mut app = long_app();
+    let mut footer_grew = false;
+    for block in 0..app.open.doc.blocks.len() {
+        app.status = None;
+        draw_sized(&mut app, 127, 11);
+        app.select_block(block);
+        draw_sized(&mut app, 127, 11);
+        let rendered = &app.open.layout.blocks[block];
+        let last = rendered.first_row + rendered.rows.len() - 1;
+        let before = app.geometry.doc.height;
+        let shown_before = last < app.scroll + usize::from(before);
+        press_char(&mut app, 'a');
+        draw_sized(&mut app, 127, 11);
+        footer_grew |= app.geometry.doc.height < before;
+        if shown_before {
+            let shown = last < app.scroll + usize::from(app.geometry.doc.height);
+            assert!(shown, "block {block}: row {last} left the view at scroll {}", app.scroll);
+        }
+    }
+    assert!(footer_grew, "the status never grew the footer, so this tested nothing");
+}
+
+#[test]
+fn a_footer_that_grows_leaves_a_block_the_reader_scrolled_away_from() {
+    let mut app = long_app();
+    draw_sized(&mut app, 127, 11);
+    app.scroll_by(6);
+    let scroll = app.scroll;
+    let before = app.geometry.doc.height;
+    app.set_status("a status long enough to push the key hints up onto a row of their own".to_owned());
+    draw_sized(&mut app, 127, 11);
+    assert!(app.geometry.doc.height < before, "the status grew the footer");
+    assert_eq!(app.scroll, scroll);
+}
+
+#[test]
+fn a_footer_that_grows_keeps_the_toolbar_on_screen() {
+    let mut app = long_app();
+    draw_sized(&mut app, 127, 11);
+    app.select_block(4);
+    press_char(&mut app, 'v');
+    press_char(&mut app, 'e');
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("enter");
+    draw_sized(&mut app, 127, 11);
+    assert!(app.geometry.toolbar.is_some());
+    app.set_status("a status long enough to push the key hints up onto a row of their own".to_owned());
+    draw_sized(&mut app, 127, 11);
+    assert!(app.geometry.toolbar.is_some(), "the selection is still waiting for an action");
+}
+
+#[test]
+fn a_pane_too_narrow_for_the_document_still_draws() {
+    let mut app = two_row_paragraph_app();
+    draw_sized(&mut app, 0, 5);
+    assert_eq!(app.geometry.doc.width, 0);
+}
+
+fn long_app() -> App {
+    let text = (1..=12).map(|n| format!("para {n}")).collect::<Vec<_>>().join("\n\n");
+    let source = DocumentSource::new(text, "doc.md", true, Provenance::Stdin);
+    let mut app = App::open(source, 60, Box::new(Discard)).expect("app opens");
+    app.data_dir = scratch_data_dir();
+    app
+}
+
+#[test]
+fn a_resize_that_clears_the_selection_sizes_the_footer_without_it() {
+    let mut app = two_row_paragraph_app();
+    draw_sized(&mut app, 100, 20);
+    press_char(&mut app, 'v');
+    press_char(&mut app, 'e');
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("enter");
+    draw_sized(&mut app, 100, 20);
+    assert!(app.pending.is_some());
+    draw_sized(&mut app, 60, 20);
+    assert!(app.pending.is_none(), "the reflow cleared it");
+    let height = app.geometry.doc.height;
+    draw_sized(&mut app, 60, 20);
+    assert_eq!(app.geometry.doc.height, height);
+}
+
+#[test]
+fn the_footer_stops_at_three_rows() {
+    let mut app = two_row_paragraph_app();
+    draw_sized(&mut app, 24, 20);
+    assert_eq!(20 - app.geometry.doc.bottom(), 3);
+}
+
+#[test]
 fn esc_from_a_block_comment_returns_to_the_block_not_to_a_toolbar() {
     let mut app = two_row_paragraph_app();
     press_char(&mut app, 'c');
@@ -1205,8 +1333,8 @@ fn rebound_movement_keys_move_and_the_footer_names_them() {
     keys(&mut app, &[KeyCode::Esc, KeyCode::Char('k')]);
     assert_eq!(app.selected, 1);
     app.roam = true;
-    let footer = draw(&mut app).pop().expect("footer");
-    assert!(footer.contains("jkl; move"), "{footer:?}");
+    let screen = draw(&mut app).join("\n");
+    assert!(screen.contains("jkl; move"), "{screen}");
 }
 
 /// An unbound action leaves no bare label behind in the footer.
@@ -1214,9 +1342,9 @@ fn rebound_movement_keys_move_and_the_footer_names_them() {
 fn an_unbound_action_drops_out_of_the_footer() {
     let mut app = app(Box::new(Discard));
     app.keys = toml::from_str("quit = []\n").expect("keys");
-    let footer = draw(&mut app).pop().expect("footer");
-    assert!(footer.contains("S send+quit "), "{footer:?}");
-    assert!(!footer.contains("quit · ") && !footer.contains(" · quit"), "{footer:?}");
+    let screen = draw(&mut app).join("\n");
+    assert!(screen.contains("S send+quit "), "{screen}");
+    assert!(!screen.contains("quit · ") && !screen.contains(" · quit"), "{screen}");
 }
 
 /// A ctrl binding whose letter is also a plain binding earlier in the context still runs.

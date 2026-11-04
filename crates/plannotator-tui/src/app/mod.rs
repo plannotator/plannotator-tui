@@ -580,6 +580,24 @@ impl App {
         }
     }
 
+    /// The footer took rows from a document `old_height` tall: scroll just enough to keep what
+    /// the keys act on in view. Anything already off screen stays there, so a reader who
+    /// scrolled away is not pulled back.
+    fn keep_focus_in_view(&mut self, old_height: u16) {
+        let height = usize::from(self.geometry.doc.height.max(1));
+        let row = match &self.pending {
+            Some(pending) => pending.at.0,
+            None if self.roam || self.selection.is_some_and(|s| s.dragging) => self.cursor.0,
+            None => {
+                let Some(block) = self.open.layout.blocks.get(self.selected) else { return };
+                block.first_row + block.rows.len().saturating_sub(1)
+            }
+        };
+        if row >= self.scroll + height && row < self.scroll + usize::from(old_height) {
+            self.scroll = row + 1 - height;
+        }
+    }
+
     fn scroll_by(&mut self, delta: i64) {
         let height = usize::from(self.geometry.doc.height.max(1));
         let max = self.open.layout.total_rows.saturating_sub(height);
