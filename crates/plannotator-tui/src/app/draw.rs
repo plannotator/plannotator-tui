@@ -10,6 +10,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
+use super::compose::COMPOSE_WIDTH;
 use super::{App, Focus, GUTTER, Geometry, Mode, TOOLBAR, glyph, label};
 use crate::gate::Gate;
 use crate::keys::Action;
@@ -23,7 +24,6 @@ const RAIL_MIN_TOTAL_WIDTH: u16 = 80;
 const TREE_WIDTH: u16 = 28;
 /// Below this the tree is hidden unless toggled on; Tab still reaches it.
 pub(super) const TREE_MIN_TOTAL_WIDTH: u16 = 120;
-const COMPOSE_WIDTH: u16 = 48;
 
 fn accent(kind: Kind) -> Color {
     match kind {
@@ -280,13 +280,20 @@ impl App {
     /// The compose box title; the Shift+Enter hint appears only when the terminal
     /// actually distinguishes it, so the hint is never a lie.
     fn compose_title(&self, verb: &str) -> String {
+        if self.confirm_discard {
+            let answers = [(Action::Yes, "discard"), (Action::No, "keep editing")]
+                .into_iter()
+                .filter_map(|(action, label)| self.keys.labelled(action, label))
+                .collect::<Vec<_>>()
+                .join(" \u{b7} ");
+            return format!(" discard {verb}? {answers} ");
+        }
         let newline = if self.shift_enter { "shift+enter new line" } else { "alt+enter new line" };
         format!(" {verb} \u{b7} enter saves \u{b7} {newline} \u{b7} esc cancels ")
     }
 
     fn draw_compose(&self, frame: &mut Frame, title: &str) {
-        let wrap_width = usize::from(COMPOSE_WIDTH.saturating_sub(3));
-        let (lines, cursor_row, cursor_col) = self.compose.wrapped(wrap_width);
+        let (lines, cursor_row, cursor_col) = self.compose.wrapped();
         let content_rows = lines.len().clamp(1, 8);
         let height = content_rows as u16 + 2;
         let rect = self
@@ -302,7 +309,10 @@ impl App {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::new().fg(palette().comment))
-            .title(Span::styled(title.to_owned(), Style::new().dim()));
+            .title(Span::styled(
+                title.to_owned(),
+                if self.confirm_discard { Style::new().bold() } else { Style::new().dim() },
+            ));
         let inner = boxed.inner(rect);
         frame.render_widget(boxed, rect);
         // Keep the cursor's row visible when the comment is taller than the box.

@@ -216,6 +216,8 @@ pub(crate) struct App {
     /// token. Feedback quotes rejoin them and carry no line labels.
     terminal_breaks: Option<Vec<usize>>,
     compose: Compose,
+    /// Set while the comment box asks whether to throw away a changed draft.
+    confirm_discard: bool,
     /// Whether the terminal reports Shift+Enter distinctly (kitty keyboard protocol).
     pub(super) shift_enter: bool,
     pub(crate) keys: Keymap,
@@ -297,6 +299,7 @@ impl App {
             message_session: None,
             terminal_breaks: None,
             compose: Compose::default(),
+            confirm_discard: false,
             shift_enter: false,
             keys: Keymap::default(),
             editor: None,

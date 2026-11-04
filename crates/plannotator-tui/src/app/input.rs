@@ -44,6 +44,7 @@ impl App {
             // A paste lands in the comment box verbatim, newlines included; anywhere else
             // it is ignored rather than replayed as keystrokes.
             Event::Paste(text) if matches!(self.mode, Mode::Compose | Mode::Edit(_)) => {
+                self.confirm_discard = false;
                 self.compose.insert_text(text);
                 Ok(())
             }
@@ -475,8 +476,26 @@ impl App {
         }
     }
 
+    /// The answer to "discard this draft?". Only `yes` loses the text, and Enter is no
+    /// answer, so a slip cannot.
+    fn confirm_discard_key(&mut self, key: KeyEvent) {
+        match self.keys.action(&key, keys::CONFIRM_CLEAR) {
+            Some(Action::Yes) => {
+                self.confirm_discard = false;
+                self.cancel_compose();
+            }
+            Some(Action::No | Action::Back) => self.confirm_discard = false,
+            _ => {}
+        }
+    }
+
     fn text_key(&mut self, key: KeyEvent) -> Result<()> {
+        if self.confirm_discard {
+            self.confirm_discard_key(key);
+            return Ok(());
+        }
         match self.compose.handle_key(key) {
+            ComposeAction::Cancel if self.compose.has_changes() => self.confirm_discard = true,
             ComposeAction::Cancel => self.cancel_compose(),
             ComposeAction::Save => {
                 let body = self.compose.value().trim().to_owned();

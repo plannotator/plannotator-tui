@@ -567,6 +567,89 @@ fn pasting_into_the_comment_box_keeps_newlines() {
 }
 
 #[test]
+fn esc_on_a_typed_comment_asks_before_discarding_it() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 3)).expect("click");
+    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    app.handle_event(&Event::Paste("draft".to_owned())).expect("paste");
+
+    let press = |app: &mut App, code| app.handle_event(&key(code, KeyModifiers::NONE)).expect("key");
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.mode, Mode::Compose);
+    let rows = draw(&mut app);
+    assert!(rows.iter().any(|r| r.contains("discard comment? y discard")), "{rows:?}");
+    assert!(rows.iter().any(|r| r.contains("draft")), "the draft stays visible: {rows:?}");
+
+    // Neither a second Esc nor Enter nor a stray letter loses or changes the draft.
+    press(&mut app, KeyCode::Char('x'));
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.mode, Mode::Compose);
+    assert_eq!(app.compose.value(), "draft");
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.mode, Mode::Compose);
+    press(&mut app, KeyCode::Char('x'));
+    assert_eq!(app.compose.value(), "draftx", "esc returned to editing");
+
+    press(&mut app, KeyCode::Esc);
+    press(&mut app, KeyCode::Char('n'));
+    assert_eq!(app.mode, Mode::Compose);
+    assert_eq!(app.compose.value(), "draftx", "n returned to editing");
+
+    press(&mut app, KeyCode::Esc);
+    press(&mut app, KeyCode::Char('y'));
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.store.len(), 0, "the draft was discarded, not saved");
+}
+
+#[test]
+fn esc_closes_at_once_when_there_is_nothing_to_lose() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 3)).expect("click");
+    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    assert_eq!(app.mode, Mode::Browse);
+}
+
+#[test]
+fn esc_on_an_edit_asks_only_once_the_body_changed() {
+    let mut app = app(Box::new(Discard));
+    app.add_block_annotation(0, Kind::Comment, "body".to_owned()).expect("annotation");
+    app.edit_selected_annotation();
+    assert!(matches!(app.mode, Mode::Edit(_)));
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    assert_eq!(app.mode, Mode::Browse, "an untouched edit closes at once");
+
+    app.edit_selected_annotation();
+    app.handle_event(&key(KeyCode::Char('!'), KeyModifiers::NONE)).expect("type");
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    assert!(matches!(app.mode, Mode::Edit(_)), "a changed edit asks first");
+    let rows = draw(&mut app);
+    assert!(rows.iter().any(|r| r.contains("discard edit? y discard")), "{rows:?}");
+    app.handle_event(&key(KeyCode::Char('y'), KeyModifiers::NONE)).expect("yes");
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.store.placed().first().expect("note").annotation.body, "body");
+}
+
+#[test]
+fn a_paste_during_the_discard_question_returns_to_editing() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 3)).expect("click");
+    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    app.handle_event(&Event::Paste("draft".to_owned())).expect("paste");
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    app.handle_event(&Event::Paste(" more".to_owned())).expect("paste");
+    app.handle_event(&key(KeyCode::Char('y'), KeyModifiers::NONE)).expect("type");
+    assert_eq!(app.mode, Mode::Compose);
+    assert_eq!(app.compose.value(), "draft morey");
+}
+
+#[test]
 fn roaming_moves_by_row_so_a_selection_can_start_mid_block() {
     // A paragraph with a hard break (two rows), then a list: in block mode `j` from the top lands on "- one",
     // roaming lands on "second line" of the same block.
