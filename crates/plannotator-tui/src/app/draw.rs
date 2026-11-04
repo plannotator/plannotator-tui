@@ -10,7 +10,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-use super::compose::COMPOSE_WIDTH;
 use super::{App, Focus, GUTTER, Geometry, Mode, TOOLBAR, glyph, label};
 use crate::gate::Gate;
 use crate::keys::Action;
@@ -40,6 +39,27 @@ fn priority(kind: Kind) -> u8 {
         Kind::LooksGood => 1,
         Kind::Delete => 2,
     }
+}
+
+/// Compose box columns not used for wrapping text: two borders, one of left padding, and one
+/// so the cursor can sit past the last character of a full row.
+const COMPOSE_CHROME: u16 = 4;
+
+/// Split a ` · `-separated title into what fits `width` columns on the box's top border,
+/// spaces included, and the rest for the bottom border, empty when it all fits.
+fn split_title(title: &str, width: usize) -> (String, String) {
+    const SEPARATOR: &str = " \u{b7} ";
+    let mut first = String::new();
+    let mut rest: Vec<&str> = Vec::new();
+    for part in title.trim().split(SEPARATOR) {
+        let joined = if first.is_empty() { part.to_owned() } else { format!("{first}{SEPARATOR}{part}") };
+        if first.is_empty() || (rest.is_empty() && joined.width() + 2 <= width) {
+            first = joined;
+        } else {
+            rest.push(part);
+        }
+    }
+    (format!(" {first} "), rest.join(SEPARATOR))
 }
 
 impl App {
@@ -275,8 +295,6 @@ impl App {
         self.geometry.toolbar = Some((rect, spans));
     }
 
-    /// The compose box: at the pending selection when there is one, else over the rail
-    /// bubble being edited, else centered.
     /// The compose box title; the Shift+Enter hint appears only when the terminal
     /// actually distinguishes it, so the hint is never a lie.
     fn compose_title(&self, verb: &str) -> String {
@@ -292,27 +310,51 @@ impl App {
         format!(" {verb} \u{b7} enter saves \u{b7} {newline} \u{b7} esc cancels ")
     }
 
-    fn draw_compose(&self, frame: &mut Frame, title: &str) {
-        let (lines, cursor_row, cursor_col) = self.compose.wrapped();
+    /// `[ui] comment_width`, raised to where the title still fits on the box's two borders.
+    fn compose_width(&self) -> u16 {
+        self.ui.comment_width.max(38)
+    }
+
+    /// The columns the compose box wraps to: as last drawn or, for keys that arrive before
+    /// its first frame, as configured.
+    pub(super) fn compose_wrap(&self) -> usize {
+        match self.geometry.compose_wrap {
+            0 => usize::from(self.compose_width().saturating_sub(COMPOSE_CHROME)),
+            drawn => drawn,
+        }
+    }
+
+    /// The compose box: at the pending selection when there is one, else over the rail
+    /// bubble being edited, else centered. `[ui] comment_width` caps its width; a narrower
+    /// pane narrows it further.
+    fn compose_rect(&self, area: Rect, height: u16) -> Rect {
+        let width = self.compose_width();
+        self.float_origin(height, width).or_else(|| self.edit_origin(height, width)).unwrap_or_else(|| {
+            let area = self.viewport(area);
+            let width = width.min(area.width);
+            Rect { x: area.x + (area.width - width) / 2, y: area.y + area.height / 2, width, height }
+        })
+    }
+
+    fn draw_compose(&mut self, frame: &mut Frame, title: &str) {
+        let width = self.compose_rect(frame.area(), 1).width;
+        let wrap_width = usize::from(width.saturating_sub(COMPOSE_CHROME));
+        self.geometry.compose_wrap = wrap_width;
+        let (lines, cursor_row, cursor_col) = self.compose.wrapped(wrap_width);
+        let (title, title_rest) = split_title(title, usize::from(width.saturating_sub(2)));
         let content_rows = lines.len().clamp(1, 8);
         let height = content_rows as u16 + 2;
-        let rect = self
-            .float_origin(height, COMPOSE_WIDTH)
-            .or_else(|| self.edit_origin(height, COMPOSE_WIDTH))
-            .unwrap_or_else(|| {
-                let area = self.viewport(frame.area());
-                let width = COMPOSE_WIDTH.min(area.width);
-                Rect { x: area.x + (area.width - width) / 2, y: area.y + area.height / 2, width, height }
-            });
+        let rect = self.compose_rect(frame.area(), height);
         frame.render_widget(Clear, rect);
-        let boxed = Block::default()
+        let title_style = if self.confirm_discard { Style::new().bold() } else { Style::new().dim() };
+        let mut boxed = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::new().fg(palette().comment))
-            .title(Span::styled(
-                title.to_owned(),
-                if self.confirm_discard { Style::new().bold() } else { Style::new().dim() },
-            ));
+            .title(Span::styled(title, title_style));
+        if !title_rest.is_empty() {
+            boxed = boxed.title_bottom(Span::styled(format!(" {title_rest} "), title_style));
+        }
         let inner = boxed.inner(rect);
         frame.render_widget(boxed, rect);
         // Keep the cursor's row visible when the comment is taller than the box.

@@ -257,6 +257,14 @@ All three default to `0`, which fills the terminal as before. The margin and `ma
 yield before the app drops below 80 columns, so a narrow pane keeps its notes rail; a
 narrow pane also lets the document shrink below `doc_width`.
 
+The comment box is 48 columns wide. `comment_width` changes that, down to a minimum of 38,
+and a narrower pane still narrows it:
+
+```toml
+[ui]
+comment_width = 72
+```
+
 A mouse selection is copied to the clipboard when you release the button. To leave the
 clipboard alone, as with Herdr's `ui.copy_on_select = false`, turn it off and press `y` on
 the selection when you want a copy:

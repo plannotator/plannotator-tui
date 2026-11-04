@@ -494,7 +494,7 @@ impl App {
             self.confirm_discard_key(key);
             return Ok(());
         }
-        match self.compose.handle_key(key) {
+        match self.compose.handle_key(key, self.compose_wrap()) {
             ComposeAction::Cancel if self.compose.has_changes() => self.confirm_discard = true,
             ComposeAction::Cancel => self.cancel_compose(),
             ComposeAction::Save => {

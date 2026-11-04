@@ -90,6 +90,8 @@ enum Focus {
 struct Geometry {
     tree: Rect,
     doc: Rect,
+    /// The columns the compose box wrapped its text to this frame; zero when it is not open.
+    compose_wrap: usize,
     /// Toolbar rect and the column span of each item, in screen coordinates.
     toolbar: Option<(Rect, [Range<u16>; 3])>,
     /// Screen rects of the rail bubbles drawn last frame, with their annotation ids.

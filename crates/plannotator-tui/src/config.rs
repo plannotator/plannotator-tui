@@ -41,6 +41,8 @@ pub(crate) struct UiConfig {
     /// Copy a mouse selection to the clipboard on release. Off leaves the clipboard alone
     /// until `copy` (`y`) on the waiting selection.
     pub(crate) copy_on_select: bool,
+    /// Widest the comment box gets, borders included; a narrower pane narrows it further.
+    pub(crate) comment_width: u16,
 }
 
 impl Default for UiConfig {
@@ -51,6 +53,7 @@ impl Default for UiConfig {
             max_width: 0,
             doc_width: 0,
             copy_on_select: true,
+            comment_width: 48,
         }
     }
 }
@@ -295,6 +298,12 @@ mod tests {
         assert_eq!(Config::default().last.claude_profile_dirs, Vec::<String>::new());
         let config = Config::parse("[last]\nclaude_profile_dirs = [\"~/b\", \"/a\"]\n").expect("parses");
         assert_eq!(config.last.claude_profile_dirs, ["~/b", "/a"]);
+    }
+
+    #[test]
+    fn comment_width_defaults_to_48_and_can_be_set() {
+        assert_eq!(Config::default().ui.comment_width, 48);
+        assert_eq!(Config::parse("[ui]\ncomment_width = 72\n").expect("parses").ui.comment_width, 72);
     }
 
     #[test]
