@@ -713,6 +713,80 @@ fn a_and_d_mark_the_selected_block_directly() {
 }
 
 #[test]
+fn a_and_d_mark_a_selection_still_being_extended() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'v');
+    press_char(&mut app, 'e');
+    press_char(&mut app, 'a');
+    let placed = app.open.store.placed();
+    assert_eq!(placed.len(), 1);
+    assert_eq!(placed[0].kind(), Kind::LooksGood);
+    assert_eq!(app.open.doc.source.get(placed[0].range.clone()), Some("alpha"));
+    drop(placed);
+    assert!(app.selection.is_none() && app.pending.is_none(), "nothing is left waiting");
+
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'V');
+    press_char(&mut app, 'd');
+    let placed = app.open.store.placed();
+    assert_eq!(placed.len(), 1);
+    assert_eq!(placed[0].kind(), Kind::Delete);
+    assert_eq!(app.open.doc.source.get(placed[0].range.clone()), Some("alpha beta gamma"));
+}
+
+#[test]
+fn c_comments_on_a_selection_still_being_extended_and_esc_returns_to_its_toolbar() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'v');
+    press_char(&mut app, 'e');
+    press_char(&mut app, 'c');
+    assert_eq!(app.mode, Mode::Compose);
+    assert_eq!(selected_text(&app), Some("alpha"));
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    assert_eq!(selected_text(&app), Some("alpha"), "the toolbar is back for the selection");
+}
+
+#[test]
+fn marking_a_selection_that_never_moved_selects_nothing() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'v');
+    press_char(&mut app, 'a');
+    assert!(app.open.store.placed().is_empty());
+    assert!(app.selection.is_none());
+    assert_eq!(app.status, None, "the visual hint must not outlive the selection");
+}
+
+#[test]
+fn the_visual_hint_names_only_the_bound_toolbar_keys() {
+    let mut app = two_row_paragraph_app();
+    app.keys = toml::from_str("comment = []\n").expect("keys");
+    press_char(&mut app, 'v');
+    assert!(app.status.as_deref().is_some_and(|s| s.contains(" a/d to act")), "{:?}", app.status);
+}
+
+#[test]
+fn a_key_that_does_nothing_during_a_mouse_drag_keeps_the_selection() {
+    let mut app = two_row_paragraph_app();
+    let doc = app.geometry.doc;
+    click(&mut app, MouseEventKind::Down(MouseButton::Left), doc.x, doc.y);
+    click(&mut app, MouseEventKind::Drag(MouseButton::Left), doc.x + 3, doc.y);
+    press_char(&mut app, 'y');
+    click(&mut app, MouseEventKind::Up(MouseButton::Left), doc.x + 3, doc.y);
+    assert_eq!(selected_text(&app), Some("alph"));
+}
+
+#[test]
+fn a_motion_bound_to_a_mark_key_still_moves_a_selection() {
+    let mut app = two_row_paragraph_app();
+    app.keys = toml::from_str("word-end = [\"a\"]\n").expect("keys");
+    press_char(&mut app, 'v');
+    press_char(&mut app, 'a');
+    assert_eq!(app.cursor, (0, 4));
+    assert!(app.open.store.placed().is_empty());
+    assert!(app.selection.is_some_and(|s| s.dragging), "still extending");
+}
+
+#[test]
 fn repeating_a_mark_on_a_block_adds_nothing() {
     let mut app = two_row_paragraph_app();
     press_char(&mut app, 'a');

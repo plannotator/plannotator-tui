@@ -247,15 +247,13 @@ impl App {
             return Ok(());
         }
         if self.pending.is_some()
-            && let Some(action) = self.keys.action(&key, keys::TOOLBAR)
-            && let Some(&(_, _, _, kind)) = TOOLBAR.iter().find(|item| item.2 == action)
+            && let Some(kind) = self.toolbar_kind(&key)
         {
             return self.act(kind);
         }
         // Visual mode: the selection follows the cursor.
         if self.selection.is_some_and(|s| s.dragging) {
-            self.visual_key(key);
-            return Ok(());
+            return self.visual_key(key);
         }
         // Roaming (`i`): the cursor moves with nothing selected yet, so `v` can start
         // anywhere. Other keys fall through to their block-mode meaning.
@@ -319,25 +317,45 @@ impl App {
     fn start_visual(&mut self, selection: Selection) {
         self.clear_selection();
         self.selection = Some(selection);
+        let marks = TOOLBAR
+            .map(|item| self.keys.hint(item.2))
+            .into_iter()
+            .filter(|hint| !hint.is_empty())
+            .collect::<Vec<_>>()
+            .join("/");
         self.status = Some(format!(
-            "visual: move to extend, {} to select, {} to cancel",
+            "visual: move to extend, {marks} to act, {} to select, {} to cancel",
             self.keys.hint(Action::Confirm),
             self.keys.hint(Action::Back)
         ));
     }
 
-    /// Keys while a keyboard selection is being extended.
-    fn visual_key(&mut self, key: KeyEvent) {
+    /// Keys while a keyboard selection is being extended. A motion wins over a toolbar key, so
+    /// a config that gave `a` to a motion keeps it.
+    fn visual_key(&mut self, key: KeyEvent) -> Result<()> {
         match self.keys.action(&key, keys::VISUAL) {
             Some(Action::Back) => self.clear_selection(),
             Some(Action::Confirm | Action::Visual | Action::VisualLine) => self.finish_selection(),
+            _ if self.motion_key(key) => {
+                // Only a motion moves the head: during a mouse drag the cursor is not on it.
+                if let Some(sel) = self.selection.as_mut() {
+                    sel.set_head(self.cursor);
+                }
+            }
             _ => {
-                self.motion_key(key);
+                if let Some(kind) = self.toolbar_kind(&key) {
+                    self.finish_selection();
+                    return self.act(kind);
+                }
             }
         }
-        if let Some(sel) = self.selection.as_mut() {
-            sel.set_head(self.cursor);
-        }
+        Ok(())
+    }
+
+    /// The annotation kind `key` makes from the toolbar.
+    fn toolbar_kind(&self, key: &KeyEvent) -> Option<Kind> {
+        let action = self.keys.action(key, keys::TOOLBAR)?;
+        TOOLBAR.iter().find(|item| item.2 == action).map(|item| item.3)
     }
 
     /// Enter roaming: the visual-mode motions move the cursor with nothing selected.
@@ -641,6 +659,7 @@ impl App {
         sel.dragging = false;
         if sel.is_empty() {
             self.selection = None;
+            self.status = None;
             return;
         }
         let sel = *sel;
@@ -656,6 +675,7 @@ impl App {
         }
         let Some((lo, hi)) = bounds else {
             self.selection = None;
+            self.status = None;
             return;
         };
         let source = &self.open.doc.source;
