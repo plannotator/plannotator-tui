@@ -29,7 +29,18 @@ pub(super) fn resolve(host: Host, session_id: &str, cwd: &Path, roots: &Roots) -
                     return Ok(ExactSession::File(path));
                 }
             }
-            bail!("no Claude Code session {id} in {}", describe(&dirs))
+            let missing: Vec<PathBuf> = dirs
+                .iter()
+                .filter_map(|projects| projects.parent())
+                .filter(|dir| !dir.is_dir())
+                .map(Path::to_path_buf)
+                .collect();
+            let note = if missing.is_empty() {
+                String::new()
+            } else {
+                format!(" (missing: {})", describe(&missing))
+            };
+            bail!("no Claude Code session {id} in {}{note}", describe(&dirs))
         }
         Host::Codex => {
             let files = codex::find_transcripts_by_id(&roots.codex_home, id)?;

@@ -182,6 +182,29 @@ fn an_exact_claude_id_survives_a_config_file_with_an_error() {
 }
 
 #[test]
+fn a_session_not_found_names_the_listed_profile_dir_that_does_not_exist() {
+    let (out, _) = exact_claude_lookup_in_profile(
+        "claude missing profile",
+        ".claude-max",
+        "[last]\nclaude_profile_dirs = [\"~/.claude-gone\"]\n",
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let missing = stderr.split_once("(missing: ").map(|(_, rest)| rest.trim_end()).expect("named");
+    assert!(missing.ends_with(".claude-gone)") && !missing.contains(", "), "{stderr}");
+}
+
+#[test]
+fn a_listed_profile_dir_that_does_not_exist_is_no_error_when_the_session_is_found() {
+    let (out, expected) = exact_claude_lookup_in_profile(
+        "claude found despite missing",
+        ".claude-max",
+        "[last]\nclaude_profile_dirs = [\"~/.claude-gone\", \"~/.claude-max\"]\n",
+    );
+    assert!(out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), expected.trim_end());
+}
+
+#[test]
 fn an_exact_claude_id_in_an_unlisted_profile_dir_is_not_found() {
     let (out, _) = exact_claude_lookup_in_profile("claude unlisted profile", ".claude-max", "");
     assert!(out.stdout.is_empty(), "{}", String::from_utf8_lossy(&out.stdout));
