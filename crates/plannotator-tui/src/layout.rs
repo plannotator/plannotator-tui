@@ -10,10 +10,12 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Text};
 use tui_markdown::{Options, StyleSheet};
 
+use crate::cjk_emphasis::{protect, strip_marks};
+use crate::decorate::decorate;
 use crate::doc::{BlockKind, Document};
 use crate::srcmap::{LineOffsets, align};
 use crate::theme::palette;
-use crate::wrap::{Row, clip_line, wrap_line, wrap_table};
+use crate::wrap::{Row, clip_line, rule_row, wrap_line, wrap_line_hanging, wrap_table};
 
 /// Rows of vertical space between blocks.
 const BLOCK_GAP: usize = 1;
@@ -67,14 +69,16 @@ pub(crate) struct DocLayout {
 
 fn render_block(doc: &Document, index: usize) -> (Text<'static>, Vec<LineOffsets>) {
     let source = doc.block_text(index);
-    let text = own(tui_markdown::from_str_with_options(source, &Options::new(Styles)));
+    let protected = protect(source);
+    let text = strip_marks(own(tui_markdown::from_str_with_options(&protected, &Options::new(Styles))));
     let plain: Vec<String> = text.lines.iter().map(ToString::to_string).collect();
-    let base = doc.blocks.get(index).map_or(0, |b| b.range.start);
+    let block = doc.blocks.get(index);
+    let base = block.map_or(0, |b| b.range.start);
     let offsets = align(&plain, source, base);
-    (text, offsets)
+    decorate(block.map_or(BlockKind::Other, |b| b.kind), text, offsets)
 }
 
-fn own(text: Text<'_>) -> Text<'static> {
+pub(crate) fn own(text: Text<'_>) -> Text<'static> {
     let lines = text
         .lines
         .into_iter()
@@ -112,10 +116,15 @@ impl DocLayout {
         for block in &mut self.blocks {
             block.first_row = row;
             let lines = || block.text.lines.iter().zip(&block.offsets);
-            block.rows = if block.kind == BlockKind::Table {
+            block.rows = if block.kind == BlockKind::Rule {
+                let first_offset = block.offsets.iter().flatten().flatten().next().copied();
+                vec![rule_row(first_offset, width)]
+            } else if block.kind == BlockKind::Table {
                 wrap_table(&block.text.lines, &block.offsets, width)
             } else if block.kind.preserves_columns() {
                 lines().map(|(l, o)| clip_line(l, o, width)).collect()
+            } else if matches!(block.kind, BlockKind::List | BlockKind::BlockQuote) {
+                lines().flat_map(|(l, o)| wrap_line_hanging(l, o, width)).collect()
             } else {
                 lines().flat_map(|(l, o)| wrap_line(l, o, width)).collect()
             };
