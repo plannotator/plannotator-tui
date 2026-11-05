@@ -3,6 +3,7 @@
 mod app;
 mod archive;
 mod base64;
+mod cjk_emphasis;
 mod cli;
 mod config;
 mod delivery;
