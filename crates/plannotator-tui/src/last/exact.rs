@@ -8,6 +8,7 @@ use plannotator_tui_hosts::{
 };
 
 use super::roots::Roots;
+use crate::config::Config;
 
 pub(super) enum ExactSession {
     File(PathBuf),
@@ -20,10 +21,26 @@ pub(super) fn resolve(host: Host, session_id: &str, cwd: &Path, roots: &Roots) -
     let id = plannotator_tui_hosts::validate_session_id(session_id)?;
     match host {
         Host::ClaudeCode => {
-            let projects = roots.claude_config.join("projects");
-            claude::find_transcript_by_id(&projects, cwd, id)?
-                .map(ExactSession::File)
-                .with_context(|| format!("no Claude Code session {id} in {}", projects.display()))
+            // A config that fails to parse must not cost a lookup that doesn't need it.
+            let profile_dirs = Config::load().unwrap_or_default().last.claude_profile_dirs;
+            let dirs = roots.claude_projects_dirs(&profile_dirs);
+            for projects in &dirs {
+                if let Some(path) = claude::find_transcript_by_id(projects, cwd, id)? {
+                    return Ok(ExactSession::File(path));
+                }
+            }
+            let missing: Vec<PathBuf> = dirs
+                .iter()
+                .filter_map(|projects| projects.parent())
+                .filter(|dir| !dir.is_dir())
+                .map(Path::to_path_buf)
+                .collect();
+            let note = if missing.is_empty() {
+                String::new()
+            } else {
+                format!(" (missing: {})", describe(&missing))
+            };
+            bail!("no Claude Code session {id} in {}{note}", describe(&dirs))
         }
         Host::Codex => {
             let files = codex::find_transcripts_by_id(&roots.codex_home, id)?;

@@ -188,6 +188,17 @@ code block. Send goes to the agent in that pane, as it does for a reply; a pane 
 copies instead. `--print` writes the document to stdout instead of opening a pane. Herdr
 Annotate ships it as the `annotate.terminal` action with no default key.
 
+A Claude Code session is looked up in `CLAUDE_CONFIG_DIR`, else `~/.claude`. An agent's own
+`CLAUDE_CONFIG_DIR` doesn't reach a pane Herdr opens, so if you run several profiles, list
+them to have them searched for a session Herdr identifies by id:
+
+```toml
+[last]
+claude_profile_dirs = ["~/.claude-max", "~/.claude-work"]
+```
+
+Finding a session by pid or folder still uses only the first two.
+
 `plannotator-tui config` prints the file's path and the values in effect. The `herdr/`
 directory in this repo is the development manifest; users should install Herdr Annotate.
 

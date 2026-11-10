@@ -55,6 +55,18 @@ impl Roots {
         })
     }
 
+    /// Claude Code `projects` dirs to search for a known session id: the configured one
+    /// first, then those of `profile_dirs` in order.
+    pub(super) fn claude_projects_dirs(&self, profile_dirs: &[String]) -> Vec<PathBuf> {
+        let configured = self.claude_config.join("projects");
+        let listed = profile_dirs
+            .iter()
+            .map(|dir| dir.strip_prefix("~/").map_or_else(|| PathBuf::from(dir), |rest| self.home.join(rest)))
+            .map(|dir| dir.join("projects"))
+            .filter(|projects| *projects != configured);
+        std::iter::once(configured.clone()).chain(listed).collect()
+    }
+
     /// Command Code reads `$HOME` (else `%USERPROFILE%`) and has no override of its own.
     pub(super) fn commandcode_projects(&self) -> PathBuf {
         self.home.join(commandcode::DEFAULT_PROJECTS_DIR)
@@ -143,6 +155,19 @@ mod tests {
         assert_eq!(roots.pi_sessions(".pi/agent"), PathBuf::from("root/pi sessions"));
         assert_eq!(roots.hermes_database(), PathBuf::from("root/hermes").join(hermes::DB_FILE));
         assert_eq!(roots.opencode_databases(), vec![PathBuf::from("root/opencode/custom.db")]);
+    }
+
+    #[test]
+    fn the_configured_claude_projects_dir_is_searched_before_the_listed_profiles() {
+        let roots = Roots::from_lookup(PathBuf::from("home"), |key| {
+            (key == "CLAUDE_CONFIG_DIR").then(|| OsString::from("home/.claude-max"))
+        });
+        let listed = ["~/.claude-work", "/elsewhere/claude", "~/.claude-max/"].map(str::to_owned);
+        assert_eq!(
+            roots.claude_projects_dirs(&listed),
+            ["home/.claude-max/projects", "home/.claude-work/projects", "/elsewhere/claude/projects"]
+                .map(PathBuf::from)
+        );
     }
 
     #[test]
