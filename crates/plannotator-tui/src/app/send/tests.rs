@@ -156,6 +156,22 @@ fn s_sends_a_reply_review_and_closes() {
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 
+/// A send that landed with something left to do counts as sent, so it is never pasted twice,
+/// and the status says what is left.
+#[test]
+fn a_send_that_landed_with_a_notice_counts_as_sent_and_shows_the_notice() {
+    let (root, mut app, delivery) = file_app("noticed");
+    app.add_quote_annotation("one", Kind::Comment, "A".into()).expect("A");
+    delivery.outcome.set(Outcome::Noticed);
+    press(&mut app, 'E');
+    assert_eq!(app.status.as_deref(), Some("sent 1 annotation(s) → test agent · press Enter there"));
+    delivery.outcome.set(Outcome::Success);
+    press(&mut app, 'E');
+    assert_eq!(delivery.calls.borrow().len(), 1, "nothing is left to send again");
+    assert_eq!(app.status.as_deref(), Some("nothing new to send"));
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
 #[test]
 fn s_keeps_the_window_open_while_the_agent_is_at_a_dialog() {
     let (root, mut app, delivery) = reply_app("s-blocked");

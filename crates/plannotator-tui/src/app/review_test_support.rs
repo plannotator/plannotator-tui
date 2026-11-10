@@ -23,6 +23,8 @@ use crate::tree::Tree;
 pub(super) enum Outcome {
     #[default]
     Success,
+    /// Delivered, with something left for the person to do.
+    Noticed,
     Blocked,
     Unavailable,
     Failed,
@@ -44,11 +46,14 @@ impl Delivery for RecordingDelivery {
     fn deliver(&self, text: &str) -> Result<(), DeliveryError> {
         self.calls.borrow_mut().push(text.to_owned());
         match self.outcome.get() {
-            Outcome::Success => Ok(()),
+            Outcome::Success | Outcome::Noticed => Ok(()),
             Outcome::Blocked => Err(DeliveryError::Blocked("at a dialog".into())),
             Outcome::Unavailable => Err(DeliveryError::Unavailable("agent gone".into())),
             Outcome::Failed => Err(DeliveryError::Failed(anyhow::anyhow!("transport failed"))),
         }
+    }
+    fn notice(&self) -> Option<String> {
+        matches!(self.outcome.get(), Outcome::Noticed).then(|| "press Enter there".to_owned())
     }
 }
 

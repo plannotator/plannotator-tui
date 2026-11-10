@@ -64,6 +64,9 @@ impl App {
                     String::new()
                 };
                 let mut status = format!("{verb} {} annotation(s){across} → {target}", feedback.count);
+                if let Some(notice) = self.delivery.notice() {
+                    let _ = write!(status, " · {notice}");
+                }
                 if !errors.is_empty() {
                     let _ = write!(
                         status,
