@@ -1,7 +1,7 @@
 //! `plannotator-tui rex last|open|terminal|find`: find the agent in a Rex block and open
 //! plannotator-tui beside it (a split) or over it (a popup), wired to send feedback back to
-//! the block. Either is an ordinary pane, so it keeps Rex's frame and theme. `foreground`
-//! and `argv` are pure; only `run` touches Rex.
+//! the block. Either is an ordinary pane, so it keeps Rex's frame and theme. `foreground`,
+//! `reported_host` and `argv` are pure; only `run` touches Rex.
 
 use std::path::{Path, PathBuf};
 
@@ -53,16 +53,30 @@ pub(crate) struct Foreground {
 }
 
 /// Read the foreground process. Rex reports the binary's file name, which for Claude Code is
-/// its version number, so the name it was invoked by is checked first.
+/// its version number, so the name it was invoked by is checked first. An agent run by an
+/// interpreter, such as pi under `node`, is named only by its `script`, if at all; `run` asks
+/// the agent's own status report first.
 pub(crate) fn foreground(process: &Value) -> Option<Foreground> {
     let fg = process.get("foreground")?;
     let pid = u32::try_from(fg.get("pid")?.as_u64()?).ok()?;
-    let host = ["argv0", "invoked_path", "name", "path"]
+    let host = ["argv0", "invoked_path", "name", "path", "script"]
         .iter()
         .filter_map(|key| fg.get(*key).and_then(Value::as_str))
         .find_map(known_host);
     let cwd = fg.get("cwd").and_then(Value::as_str).map(PathBuf::from);
     Some(Foreground { pid, cwd, host })
+}
+
+/// The agent process `pid` says it is, from `program_status` JSON: the app of a record that
+/// process owns. Rex keeps records of programs that have exited, so only the owner counts.
+pub(crate) fn reported_host(status: &Value, pid: u32) -> Option<&'static str> {
+    let records = status.get("records")?.as_array()?;
+    records
+        .iter()
+        .filter(|r| r.pointer("/owner/pid").and_then(Value::as_u64) == Some(u64::from(pid)))
+        .flat_map(|r| ["effective_app", "app"].map(|key| r.get(key).and_then(Value::as_str)))
+        .flatten()
+        .find_map(|app| if app == "claude-code" { Some("claude") } else { known_host(app) })
 }
 
 /// The argv the pane runs: `env` sets the delivery target, then `plannotator-tui rex pane`
@@ -122,7 +136,8 @@ fn newest_markdown(rex: &Rex, block: &str, fg: &Foreground, lines: u32) -> Resul
         .with_context(|| format!("no Markdown file named in the last {lines} lines of block {block}"))
 }
 
-/// Open the review beside or over `block`.
+/// Open the review beside or over `block`. The agent is the one its status report names, else
+/// the one its process names; a status Rex cannot give leaves the process to decide.
 pub(crate) fn run(
     rex: &Rex,
     block: &str,
@@ -131,7 +146,10 @@ pub(crate) fn run(
     placement: RexPlacement,
 ) -> Result<()> {
     let process = rex.terminal_method(block, "process")?;
-    let fg = foreground(&process).with_context(|| format!("block {block} has no foreground process"))?;
+    let mut fg = foreground(&process).with_context(|| format!("block {block} has no foreground process"))?;
+    if let Ok(status) = rex.terminal_method(block, "program_status") {
+        fg.host = reported_host(&status, fg.pid).or(fg.host);
+    }
     let exe = std::env::current_exe().context("finding the plannotator-tui binary")?;
     let review = match review {
         Review::Find { lines } => Review::Open(Some(newest_markdown(rex, block, &fg, *lines)?), None),
@@ -149,6 +167,9 @@ mod tests {
     /// `com.superlogical.terminal.process` for a block running Claude Code, as Rex reports it.
     const CLAUDE: &str = r#"{"last_exit":null,"child":{"pid":59515,"name":"login"},"foreground":{"pid":60223,"name":"2.1.308","path":"/Users/me/.local/share/claude/versions/2.1.308","invoked_path":"/Users/me/.local/bin/claude","argv0":"claude","cwd":"/Users/me/project"}}"#;
     const SHELL: &str = r#"{"foreground":{"pid":700,"name":"fish","argv0":"-fish","cwd":"/Users/me"}}"#;
+    /// pi as installed by npm, run by `node` (Rex 1913): nothing but the status names it.
+    const PI_NODE: &str = r#"{"last_exit":null,"foreground":{"pid":73139,"user_id":501,"user":"me","name":"node","path":"/Users/me/.local/share/fnm/node-versions/v24.15.0/installation/bin/node","invoked_path":"/Users/me/.local/share/fnm/node-versions/v24.15.0/installation/bin/node","argv0":"node","script":"/Users/me/.local/share/fnm/node-versions/v24.15.0/installation/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js","cwd":"/Users/me/project"},"home":"/Users/me"}"#;
+    const PI_STATUS: &str = r#"{"records":[{"state":"idle","app":"pi","effective_app":"pi","updated_at":"2026-11-10T00:25:21.924601-05:00","owner":{"pid":73139,"name":"node"}}]}"#;
 
     fn parse(json: &str) -> Foreground {
         foreground(&serde_json::from_str(json).expect("json")).expect("a foreground process")
@@ -161,6 +182,33 @@ mod tests {
         assert_eq!(fg.host, Some("claude"));
         assert_eq!(fg.cwd.as_deref(), Some(Path::new("/Users/me/project")));
         assert_eq!(parse(SHELL).host, None);
+    }
+
+    fn status(json: &str) -> Value {
+        serde_json::from_str(json).expect("json")
+    }
+
+    #[test]
+    fn an_agent_under_an_interpreter_is_named_by_its_own_status_report() {
+        let fg = parse(PI_NODE);
+        assert_eq!(fg.host, None, "node and cli.js name no agent");
+        assert_eq!(reported_host(&status(PI_STATUS), fg.pid), Some("pi"));
+        let claude = r#"{"records":[{"state":"working","app":"claude-code","owner":{"pid":60223}}]}"#;
+        assert_eq!(reported_host(&status(claude), 60223), Some("claude"));
+    }
+
+    #[test]
+    fn a_status_left_by_another_process_names_no_agent() {
+        assert_eq!(reported_host(&status(PI_STATUS), 700), None);
+        let unknown = r#"{"records":[{"state":"working","app":"terraform","owner":{"pid":700}}]}"#;
+        assert_eq!(reported_host(&status(unknown), 700), None);
+        assert_eq!(reported_host(&status(r#"{"records":[]}"#), 700), None);
+    }
+
+    #[test]
+    fn a_script_names_the_agent_when_its_file_is_called_after_it() {
+        let script = r#"{"foreground":{"pid":9,"name":"node","argv0":"node","script":"/opt/bin/pi"}}"#;
+        assert_eq!(parse(script).host, Some("pi"));
     }
 
     #[test]
