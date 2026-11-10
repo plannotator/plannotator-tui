@@ -14,7 +14,9 @@ crates/plannotator-tui          the app: parse → layout → draw → input. Ta
 herdr/                    the Herdr plugin manifest. The launcher it runs is
                           `plannotator-tui herdr open` (src/herdr/); no shell logic here.
                           Rex needs no manifest: its launchers and delivery
-                          (`plannotator-tui rex …`, src/rex/) drive the `rex` CLI.
+                          (`plannotator-tui rex …`, src/rex/) drive the `rex` CLI, and
+                          Rex Annotate is src/rex/annotate.lua, embedded and written
+                          by `plannotator-tui rex install`.
 ```
 
 Markdown parsing is `pulldown-cmark`; rendering to styled text is `tui-markdown`. We never

@@ -15,7 +15,8 @@ use crate::gate::{self, GateError};
 
 /// `plannotator-tui rex open|last|terminal|find`: open a review beside a block (a split) or
 /// over it (`--placement popup`, or `[rex] placement`). The block defaults to `REX_BLOCK`, so
-/// an agent running this from its own block reviews itself.
+/// an agent running this from its own block reviews itself. `rex install` writes the Rex
+/// Annotate module.
 /// `--paste` leaves the feedback in the agent's prompt instead of sending it; `open --gate`
 /// adds Approve, as `herdr open --gate` does. `rex pane` is what the split runs. A gated open
 /// with a result file fails as a [`GateError`], like the direct gate.
@@ -31,6 +32,7 @@ fn launch_review(args: &[String]) -> Result<()> {
         Some("terminal") => Review::Terminal { lines: crate::terminal::DEFAULT_LINES },
         Some("find") => Review::Find { lines: crate::terminal::DEFAULT_LINES },
         Some("pane") => return pane(args.get(1..).unwrap_or_default()),
+        Some("install") => return super::install::run(args.get(1..).unwrap_or_default()),
         _ => anyhow::bail!(USAGE),
     };
     let mut block = None;

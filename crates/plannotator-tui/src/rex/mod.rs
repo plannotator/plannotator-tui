@@ -3,12 +3,13 @@
 //!
 //! Rex is driven only through its `rex` CLI. `command` runs it; `launch` finds the agent and
 //! `place` opens the split or popup; `terminal` reads a block's output; `paths` finds the
-//! Markdown files in it; `agent` is the delivery target the opened app sends to; `cli` parses
-//! the `rex` subcommands.
+//! Markdown files in it; `agent` is the delivery target the opened app sends to; `install`
+//! writes the Rex Annotate Lua module; `cli` parses the `rex` subcommands.
 
 pub(crate) mod agent;
 pub(crate) mod cli;
 pub(crate) mod command;
+pub(crate) mod install;
 pub(crate) mod launch;
 pub(crate) mod paths;
 pub(crate) mod place;

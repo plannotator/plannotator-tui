@@ -41,6 +41,11 @@ fn bin(env: impl Fn(&str) -> Option<String>, parent: impl FnOnce() -> Option<Pat
         .unwrap_or_else(|| PathBuf::from("rex"))
 }
 
+/// The `rex` this process would run, for calls that need no session.
+pub(crate) fn installed_bin() -> PathBuf {
+    bin(|k| std::env::var(k).ok(), parent_rex)
+}
+
 /// The parent process's executable, when it is a `rex`.
 fn parent_rex() -> Option<PathBuf> {
     let exe = parent_exe()?;
