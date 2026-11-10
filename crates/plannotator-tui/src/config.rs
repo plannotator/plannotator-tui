@@ -292,7 +292,7 @@ mod tests {
 
     #[test]
     fn claude_profile_dirs_default_to_none_and_are_listed_in_order() {
-        assert!(Config::default().last.claude_profile_dirs.is_empty());
+        assert_eq!(Config::default().last.claude_profile_dirs, Vec::<String>::new());
         let config = Config::parse("[last]\nclaude_profile_dirs = [\"~/b\", \"/a\"]\n").expect("parses");
         assert_eq!(config.last.claude_profile_dirs, ["~/b", "/a"]);
     }
