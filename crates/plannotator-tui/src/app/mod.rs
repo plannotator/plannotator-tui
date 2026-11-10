@@ -117,6 +117,9 @@ struct Pending {
     range: Range<usize>,
     /// Document (row, col) where the selection starts; anchors the toolbar and compose box.
     at: (usize, usize),
+    /// Whether leaving the comment box comes back to the toolbar. A block comment opened
+    /// straight from the document never showed one.
+    has_toolbar: bool,
 }
 
 /// Everything about the open document; swapped wholesale when the tree switches files.
@@ -480,12 +483,32 @@ impl App {
                 self.compose = Compose::default();
             }
             Kind::LooksGood | Kind::Delete => {
-                self.annotate(pending.range, kind, String::new())?;
+                let placed = self.open.store.placed();
+                let repeated = placed.iter().any(|p| p.kind() == kind && *p.range == pending.range);
+                drop(placed);
+                let outcome = if repeated {
+                    "already saved"
+                } else {
+                    self.annotate(pending.range, kind, String::new())?;
+                    "saved"
+                };
                 self.clear_selection();
-                self.status = Some(format!("{} saved", label(kind)));
+                self.status = Some(format!("{} {outcome}", label(kind)));
             }
         }
         Ok(())
+    }
+
+    /// Apply `kind` to the whole selected block, with no toolbar in between.
+    fn act_on_block(&mut self, kind: Kind) -> Result<()> {
+        let (Some(block), Some(rendered)) =
+            (self.open.doc.blocks.get(self.selected), self.open.layout.blocks.get(self.selected))
+        else {
+            return Ok(());
+        };
+        self.pending =
+            Some(Pending { range: block.range.clone(), at: (rendered.first_row, 0), has_toolbar: false });
+        self.act(kind)
     }
 
     /// `copy`: the waiting selection's source text to the clipboard. It stays selected.

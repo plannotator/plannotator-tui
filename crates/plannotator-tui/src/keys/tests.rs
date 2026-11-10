@@ -136,6 +136,22 @@ fn a_config_that_gave_approves_key_away_still_loads() {
 }
 
 #[test]
+fn word_end_and_visual_line_yield_to_an_older_config() {
+    let keymap = Keymap::default();
+    assert_eq!(keymap.action(&press(KeyCode::Char('e'), KeyModifiers::NONE), MOTION), Some(WordEnd));
+    assert_eq!(keymap.action(&press(KeyCode::Char('V'), KeyModifiers::SHIFT), DOCUMENT), Some(VisualLine));
+    assert_eq!(parse("left = [\"e\"]\n").expect("an older config keeps loading").hint(WordEnd), "");
+    assert_eq!(parse("comment = [\"V\"]\n").expect("an older config keeps loading").hint(VisualLine), "");
+}
+
+#[test]
+fn looks_good_and_delete_on_a_block_never_conflict_with_a_document_key() {
+    let keymap = parse("looks-good = [\"j\"]\nclear-block = [\"d\"]\n").expect("loads as it did");
+    assert_eq!(keymap.action(&press(KeyCode::Char('j'), KeyModifiers::NONE), DOCUMENT), Some(Down));
+    assert_eq!(keymap.action(&press(KeyCode::Char('d'), KeyModifiers::NONE), DOCUMENT), Some(ClearBlock));
+}
+
+#[test]
 fn copy_is_y_on_a_waiting_selection_and_yields_to_an_older_config() {
     let keymap = Keymap::default();
     assert_eq!(keymap.action(&press(KeyCode::Char('y'), KeyModifiers::NONE), TOOLBAR), Some(CopySelection));

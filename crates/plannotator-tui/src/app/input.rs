@@ -3,6 +3,8 @@
 use anyhow::Result;
 use plannotator_tui_schema::Kind;
 use ratatui::crossterm::event::{Event, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::text::Line;
+use unicode_width::UnicodeWidthChar;
 
 use super::compose::ComposeAction;
 use super::menu::ReviewAction;
@@ -12,6 +14,12 @@ use super::{App, Focus, GUTTER, Mode, Pending, TOOLBAR};
 use crate::delivery::Delivery as _;
 use crate::gate::Gate;
 use crate::keys::{self, Action};
+
+/// A row's characters indexed by screen column, as the cursor is: a wide one fills two.
+fn chars_by_column(line: &Line<'_>) -> Vec<char> {
+    let text = line.to_string();
+    text.chars().flat_map(|c| std::iter::repeat_n(c, c.width().unwrap_or(0))).collect()
+}
 
 impl App {
     pub(crate) fn handle_event(&mut self, event: &Event) -> Result<()> {
@@ -239,15 +247,13 @@ impl App {
             return Ok(());
         }
         if self.pending.is_some()
-            && let Some(action) = self.keys.action(&key, keys::TOOLBAR)
-            && let Some(&(_, _, _, kind)) = TOOLBAR.iter().find(|item| item.2 == action)
+            && let Some(kind) = self.toolbar_kind(&key)
         {
             return self.act(kind);
         }
         // Visual mode: the selection follows the cursor.
         if self.selection.is_some_and(|s| s.dragging) {
-            self.visual_key(key);
-            return Ok(());
+            return self.visual_key(key);
         }
         // Roaming (`i`): the cursor moves with nothing selected yet, so `v` can start
         // anywhere. Other keys fall through to their block-mode meaning.
@@ -261,7 +267,11 @@ impl App {
                 return Ok(());
             }
         }
-        match self.keys.action(&key, keys::DOCUMENT) {
+        let action = self
+            .keys
+            .action(&key, keys::DOCUMENT)
+            .or_else(|| self.keys.action_without_ctrl_leak(&key, keys::BLOCK_MARKS));
+        match action {
             Some(Action::Back) => {
                 if self.pending.is_some() || self.selection.is_some() {
                     self.clear_selection();
@@ -269,15 +279,8 @@ impl App {
                     self.request_quit();
                 }
             }
-            Some(Action::Visual) => {
-                self.clear_selection();
-                self.selection = Some(Selection::start(self.cursor));
-                self.status = Some(format!(
-                    "visual: move to extend, {} to select, {} to cancel",
-                    self.keys.hint(Action::Confirm),
-                    self.keys.hint(Action::Back)
-                ));
-            }
+            Some(Action::Visual) => self.start_visual(Selection::start(self.cursor)),
+            Some(Action::VisualLine) => self.start_visual(Selection::start_rows(self.cursor)),
             Some(Action::MoveCursor) => self.start_roaming(),
             Some(Action::Down) => self.select_block(self.selected + 1),
             Some(Action::Up) => self.select_block(self.selected.saturating_sub(1)),
@@ -293,15 +296,10 @@ impl App {
             Some(Action::Bottom) => {
                 self.select_block(self.open.doc.blocks.len().saturating_sub(1));
             }
-            Some(Action::Comment | Action::Confirm) => {
-                // No selection: comment on the whole selected block.
-                if let (Some(block), Some(rendered)) =
-                    (self.open.doc.blocks.get(self.selected), self.open.layout.blocks.get(self.selected))
-                {
-                    self.pending = Some(Pending { range: block.range.clone(), at: (rendered.first_row, 0) });
-                    self.act(Kind::Comment)?;
-                }
-            }
+            // No selection: these act on the whole selected block.
+            Some(Action::Comment | Action::Confirm) => self.act_on_block(Kind::Comment)?,
+            Some(Action::LooksGood) => self.act_on_block(Kind::LooksGood)?,
+            Some(Action::Delete) => self.act_on_block(Kind::Delete)?,
             Some(Action::ClearBlock) => {
                 let removed = self.open.store.remove_in_block(&self.open.doc, self.selected)?;
                 if removed > 0 {
@@ -318,18 +316,54 @@ impl App {
         Ok(())
     }
 
-    /// Keys while a keyboard selection is being extended.
-    fn visual_key(&mut self, key: KeyEvent) {
+    fn start_visual(&mut self, selection: Selection) {
+        self.clear_selection();
+        self.selection = Some(selection);
+        let copy = (!self.ui.copy_on_select).then(|| self.keys.hint(Action::CopySelection));
+        let marks = TOOLBAR
+            .map(|item| self.keys.hint(item.2))
+            .into_iter()
+            .chain(copy)
+            .filter(|hint| !hint.is_empty())
+            .collect::<Vec<_>>()
+            .join("/");
+        self.status = Some(format!(
+            "visual: move to extend, {marks} to act, {} to select, {} to cancel",
+            self.keys.hint(Action::Confirm),
+            self.keys.hint(Action::Back)
+        ));
+    }
+
+    /// Keys while a keyboard selection is being extended. A motion wins over a toolbar key, so
+    /// a config that gave `a` to a motion keeps it.
+    fn visual_key(&mut self, key: KeyEvent) -> Result<()> {
         match self.keys.action(&key, keys::VISUAL) {
             Some(Action::Back) => self.clear_selection(),
-            Some(Action::Confirm | Action::Visual) => self.finish_selection(),
+            Some(Action::Confirm | Action::Visual | Action::VisualLine) => self.finish_selection(),
+            _ if self.motion_key(key) => {
+                // Only a motion moves the head: during a mouse drag the cursor is not on it.
+                if let Some(sel) = self.selection.as_mut() {
+                    sel.set_head(self.cursor);
+                }
+            }
+            _ if self.keys.action_without_ctrl_leak(&key, keys::TOOLBAR).is_none() => {}
             _ => {
-                self.motion_key(key);
+                if self.keys.action(&key, keys::TOOLBAR) == Some(Action::CopySelection) {
+                    self.finish_selection();
+                    self.copy_pending();
+                } else if let Some(kind) = self.toolbar_kind(&key) {
+                    self.finish_selection();
+                    return self.act(kind);
+                }
             }
         }
-        if let Some(sel) = self.selection.as_mut() {
-            sel.set_head(self.cursor);
-        }
+        Ok(())
+    }
+
+    /// The annotation kind `key` makes from the toolbar.
+    fn toolbar_kind(&self, key: &KeyEvent) -> Option<Kind> {
+        let action = self.keys.action(key, keys::TOOLBAR)?;
+        TOOLBAR.iter().find(|item| item.2 == action).map(|item| item.3)
     }
 
     /// Enter roaming: the visual-mode motions move the cursor with nothing selected.
@@ -338,10 +372,11 @@ impl App {
         self.roam = true;
         let hint = |action| self.keys.hint(action);
         self.status = Some(format!(
-            "move: {} {} {} {} {} · {} select · {} back to blocks",
+            "move: {} {} {} {} {} {} · {} select · {} back to blocks",
             self.keys.directions_hint(),
             hint(Action::WordForward),
             hint(Action::WordBack),
+            hint(Action::WordEnd),
             hint(Action::LineStart),
             hint(Action::LineEnd),
             hint(Action::Visual),
@@ -358,6 +393,7 @@ impl App {
             Some(Action::Up) => self.move_cursor(-1, 0),
             Some(Action::WordForward) => self.move_word(1),
             Some(Action::WordBack) => self.move_word(-1),
+            Some(Action::WordEnd) => self.move_word_end(),
             Some(Action::LineStart) => self.cursor.1 = 0,
             Some(Action::LineEnd) => {
                 self.cursor.1 =
@@ -399,14 +435,27 @@ impl App {
         self.ensure_cursor_visible();
     }
 
+    /// Jump to the next word's last character on the current row; past the row's last word,
+    /// stay put.
+    fn move_word_end(&mut self) {
+        let Some(row) = self.open.layout.row(self.cursor.0) else { return };
+        let chars = chars_by_column(&row.line);
+        let is_end = |i: usize| {
+            chars.get(i).is_some_and(|c| !c.is_whitespace())
+                && chars.get(i + 1).is_none_or(|c| c.is_whitespace())
+        };
+        if let Some(end) = (self.cursor.1 + 1..chars.len()).find(|&i| is_end(i)) {
+            self.cursor.1 = end;
+        }
+    }
+
     /// Jump to the next (+1) or previous (-1) word start on the current row.
     fn move_word(&mut self, direction: i64) {
         let Some(row) = self.open.layout.row(self.cursor.0) else { return };
-        let text = row.line.to_string();
-        let chars: Vec<char> = text.chars().collect();
+        let chars = chars_by_column(&row.line);
         let is_boundary = |i: usize| {
             let here = chars.get(i).is_some_and(|c| !c.is_whitespace());
-            let before = i == 0 || chars.get(i - 1).is_some_and(char::is_ascii_whitespace);
+            let before = i == 0 || chars.get(i - 1).is_some_and(|c| c.is_whitespace());
             here && before
         };
         let col = self.cursor.1;
@@ -418,9 +467,17 @@ impl App {
         self.cursor.1 = next;
     }
 
+    /// Leave the comment box without saving.
+    fn cancel_compose(&mut self) {
+        self.mode = Mode::Browse;
+        if self.pending.as_ref().is_some_and(|pending| !pending.has_toolbar) {
+            self.pending = None;
+        }
+    }
+
     fn text_key(&mut self, key: KeyEvent) -> Result<()> {
         match self.compose.handle_key(key) {
-            ComposeAction::Cancel => self.mode = Mode::Browse,
+            ComposeAction::Cancel => self.cancel_compose(),
             ComposeAction::Save => {
                 let body = self.compose.value().trim().to_owned();
                 match std::mem::replace(&mut self.mode, Mode::Browse) {
@@ -511,7 +568,7 @@ impl App {
                     self.selection = None;
                     self.cursor = pos;
                     self.status = None;
-                    self.pending = Some(Pending { range, at: pos });
+                    self.pending = Some(Pending { range, at: pos, has_toolbar: true });
                     return Ok(());
                 }
                 if let Some(block) = self.open.layout.block_at_row(pos.0) {
@@ -610,6 +667,7 @@ impl App {
         sel.dragging = false;
         if sel.is_empty() {
             self.selection = None;
+            self.status = None;
             return;
         }
         let sel = *sel;
@@ -625,6 +683,7 @@ impl App {
         }
         let Some((lo, hi)) = bounds else {
             self.selection = None;
+            self.status = None;
             return;
         };
         let source = &self.open.doc.source;
@@ -640,6 +699,6 @@ impl App {
             self.selected = block;
         }
         self.status = None;
-        self.pending = Some(Pending { range, at: a });
+        self.pending = Some(Pending { range, at: a, has_toolbar: true });
     }
 }
