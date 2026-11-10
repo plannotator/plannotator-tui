@@ -182,6 +182,7 @@ mod tests {
         Scratch(dir)
     }
 
+    #[cfg(unix)]
     fn lookup(vars: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
         |k| vars.iter().find(|(name, _)| *name == k).map(|(_, v)| (*v).to_owned())
     }
