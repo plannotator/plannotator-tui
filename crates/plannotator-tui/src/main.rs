@@ -11,6 +11,8 @@ mod editor;
 mod export;
 mod file_search;
 mod gate;
+#[cfg(unix)]
+mod hangup;
 mod herdr;
 mod keys;
 mod last;
