@@ -186,6 +186,8 @@ mod tests {
         |k| vars.iter().find(|(name, _)| *name == k).map(|(_, v)| (*v).to_owned())
     }
 
+    // Unix paths: on Windows `/home/me` is not absolute. Rex runs on macOS.
+    #[cfg(unix)]
     #[test]
     fn the_module_goes_where_rex_reads_its_config_from() {
         let home = Path::new("/home/me");
@@ -204,6 +206,8 @@ mod tests {
         assert_eq!(module_path(&explicit), Path::new("/etc/rex/plannotator/annotate.lua"));
     }
 
+    // Unix paths: on Windows `/home/me` is not absolute. Rex runs on macOS.
+    #[cfg(unix)]
     #[test]
     fn the_module_names_this_binary_as_a_lua_string() {
         let text = module(Path::new("/opt/a \"b\"\\c/plannotator-tui")).expect("module");
