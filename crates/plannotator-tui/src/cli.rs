@@ -465,6 +465,8 @@ fn run_review(build: impl FnOnce(usize) -> Result<App>) -> Result<Option<Decisio
         &config.colors,
     );
     let mut terminal = ratatui::init();
+    #[cfg(unix)]
+    crate::hangup::watch();
     execute!(stdout(), EnableMouseCapture)?;
     // Shift+Enter is only distinguishable from Enter where the kitty keyboard protocol
     // holds end to end (terminal, and any multiplexer in between). Ask for it; the flag
