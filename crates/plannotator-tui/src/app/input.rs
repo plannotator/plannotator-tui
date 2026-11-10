@@ -269,10 +269,8 @@ impl App {
                 return Ok(());
             }
         }
-        let action = self
-            .keys
-            .action(&key, keys::DOCUMENT)
-            .or_else(|| self.keys.action_without_ctrl_leak(&key, keys::BLOCK_MARKS));
+        let action =
+            self.keys.action(&key, keys::DOCUMENT).or_else(|| self.keys.action(&key, keys::BLOCK_MARKS));
         match action {
             Some(Action::Back) => {
                 if self.pending.is_some() || self.selection.is_some() {
@@ -348,7 +346,6 @@ impl App {
                     sel.set_head(self.cursor);
                 }
             }
-            _ if self.keys.action_without_ctrl_leak(&key, keys::TOOLBAR).is_none() => {}
             _ => {
                 if self.keys.action(&key, keys::TOOLBAR) == Some(Action::CopySelection) {
                     self.finish_selection();

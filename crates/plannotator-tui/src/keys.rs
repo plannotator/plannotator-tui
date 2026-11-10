@@ -344,15 +344,6 @@ impl Keymap {
         context.iter().copied().find(|&action| self.is(action, key))
     }
 
-    /// `action`, except a plain binding does not answer with Ctrl held: `ctrl+d` pages, it
-    /// does not mark. Ctrl with Alt still counts as plain, because Windows reports `AltGr`
-    /// that way and `AltGr` types ordinary characters.
-    pub(crate) fn action_without_ctrl_leak(&self, key: &KeyEvent, context: &[Action]) -> Option<Action> {
-        let held_ctrl = key.modifiers & (KeyModifiers::CONTROL | KeyModifiers::ALT) == KeyModifiers::CONTROL;
-        self.action(key, context)
-            .filter(|&action| !held_ctrl || self.keys(action).iter().any(|k| k.ctrl && k.matches(key)))
-    }
-
     pub(crate) fn is(&self, action: Action, key: &KeyEvent) -> bool {
         self.keys(action).iter().any(|k| k.matches(key))
     }
