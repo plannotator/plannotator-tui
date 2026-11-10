@@ -318,14 +318,67 @@ pane. Mirror does not preserve overlay presentation, and Herdr 0.8.2 opens an
 overlay in its server's active tab, which can differ from the tab you are viewing.
 An explicit `--placement` or `PLANNOTATOR_TUI_PLACEMENT` still takes precedence.
 
-## Inside Rex
+## Rex Annotate
 
-Bind keys or actions in Rex to the launchers below. Each opens plannotator-tui in a split beside
-the focused pane: the agent's recent replies, its newest reply, the pane's folder, or the pane's
-recent output. The header button sends the review to the agent in that pane as its next message:
-`Send 3 new ▸ claude in a1d6db (E)`. A pane with no agent copies instead.
+Rex Annotate gives [Rex](https://www.superlogical.com/rex) the same reviews as Herdr Annotate:
+a key opens the focused pane's agent replies, its folder, or its output in plannotator-tui, and
+**Send** makes the review the agent's next message: `Send 3 new ▸ claude in a1d6db (E)`. Rex has
+no plugin manifest, so Rex Annotate is a Lua module that Rex's config file loads.
 
-Each launcher opens the split and exits:
+```sh
+brew trust plannotator/tap && brew install plannotator/tap/plannotator-tui
+plannotator-tui rex install    # writes ~/.config/rex/plannotator/annotate.lua
+```
+
+Add the line it prints to `~/.config/rex/init.lua`, then reload:
+
+```lua
+require("plannotator.annotate").setup{}
+```
+
+```sh
+rex config reload
+```
+
+`rex install` never edits `init.lua`. It writes the module beside it (in the folder of
+`$REX_CONFIG` when that is set), naming this binary by its full path, because Rex runs actions
+with a bare `PATH`. It then checks the module with `rex config check` against a scratch copy.
+Run it again after upgrading plannotator-tui. `--dry-run` says what it would write;
+`--print` writes the module to stdout instead.
+
+| Key | Action (`rex do …`, palette: Annotate) | Opens |
+|---|---|---|
+| `Shift+Cmd+O` | `annotate_last` | the agent's recent replies |
+| `Alt+Shift+Cmd+O` | `annotate_newest` | the agent's newest reply, with no picker |
+| `Ctrl+Cmd+O` | `annotate_open` | the pane's folder, with a file tree |
+| | `annotate_gate` | the pane's folder, with **Approve** (`A`) |
+| | `annotate_terminal` | the pane's recent output |
+| | `annotate_find` | the newest `.md` file the pane's output names |
+
+Rex for Mac binds none of these keys by default. Change or add keys, or bind none:
+
+```lua
+require("plannotator.annotate").setup{
+  placement = "popup",                       -- default: [rex] placement, else split
+  keys = { annotate_gate = "ctrl+cmd+a", annotate_last = false },
+  -- keys = false binds none; the actions stay in the palette
+}
+```
+
+A review opens in a split to the right of the pane, so the agent stays in view, or in a
+floating popup over the pane's window:
+
+```toml
+# ~/.config/plannotator-tui/config.toml
+[rex]
+placement = "split"   # split (default) | popup
+```
+
+Everything goes through the Rex server, so the app's Remote Control setting can stay off.
+
+### Launchers
+
+The actions run these, and so can a script or an agent. Each opens the review and exits:
 
 ```sh
 plannotator-tui rex last [--newest]         # the agent's replies
@@ -335,14 +388,19 @@ plannotator-tui rex find [--lines N]        # the newest .md file the pane's out
 ```
 
 The pane is `--block <id>`, else `REX_BLOCK`, so an agent that runs a launcher in its own
-shell reviews itself; that is how it hands you a plan. `--paste` puts the feedback in the
-agent's prompt without pressing Enter and focuses the agent's pane, so you can edit it first;
-the header says `claude prompt in a1d6db`. `rex open --gate [--result-file <path>]` adds
-Approve for a sign-off, as `herdr open --gate` does. A send waits while Rex reports the agent blocked on
-a permission prompt or a question, as it does in Herdr. It also needs the agent to report its
-state to Rex (Claude Code and Codex do): until it has, the review copies instead, since Enter
-could answer a dialog Rex cannot see, and `--paste` still works. Rex does not report its theme to
-programs, so with a light Rex theme set `[ui] theme = "light"`.
+shell reviews itself; that is how it hands you a plan. `--placement split|popup` overrides the
+config. `--paste` puts the feedback in the agent's prompt without pressing Enter and focuses the
+agent's pane, so you can edit it first; the header says `claude prompt in a1d6db`.
+`rex open --gate [--result-file <path>]` adds Approve for a sign-off, as `herdr open --gate` does.
+
+The agent is the one the pane's program reports to Rex (its program status app, such as `pi`
+or `claude-code`), else the one its process is named after. So pi, which runs under `node`,
+gets Send like any other agent. A pane with no agent copies instead. A send waits while Rex
+reports the agent blocked on a permission prompt or a question, as it does in Herdr. It also
+needs the agent to report its state to Rex (Claude Code, Codex and pi do): until it has, the
+review copies instead, since Enter could answer a dialog Rex cannot see, and `--paste` still
+works. Rex does not report its theme to programs, so with a light Rex theme set
+`[ui] theme = "light"`.
 
 ## Agent replies
 

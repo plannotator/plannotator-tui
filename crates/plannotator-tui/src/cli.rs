@@ -42,10 +42,11 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui herdr terminal [--lines N] [--placement P] [--deliver-to <pane>] [--print]
   plannotator-tui herdr pane
   plannotator-tui rex open [file.md | folder] [--block <id>] [--session <id>] [--paste]
-                           [--gate] [--result-file <path>]
-  plannotator-tui rex last [--block <id>] [--session <id>] [--newest] [--paste]
-  plannotator-tui rex terminal [--block <id>] [--session <id>] [--lines N] [--paste] [--print]
-  plannotator-tui rex find [--block <id>] [--session <id>] [--lines N] [--paste]
+                           [--placement split|popup] [--gate] [--result-file <path>]
+  plannotator-tui rex last [--block <id>] [--session <id>] [--newest] [--paste] [--placement P]
+  plannotator-tui rex terminal [--block <id>] [--session <id>] [--lines N] [--paste] [--placement P] [--print]
+  plannotator-tui rex find [--block <id>] [--session <id>] [--lines N] [--paste] [--placement P]
+  plannotator-tui rex install [--dry-run | --print]
   plannotator-tui rex pane (open <path> [--gate [--result-file <path>]] | last <last args>
                             | terminal --block <id> [--lines N])
   plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes|opencode|cmd|agy] [--pid N] [--session <transcript>]

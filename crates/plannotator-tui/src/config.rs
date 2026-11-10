@@ -18,6 +18,7 @@ use crate::theme::{Colors, ThemeSetting};
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Config {
     pub(crate) herdr: HerdrConfig,
+    pub(crate) rex: RexConfig,
     pub(crate) ui: UiConfig,
     pub(crate) last: LastConfig,
     pub(crate) keys: Keymap,
@@ -128,6 +129,36 @@ impl FromStr for Placement {
     }
 }
 
+/// How plannotator-tui opens inside Rex.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct RexConfig {
+    pub(crate) placement: RexPlacement,
+}
+
+/// Where a Rex review opens. Rex has no overlay; a popup is a floating layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum RexPlacement {
+    /// A split to the right of the agent's block, so the agent stays in view.
+    #[default]
+    Split,
+    /// A floating layer over the agent's window.
+    Popup,
+}
+
+impl FromStr for RexPlacement {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s {
+            "split" => Ok(Self::Split),
+            "popup" => Ok(Self::Popup),
+            other => anyhow::bail!("unknown Rex placement {other:?}; expected split or popup"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum SplitDirection {
@@ -211,6 +242,17 @@ mod tests {
     fn invalid_placement_error_names_the_value() {
         let err = Config::parse("[herdr]\nplacement = \"floating\"\n").expect_err("rejected");
         assert!(err.to_string().contains("floating"), "{err}");
+    }
+
+    #[test]
+    fn rex_opens_in_a_split_unless_a_popup_is_asked_for_and_has_no_overlay() {
+        assert_eq!(Config::default().rex.placement, RexPlacement::Split);
+        let popup = Config::parse("[rex]\nplacement = \"popup\"\n").expect("parses");
+        assert_eq!(popup.rex.placement, RexPlacement::Popup);
+        assert_eq!(popup.herdr, HerdrConfig::default());
+        let err = Config::parse("[rex]\nplacement = \"overlay\"\n").expect_err("rejected");
+        assert!(err.to_string().contains("overlay"), "{err}");
+        assert!("overlay".parse::<RexPlacement>().is_err());
     }
 
     #[test]

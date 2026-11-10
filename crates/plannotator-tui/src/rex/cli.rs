@@ -10,10 +10,13 @@ use anyhow::{Context, Result};
 use super::command::Rex;
 use super::launch::{self, Gate, Handoff, Review};
 use crate::cli::{USAGE, gated_pane, interactive, last_command, lines_value, wait_on_error};
+use crate::config::RexPlacement;
 use crate::gate::{self, GateError};
 
-/// `plannotator-tui rex open|last|terminal|find`: open a review in a split beside a block. The block
-/// defaults to `REX_BLOCK`, so an agent running this from its own block reviews itself.
+/// `plannotator-tui rex open|last|terminal|find`: open a review beside a block (a split) or
+/// over it (`--placement popup`, or `[rex] placement`). The block defaults to `REX_BLOCK`, so
+/// an agent running this from its own block reviews itself. `rex install` writes the Rex
+/// Annotate module.
 /// `--paste` leaves the feedback in the agent's prompt instead of sending it; `open --gate`
 /// adds Approve, as `herdr open --gate` does. `rex pane` is what the split runs. A gated open
 /// with a result file fails as a [`GateError`], like the direct gate.
@@ -29,6 +32,7 @@ fn launch_review(args: &[String]) -> Result<()> {
         Some("terminal") => Review::Terminal { lines: crate::terminal::DEFAULT_LINES },
         Some("find") => Review::Find { lines: crate::terminal::DEFAULT_LINES },
         Some("pane") => return pane(args.get(1..).unwrap_or_default()),
+        Some("install") => return super::install::run(args.get(1..).unwrap_or_default()),
         _ => anyhow::bail!(USAGE),
     };
     let mut block = None;
@@ -37,12 +41,17 @@ fn launch_review(args: &[String]) -> Result<()> {
     let mut print = false;
     let mut gated = false;
     let mut result_file = None;
+    let mut placement = None;
     let mut rest = args.get(1..).unwrap_or_default().iter();
     while let Some(arg) = rest.next() {
         match (arg.as_str(), &mut review) {
             ("--block", _) => block = Some(rest.next().context("--block needs a value")?.clone()),
             ("--session", _) => session = Some(rest.next().context("--session needs a value")?.clone()),
             ("--paste", _) => handoff = Handoff::Paste,
+            ("--placement", _) => {
+                let value = rest.next().context("--placement needs split or popup")?;
+                placement = Some(value.parse::<RexPlacement>()?);
+            }
             ("--newest", Review::Last { newest }) => *newest = true,
             ("--lines", Review::Terminal { lines } | Review::Find { lines }) => {
                 *lines = lines_value(rest.next())?;
@@ -77,7 +86,11 @@ fn launch_review(args: &[String]) -> Result<()> {
         print!("{}", crate::terminal::document(&super::terminal::read(&rex, &block, *lines)?));
         return Ok(());
     }
-    launch::run(&rex, &block, &review, handoff)
+    let placement = match placement {
+        Some(placement) => placement,
+        None => crate::config::Config::load()?.rex.placement,
+    };
+    launch::run(&rex, &block, &review, handoff, placement)
 }
 
 /// The split's entry point. Rex closes the split when this exits, so an error waits for
@@ -140,6 +153,12 @@ mod tests {
         assert_eq!(err(&["open", "--result-file", "/tmp/x.json"]), "--result-file requires --gate");
         let strict = run(&args(&["open", "--result-file", "/tmp/x.json"])).expect_err("refused");
         assert!(strict.is::<GateError>(), "a result file makes every failure a gate error");
+    }
+
+    #[test]
+    fn a_placement_is_split_or_popup_and_named_when_wrong() {
+        let err = run(&args(&["open", "--placement", "overlay"])).expect_err("refused").to_string();
+        assert!(err.contains("\"overlay\"") && err.contains("split or popup"), "{err}");
     }
 
     #[test]
