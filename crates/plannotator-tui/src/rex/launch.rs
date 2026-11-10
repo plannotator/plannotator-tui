@@ -1,15 +1,16 @@
 //! `plannotator-tui rex last|open|terminal|find`: find the agent in a Rex block and open
-//! plannotator-tui in a split to its right, wired to send feedback back to the block. A split
-//! is an ordinary pane, so it keeps Rex's frame and theme. `foreground`, `argv` and `split`
-//! are pure; only `run` touches Rex.
+//! plannotator-tui beside it (a split) or over it (a popup), wired to send feedback back to
+//! the block. Either is an ordinary pane, so it keeps Rex's frame and theme. `foreground`
+//! and `argv` are pure; only `run` touches Rex.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use super::agent::{AGENT_VAR, BLOCK_VAR, PID_VAR, SUBMIT_VAR};
 use super::command::Rex;
+use crate::config::RexPlacement;
 use crate::herdr::launch::known_host;
 
 /// What the opened pane reviews.
@@ -111,23 +112,6 @@ pub(crate) fn argv(
     Ok(args)
 }
 
-/// The `session.new_split` arguments for `argv`, to the right of `block`, starting in `cwd`.
-pub(crate) fn split(block: &str, cwd: Option<&Path>, argv: &[String]) -> Value {
-    let mut options = serde_json::Map::new();
-    options.insert("shell".to_owned(), json!("none"));
-    options.insert("command".to_owned(), json!(argv));
-    if let Some(cwd) = cwd {
-        options.insert("cwd".to_owned(), json!(cwd.display().to_string()));
-    }
-    json!({
-        "anchor_id": block,
-        "direction": "horizontal",
-        "side": "after",
-        "focus": true,
-        "layout": { "block": { "flavor": "com.superlogical.terminal.shell", "label": "Annotate", "options": options } },
-    })
-}
-
 /// The Markdown file a `Find` names: the newest one in the block's last `lines` lines.
 fn newest_markdown(rex: &Rex, block: &str, fg: &Foreground, lines: u32) -> Result<PathBuf> {
     let text = super::terminal::read(rex, block, lines)?;
@@ -138,8 +122,14 @@ fn newest_markdown(rex: &Rex, block: &str, fg: &Foreground, lines: u32) -> Resul
         .with_context(|| format!("no Markdown file named in the last {lines} lines of block {block}"))
 }
 
-/// Open the review in a split to the right of `block`.
-pub(crate) fn run(rex: &Rex, block: &str, review: &Review, handoff: Handoff) -> Result<()> {
+/// Open the review beside or over `block`.
+pub(crate) fn run(
+    rex: &Rex,
+    block: &str,
+    review: &Review,
+    handoff: Handoff,
+    placement: RexPlacement,
+) -> Result<()> {
     let process = rex.terminal_method(block, "process")?;
     let fg = foreground(&process).with_context(|| format!("block {block} has no foreground process"))?;
     let exe = std::env::current_exe().context("finding the plannotator-tui binary")?;
@@ -148,12 +138,11 @@ pub(crate) fn run(rex: &Rex, block: &str, review: &Review, handoff: Handoff) -> 
         other => other.clone(),
     };
     let args = argv(&exe, block, &fg, &review, handoff)?;
-    rex.api("session.new_split", &split(block, fg.cwd.as_deref(), &args))?;
-    Ok(())
+    super::place::open(rex, block, placement, fg.cwd.as_deref(), &args)
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::indexing_slicing, reason = "tests assert by panicking")]
+#[allow(clippy::expect_used, reason = "tests assert by panicking")]
 mod tests {
     use super::*;
 
@@ -259,15 +248,5 @@ mod tests {
             args,
             ["/usr/bin/env", "/bin/pt", "rex", "pane", "terminal", "--block", "block:b", "--lines", "80"]
         );
-    }
-
-    #[test]
-    fn the_review_opens_to_the_right_of_the_agents_block_and_runs_directly() {
-        let split = split("block:b", Some(Path::new("/tmp")), &["/bin/pt".to_owned()]);
-        assert_eq!(split["anchor_id"], "block:b");
-        assert_eq!((&split["direction"], &split["side"]), (&json!("horizontal"), &json!("after")));
-        assert_eq!(split["layout"]["block"]["options"]["shell"], "none");
-        assert_eq!(split["layout"]["block"]["options"]["command"], json!(["/bin/pt"]));
-        assert_eq!(split["layout"]["block"]["options"]["cwd"], "/tmp");
     }
 }
