@@ -132,7 +132,7 @@ pub(crate) const CONFIRM_QUIT: &[Action] = &[Yes, Confirm, No, Back];
 pub(crate) const CONFIRM_CLEAR: &[Action] = &[Yes, No, Back];
 pub(crate) const MENU: &[Action] =
     &[Down, Up, Confirm, Back, ReviewMenu, Interrupt, ResendAll, FinishReview, UndoFinish, Archive];
-pub(crate) const PICK: &[Action] = &[Down, Up, Confirm, Back, Quit];
+pub(crate) const PICK: &[Action] = &[Down, Up, PageDown, PageUp, Top, Bottom, Confirm, Back, Quit];
 pub(crate) const ARCHIVE: &[Action] = &[Down, Up, Confirm, Back, Archive, Quit, Interrupt];
 
 /// Contexts that read the same keypress: the global keys come first while browsing, and

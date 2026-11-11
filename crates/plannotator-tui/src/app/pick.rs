@@ -100,25 +100,31 @@ impl App {
 
     pub(super) fn pick_key(&mut self, key: KeyEvent) -> Result<()> {
         let last = self.candidates.len().saturating_sub(1);
-        match self.keys.action(&key, keys::PICK) {
-            Some(Action::Down) => {
-                self.pick_cursor = (self.pick_cursor + 1).min(last);
-                return self.show_candidate(self.pick_cursor);
-            }
-            Some(Action::Up) => {
-                self.pick_cursor = self.pick_cursor.saturating_sub(1);
-                return self.show_candidate(self.pick_cursor);
-            }
-            Some(Action::Confirm) => return self.open_candidate(self.pick_cursor),
+        // Half the rows drawn last, as `page-down` moves half a page in the document.
+        let page = (self.geometry.pick_rows.len() / 2).max(1);
+        let cursor = self.pick_cursor;
+        let target = match self.keys.action(&key, keys::PICK) {
+            Some(Action::Down) => (cursor + 1).min(last),
+            Some(Action::Up) => cursor.saturating_sub(1),
+            Some(Action::PageDown) => (cursor + page).min(last),
+            Some(Action::PageUp) => cursor.saturating_sub(page),
+            Some(Action::Top) => 0,
+            Some(Action::Bottom) => last,
+            Some(Action::Confirm) => return self.open_candidate(cursor),
             Some(Action::Back) => {
                 self.show_candidate(self.pick_return)?;
                 self.pick_cursor = self.pick_return;
                 self.mode = Mode::Browse;
+                return Ok(());
             }
-            Some(Action::Quit) => self.quit = true,
-            _ => {}
-        }
-        Ok(())
+            Some(Action::Quit) => {
+                self.quit = true;
+                return Ok(());
+            }
+            _ => return Ok(()),
+        };
+        self.pick_cursor = target;
+        self.show_candidate(target)
     }
 
     pub(super) fn pick_mouse(&mut self, mouse: MouseEvent) -> Result<()> {
