@@ -409,7 +409,9 @@ picker of its recent replies. Hosts: Claude Code, Codex, pi, Oh My Pi, GitHub Co
 Droid, Hermes CLI, OpenCode (1 and 2), Command Code (`cmd`), Antigravity CLI (`agy`). `--host`, `--pid`, `--session <transcript>` (format sniffed when
 no host is named) and `--session-id <id>` (Hermes, OpenCode) override detection; `--stdin`
 reads a document; `--newest` skips the picker and opens the newest reply straight away, with
-`p` still opening the picker on the rest;
+`p` still opening the picker on the rest; the picker offers the 25 newest replies, or as many
+as `pick` under `[last]` in the config file says, also inside Herdr and Rex, and `--pick N` for
+one run;
 `--print` writes the newest reply to stdout and always exits 0 (for hooks and scripts).
 A reply review keeps its annotations in memory only; nothing about it survives the run, but
 the feedback you send or copy is archived like any other (see Feedback archive below).

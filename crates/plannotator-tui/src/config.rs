@@ -56,13 +56,21 @@ impl Default for UiConfig {
     }
 }
 
-/// How `plannotator-tui last` finds a session.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+/// How `plannotator-tui last` finds a session and its messages.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct LastConfig {
     /// Claude Code config dirs to also search for a known session id, in order, for agents
     /// whose `CLAUDE_CONFIG_DIR` does not reach this process. `~/` means the home directory.
     pub(crate) claude_profile_dirs: Vec<String>,
+    /// How many recent messages the picker offers; `--pick` overrides it.
+    pub(crate) pick: usize,
+}
+
+impl Default for LastConfig {
+    fn default() -> Self {
+        Self { claude_profile_dirs: Vec::new(), pick: 25 }
+    }
 }
 
 /// How plannotator-tui opens inside Herdr.
@@ -337,6 +345,12 @@ mod tests {
         assert_eq!(Config::default().last.claude_profile_dirs, Vec::<String>::new());
         let config = Config::parse("[last]\nclaude_profile_dirs = [\"~/b\", \"/a\"]\n").expect("parses");
         assert_eq!(config.last.claude_profile_dirs, ["~/b", "/a"]);
+    }
+
+    #[test]
+    fn the_picker_offers_25_messages_unless_set() {
+        assert_eq!(Config::default().last.pick, 25);
+        assert_eq!(Config::parse("[last]\npick = 60\n").expect("parses").last.pick, 60);
     }
 
     #[test]
