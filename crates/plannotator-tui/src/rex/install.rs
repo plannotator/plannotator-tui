@@ -161,9 +161,9 @@ fn check(module: &str) {
 /// `dir/init.lua` with the `require` line, and the module beside it. `dir` must not exist yet: it
 /// is created private to this user, so nobody else can plant or swap the Lua that Rex then runs.
 fn scratch_config(dir: &Path, module: &str) -> Result<PathBuf> {
-    let mut builder = std::fs::DirBuilder::new();
+    let builder = &mut std::fs::DirBuilder::new();
     #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    std::os::unix::fs::DirBuilderExt::mode(builder, 0o700);
     builder.create(dir).with_context(|| format!("creating {}", dir.display()))?;
     let init = dir.join("init.lua");
     let written = write(&module_path(&init), module, false).and_then(|_| {
