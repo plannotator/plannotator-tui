@@ -44,7 +44,7 @@ pub(crate) struct Document {
 }
 
 /// The option set `tui-markdown` enables, so block boundaries agree with its renderer.
-fn parse_options() -> Options {
+pub(crate) fn parse_options() -> Options {
     Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_HEADING_ATTRIBUTES
