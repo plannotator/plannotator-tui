@@ -27,11 +27,25 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test --prefix pi
       - run: python3 herdr/test-manifest.py
       - run: cargo build --release -p plannotator-tui
       - run: bash herdr/stage-plannotator-tui.sh
       - run: cmp target/release/plannotator-tui herdr/bin/plannotator-tui.exe
       - run: ./herdr/bin/plannotator-tui.exe --version
+
+  pi-macos:
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test --prefix pi
 
   # Same build and smoke test as the musl entry in release.yml, so a break shows up here
   # rather than on release day.

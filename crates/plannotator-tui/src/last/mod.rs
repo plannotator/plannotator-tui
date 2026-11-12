@@ -33,6 +33,8 @@ pub(crate) struct LastOptions {
     pub(crate) session: Option<PathBuf>,
     /// An exact host-specific session id; takes precedence over pid and cwd discovery.
     pub(crate) session_id: Option<String>,
+    /// Explicit Pi branch selection; `Some("")` means the empty branch, unlike `None`.
+    pub(crate) pi_leaf_id: Option<String>,
     /// Read the document from stdin instead of a transcript.
     pub(crate) stdin: bool,
     /// Print the newest message and exit instead of opening the UI.
@@ -44,6 +46,10 @@ pub(crate) struct LastOptions {
 }
 
 pub(crate) fn run(options: &LastOptions) -> Result<()> {
+    anyhow::ensure!(
+        options.pi_leaf_id.is_none() || !options.stdin,
+        "--pi-leaf-id cannot be used with --stdin"
+    );
     if options.stdin {
         let mut text = String::new();
         std::io::stdin().read_to_string(&mut text).context("reading stdin")?;

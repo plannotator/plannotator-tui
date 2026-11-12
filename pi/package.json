@@ -1,0 +1,11 @@
+{
+  "name": "plannotator-tui-pi-session",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "pi": {
+    "extensions": ["./index.js"]
+  }
+}

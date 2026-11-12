@@ -330,7 +330,16 @@ brew trust plannotator/tap && brew install plannotator/tap/plannotator-tui
 plannotator-tui rex install    # writes ~/.config/rex/plannotator/annotate.lua
 ```
 
-Add the line it prints to `~/.config/rex/init.lua`, then reload:
+To review Pi replies, also install the Pi extension:
+
+```sh
+pi install git:github.com/plannotator/plannotator-tui
+```
+
+Restart Pi, or run `/reload` in its TUI. The extension is Unix-only; if its endpoint
+is unavailable, Rex reports an error instead of guessing a session.
+
+Add the line `rex install` prints to `~/.config/rex/init.lua`, then reload:
 
 ```lua
 require("plannotator.annotate").setup{}

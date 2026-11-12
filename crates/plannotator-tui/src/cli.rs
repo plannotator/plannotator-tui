@@ -50,7 +50,7 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui rex pane (open <path> [--gate [--result-file <path>]] | last <last args>
                             | terminal --block <id> [--lines N])
   plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes|opencode|cmd|agy] [--pid N] [--session <transcript>]
-                       [--session-id <id>] [--stdin] [--print] [--pick N] [--newest]";
+                       [--session-id <id>] [--pi-leaf-id <id>] [--stdin] [--print] [--pick N] [--newest]";
 
 /// Width the document gets when nothing else is known: gutter + rail + gap subtracted.
 fn doc_width(cols: u16) -> usize {
@@ -435,6 +435,11 @@ pub(crate) fn last_command(args: &[String]) -> Result<()> {
             }
             "--session-id" => {
                 options.session_id = Some(rest.next().context("--session-id needs a value")?.clone());
+            }
+            "--pi-leaf-id" => {
+                anyhow::ensure!(options.pi_leaf_id.is_none(), "--pi-leaf-id may be used only once");
+                let value = rest.next().filter(|value| !value.starts_with("--"));
+                options.pi_leaf_id = Some(value.context("--pi-leaf-id needs a value")?.clone());
             }
             "--stdin" => options.stdin = true,
             "--print" => options.print = true,
