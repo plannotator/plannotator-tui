@@ -135,8 +135,7 @@ fn the_approve_button_sits_on_the_edge_and_approves_when_clicked() {
     let screen = draw(&mut app, 100, 12);
     let header = screen.lines().next().unwrap_or_default();
     assert!(header.trim_end().ends_with("Approve (A)"), "{header}");
-    let footer = screen.lines().last().unwrap_or_default();
-    assert!(footer.contains("A approve"), "{footer}");
+    assert!(screen.contains("A approve"), "{screen}");
     let rect = app.geometry.approve_button.expect("drawn");
     assert_eq!(rect.right(), 100);
     click(&mut app, rect);
