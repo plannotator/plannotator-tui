@@ -253,3 +253,15 @@ fn the_footer_names_s_only_in_a_reply_review_and_fits_at_80_columns() {
         std::fs::remove_dir_all(root).expect("cleanup");
     }
 }
+
+/// A file just opened at 80 columns keeps its annotation count: the mark hint gives way.
+#[test]
+fn at_80_columns_a_file_review_keeps_its_annotation_count() {
+    let (root, mut app, _) = file_app("count-footer");
+    let footer = draw(&mut app, 80, 24).lines().last().expect("footer").to_owned();
+    assert!(footer.contains(" · 0 annotations · "), "{footer:?}");
+    assert!(!footer.contains("mark"), "{footer:?}");
+    let footer = draw(&mut app, 140, 24).lines().last().expect("footer").to_owned();
+    assert!(footer.contains("a/d mark"), "wide enough for the mark hint: {footer:?}");
+    std::fs::remove_dir_all(root).expect("cleanup");
+}

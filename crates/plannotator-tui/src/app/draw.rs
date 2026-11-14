@@ -454,8 +454,17 @@ impl App {
         if self.viewport(frame.area()).width < RAIL_MIN_TOTAL_WIDTH {
             parts.push("rail hidden: widen to ≥80 cols".into());
         }
-        let help = self.footer_help();
-        let help = if help.is_empty() { String::new() } else { format!("{} ", help.join(" · ")) };
+        // The mark hint is the first to go: at 80 columns it would push the annotation count
+        // off the line.
+        let counted = parts.iter().take(self.status.iter().count() + 2).cloned().collect::<Vec<_>>();
+        let counted = format!(" {} · ", counted.join(" · ")).width();
+        let joined = |help: Vec<String>| {
+            if help.is_empty() { String::new() } else { format!("{} ", help.join(" · ")) }
+        };
+        let mut help = joined(self.footer_help(true));
+        if counted + help.width() > usize::from(area.width) {
+            help = joined(self.footer_help(false));
+        }
         // The status must stay readable at any width, so the key help yields columns to it
         // (and is clipped) rather than the other way round.
         let status_width = self.status.as_ref().map_or(0, |s| s.width() + 1) as u16;
@@ -470,7 +479,7 @@ impl App {
     }
 
     /// The key help for the focused pane, in the user's keys.
-    fn footer_help(&self) -> Vec<String> {
+    fn footer_help(&self, with_marks: bool) -> Vec<String> {
         // Each hint names its action's first key; an unbound action drops out of the line.
         let key = |action, label| self.keys.labelled(action, label);
         let bare = |hint: String| (!hint.is_empty()).then_some(hint);
@@ -500,7 +509,7 @@ impl App {
             .filter(|hint| !hint.is_empty())
             .collect::<Vec<_>>()
             .join("/");
-        let marks = bare(marks).map(|keys| format!("{keys} mark"));
+        let marks = bare(marks).filter(|_| with_marks).map(|keys| format!("{keys} mark"));
         let help: Vec<Option<String>> = match self.focus {
             _ if self.pending.is_some() => vec![
                 key(Action::LooksGood, "looks good"),
