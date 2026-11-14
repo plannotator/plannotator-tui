@@ -283,6 +283,60 @@ fn newest_opens_the_newest_reply_and_leaves_the_picker_on_p() {
 }
 
 #[test]
+fn the_picker_scrolls_to_keep_the_cursor_in_view() {
+    let mut app = picker_of_replies(30);
+    for _ in 0..20 {
+        app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('j')))).expect("j");
+    }
+    let rows = draw_sized(&mut app, 80, 14);
+    let drawn = |app: &App, wanted: usize| {
+        app.geometry.pick_rows.iter().find(|(_, index)| *index == wanted).map(|(rect, _)| *rect)
+    };
+    let cursor = drawn(&app, 20).expect("cursor row drawn");
+    assert!(row(&rows, usize::from(cursor.y)).contains("reply 20"), "{rows:#?}");
+    // A row above the cursor, so a click that opened the cursor's message would fail.
+    let above = drawn(&app, 15).expect("rows above the cursor drawn too");
+    click(&mut app, MouseEventKind::Down(MouseButton::Left), above.x, above.y);
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.doc.source, "reply 15\n");
+}
+
+/// A picker over `count` replies, `reply 0` the newest.
+fn picker_of_replies(count: usize) -> App {
+    use plannotator_tui_hosts::{Message, Role};
+    let messages: Vec<Message> = (0..count)
+        .map(|index| Message {
+            id: format!("m{index}"),
+            role: Role::Assistant,
+            text: format!("reply {index}\n"),
+            at: Some("2026-08-28T12:00:00.000Z".to_owned()),
+        })
+        .collect();
+    let mut app =
+        App::open_message("claude", "/tmp/transcript.jsonl", None, messages, 60, Box::new(Discard), false)
+            .expect("opens");
+    app.data_dir = scratch_data_dir();
+    app
+}
+
+#[test]
+fn page_keys_move_the_picker_half_a_list_and_home_and_end_to_either_end() {
+    let mut app = picker_of_replies(30);
+    draw_sized(&mut app, 80, 14);
+    let page = app.geometry.pick_rows.len() / 2;
+    assert!(page > 1, "the list shows a few rows");
+    let mut press = |code: KeyCode| {
+        app.handle_event(&Event::Key(KeyEvent::from(code))).expect("key");
+        (app.pick_cursor, app.open.doc.source.clone())
+    };
+    assert_eq!(press(KeyCode::PageDown), (page, format!("reply {page}\n")), "the preview follows");
+    assert_eq!(press(KeyCode::PageUp).0, 0);
+    assert_eq!(press(KeyCode::End), (29, "reply 29\n".to_owned()));
+    assert_eq!(press(KeyCode::PageDown).0, 29, "paging stops at the oldest");
+    assert_eq!(press(KeyCode::Home).0, 0);
+}
+
+#[test]
 fn moving_the_picker_cursor_previews_that_message() {
     let mut app = message_app(None, Box::new(Discard));
     assert_eq!(app.open.doc.source, "# Third\n\nnewest message\n", "the newest opens behind the picker");

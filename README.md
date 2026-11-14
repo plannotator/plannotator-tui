@@ -291,8 +291,8 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `up` `down` `left` `right` | `k` `j` `h` `l`, arrows | move; `left`/`right` in the document start the cursor, `right` in the tree opens |
 | `word-forward` `word-back` `word-end` | `w` `b` `e` | cursor to the next or previous word's start, or the next word's end |
 | `line-start` `line-end` | `0` `$`, `Home` `End` | cursor to the start or end of the line |
-| `page-down` `page-up` | `ctrl+d` `ctrl+u`, `PageDown` `PageUp` | half a page |
-| `top` `bottom` | `g` `G`, `Home` `End` | first or last block |
+| `page-down` `page-up` | `ctrl+d` `ctrl+u`, `PageDown` `PageUp` | half a page, of the document or the message picker |
+| `top` `bottom` | `g` `G`, `Home` `End` | first or last block, or message in the picker |
 | `confirm` `back` | `Enter` `Esc` | finish, open, run; cancel, close |
 | `quit` `interrupt` | `q` `ctrl+c` | quit |
 | `cycle-focus` | `Tab` | tree · document · notes |
