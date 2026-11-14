@@ -188,10 +188,13 @@ const fn named(code: KeyCode) -> Key {
 }
 
 impl Key {
-    /// A plain binding ignores modifiers, as a shifted letter arrives with Shift set; a Ctrl
-    /// binding needs Ctrl alone.
+    /// A Ctrl binding needs Ctrl alone. A plain binding allows Shift, as a shifted letter
+    /// arrives with Shift set, but not Ctrl; Ctrl with Alt still counts as plain, because
+    /// Windows reports `AltGr` that way and `AltGr` types ordinary characters.
     fn matches(self, key: &KeyEvent) -> bool {
-        self.code == key.code && (!self.ctrl || key.modifiers == KeyModifiers::CONTROL)
+        let ctrl_or_alt = key.modifiers & (KeyModifiers::CONTROL | KeyModifiers::ALT);
+        let held_ctrl = ctrl_or_alt == KeyModifiers::CONTROL;
+        self.code == key.code && if self.ctrl { key.modifiers == KeyModifiers::CONTROL } else { !held_ctrl }
     }
 
     /// How the in-app hints spell the key: `j`, `G`, `enter`, `ctrl+d`.
@@ -336,25 +339,9 @@ impl<'de> Deserialize<'de> for Keymap {
 }
 
 impl Keymap {
-    /// The first action in `context` bound to `key`. A plain binding also matches the key
-    /// with Ctrl held, so an exact Ctrl binding is tried first: `page-up = ["ctrl+k"]` must
-    /// not lose `ctrl+k` to `up`'s plain `k` just because `up` comes first.
+    /// The first action in `context` bound to `key`.
     pub(crate) fn action(&self, key: &KeyEvent, context: &[Action]) -> Option<Action> {
-        let exact_ctrl = |action| self.keys(action).iter().any(|k| k.ctrl && k.matches(key));
-        context
-            .iter()
-            .copied()
-            .find(|&action| exact_ctrl(action))
-            .or_else(|| context.iter().copied().find(|&action| self.is(action, key)))
-    }
-
-    /// `action`, except a plain binding does not answer with Ctrl held: `ctrl+d` pages, it
-    /// does not mark. Ctrl with Alt still counts as plain, because Windows reports `AltGr`
-    /// that way and `AltGr` types ordinary characters.
-    pub(crate) fn action_without_ctrl_leak(&self, key: &KeyEvent, context: &[Action]) -> Option<Action> {
-        let held_ctrl = key.modifiers & (KeyModifiers::CONTROL | KeyModifiers::ALT) == KeyModifiers::CONTROL;
-        self.action(key, context)
-            .filter(|&action| !held_ctrl || self.keys(action).iter().any(|k| k.ctrl && k.matches(key)))
+        context.iter().copied().find(|&action| self.is(action, key))
     }
 
     pub(crate) fn is(&self, action: Action, key: &KeyEvent) -> bool {

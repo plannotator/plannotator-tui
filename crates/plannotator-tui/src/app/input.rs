@@ -2,7 +2,9 @@
 
 use anyhow::Result;
 use plannotator_tui_schema::Kind;
-use ratatui::crossterm::event::{Event, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{
+    Event, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::text::Line;
 use unicode_width::UnicodeWidthChar;
 
@@ -80,7 +82,7 @@ impl App {
             Some(Action::QuickOpen) if self.tree.is_none() => {
                 let others: Vec<Action> =
                     keys::GLOBAL.iter().copied().filter(|&action| action != Action::QuickOpen).collect();
-                self.keys.action(&key, &others)
+                self.keys.action(&KeyEvent::new(key.code, KeyModifiers::NONE), &others)
             }
             action => action,
         };
@@ -267,10 +269,8 @@ impl App {
                 return Ok(());
             }
         }
-        let action = self
-            .keys
-            .action(&key, keys::DOCUMENT)
-            .or_else(|| self.keys.action_without_ctrl_leak(&key, keys::BLOCK_MARKS));
+        let action =
+            self.keys.action(&key, keys::DOCUMENT).or_else(|| self.keys.action(&key, keys::BLOCK_MARKS));
         match action {
             Some(Action::Back) => {
                 if self.pending.is_some() || self.selection.is_some() {
@@ -346,7 +346,6 @@ impl App {
                     sel.set_head(self.cursor);
                 }
             }
-            _ if self.keys.action_without_ctrl_leak(&key, keys::TOOLBAR).is_none() => {}
             _ => {
                 if self.keys.action(&key, keys::TOOLBAR) == Some(Action::CopySelection) {
                     self.finish_selection();
