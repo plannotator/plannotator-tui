@@ -567,6 +567,166 @@ fn pasting_into_the_comment_box_keeps_newlines() {
 }
 
 #[test]
+fn a_title_too_long_for_the_box_continues_on_its_bottom_border() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 3)).expect("click");
+    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    app.handle_event(&Event::Paste("draft".to_owned())).expect("paste");
+    let rows = draw(&mut app);
+    let title = rows.iter().position(|r| r.contains("enter saves")).expect("title row");
+    assert!(row(&rows, title).contains("alt+enter new line"), "{rows:#?}");
+    assert!(row(&rows, title + 1).contains("draft"), "{rows:#?}");
+    assert!(row(&rows, title + 2).contains("esc cancels"), "{rows:#?}");
+}
+
+#[test]
+fn up_and_down_move_by_row_for_keys_queued_before_the_box_is_first_drawn() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 3)).expect("click");
+    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    app.handle_event(&Event::Paste("word ".repeat(12))).expect("paste");
+    app.handle_event(&key(KeyCode::Up, KeyModifiers::NONE)).expect("up");
+    assert_eq!(app.compose.wrapped(44).1, 0, "up left the second row");
+}
+
+#[test]
+fn the_cursor_shows_past_the_last_character_of_a_full_row() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 3)).expect("click");
+    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    draw(&mut app);
+    let full = "a".repeat(app.geometry.compose_wrap);
+    app.handle_event(&Event::Paste(full.clone())).expect("paste");
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 20)).expect("terminal");
+    terminal.draw(|frame| app.draw(frame)).expect("draw");
+    let cursor = terminal.get_cursor_position().expect("cursor");
+    let buffer = terminal.backend().buffer();
+    let text_row: String = (0..buffer.area.width)
+        .filter_map(|x| buffer.cell((x, cursor.y)))
+        .map(|cell| cell.symbol().to_owned())
+        .collect();
+    let start = text_row.find(&full).expect("the full row is drawn whole");
+    let text_start = text_row.get(..start).unwrap_or_default().chars().count();
+    assert_eq!(usize::from(cursor.x), text_start + full.len());
+}
+
+#[test]
+fn a_wide_comment_box_keeps_its_title_on_one_row_and_wraps_to_its_width() {
+    let mut app = app(Box::new(Discard));
+    app.ui.comment_width = 60;
+    let wide = |app: &mut App| crate::app::review_test_support::draw(app, 200, 30);
+    wide(&mut app);
+    app.handle_event(&click_at(5, 3)).expect("click");
+    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    let screen = wide(&mut app);
+    assert_eq!(app.geometry.compose_wrap, 56);
+    assert!(screen.lines().any(|r| r.contains("enter saves") && r.contains("esc cancels")), "{screen}");
+}
+
+#[test]
+fn a_narrow_pane_narrows_the_comment_box_and_its_wrapping_with_it() {
+    let mut app = app(Box::new(Discard));
+    app.ui.comment_width = 500;
+    draw(&mut app);
+    app.handle_event(&click_at(5, 3)).expect("click");
+    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    draw(&mut app);
+    assert_eq!(app.geometry.compose_wrap, usize::from(app.geometry.doc.width) - 4);
+}
+
+#[test]
+fn esc_on_a_typed_comment_asks_before_discarding_it() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 3)).expect("click");
+    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    app.handle_event(&Event::Paste("draft".to_owned())).expect("paste");
+
+    let press = |app: &mut App, code| app.handle_event(&key(code, KeyModifiers::NONE)).expect("key");
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.mode, Mode::Compose);
+    let rows = draw(&mut app);
+    assert!(rows.iter().any(|r| r.contains("discard comment? y discard")), "{rows:?}");
+    assert!(rows.iter().any(|r| r.contains("draft")), "the draft stays visible: {rows:?}");
+
+    // Neither a second Esc nor Enter nor a stray letter loses or changes the draft.
+    press(&mut app, KeyCode::Char('x'));
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.mode, Mode::Compose);
+    assert_eq!(app.compose.value(), "draft");
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.mode, Mode::Compose);
+    press(&mut app, KeyCode::Char('x'));
+    assert_eq!(app.compose.value(), "draftx", "esc returned to editing");
+
+    press(&mut app, KeyCode::Esc);
+    press(&mut app, KeyCode::Char('n'));
+    assert_eq!(app.mode, Mode::Compose);
+    assert_eq!(app.compose.value(), "draftx", "n returned to editing");
+
+    press(&mut app, KeyCode::Esc);
+    press(&mut app, KeyCode::Char('y'));
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.store.len(), 0, "the draft was discarded, not saved");
+}
+
+#[test]
+fn esc_closes_at_once_when_there_is_nothing_to_lose() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 3)).expect("click");
+    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    assert_eq!(app.mode, Mode::Browse);
+}
+
+#[test]
+fn esc_on_an_edit_asks_only_once_the_body_changed() {
+    let mut app = app(Box::new(Discard));
+    app.add_block_annotation(0, Kind::Comment, "body".to_owned()).expect("annotation");
+    app.edit_selected_annotation();
+    assert!(matches!(app.mode, Mode::Edit(_)));
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    assert_eq!(app.mode, Mode::Browse, "an untouched edit closes at once");
+
+    app.edit_selected_annotation();
+    app.handle_event(&key(KeyCode::Char('!'), KeyModifiers::NONE)).expect("type");
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    assert!(matches!(app.mode, Mode::Edit(_)), "a changed edit asks first");
+    let rows = draw(&mut app);
+    assert!(rows.iter().any(|r| r.contains("discard edit? y discard")), "{rows:?}");
+    app.handle_event(&key(KeyCode::Char('y'), KeyModifiers::NONE)).expect("yes");
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.store.placed().first().expect("note").annotation.body, "body");
+}
+
+#[test]
+fn a_paste_during_the_discard_question_returns_to_editing() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 3)).expect("click");
+    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    app.handle_event(&Event::Paste("draft".to_owned())).expect("paste");
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    app.handle_event(&Event::Paste(" more".to_owned())).expect("paste");
+    app.handle_event(&key(KeyCode::Char('y'), KeyModifiers::NONE)).expect("type");
+    assert_eq!(app.mode, Mode::Compose);
+    assert_eq!(app.compose.value(), "draft morey");
+}
+
+#[test]
 fn roaming_moves_by_row_so_a_selection_can_start_mid_block() {
     // A paragraph with a hard break (two rows), then a list: in block mode `j` from the top lands on "- one",
     // roaming lands on "second line" of the same block.

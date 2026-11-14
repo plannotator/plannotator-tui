@@ -100,6 +100,7 @@ dimmed. The keys also work without opening the menu.
 | gated review | `A` approve; `E` send and finish; `q` dismiss |
 | document | `j`/`k` block; `c` comment on the block; `a` looks good; `d` delete; `x` clear its annotations; `X` clear every annotation on the document, after a `y`; `v` select with `hjkl` `w` `b` `e` `0` `$`, then `a`, `c` or `d` to act on it, `y` to copy it, or `Enter` for the toolbar; `V` select whole rows; `i` move the cursor with those keys first, then `v` to select from there; `I`/`D` attach or remove an image on the block's note |
 | toolbar | `a` looks good · `c` comment · `d` delete · `y` copy · `Esc` |
+| comment box | `Enter` save; `Shift+Enter`, `Alt+Enter` or `Ctrl+J` new line; `↑`/`↓` move by display row; `Ctrl+←`/`Ctrl+→`, `Alt+←`/`Alt+→` or `Alt+B`/`Alt+F` jump by word; `Ctrl+A`/`Ctrl+E` line start/end; `Ctrl+W`, `Alt+Backspace` or `Ctrl+Backspace` delete the previous word; `Alt+D` or `Ctrl+Delete` delete the next word; `Ctrl+U`/`Ctrl+K` delete to line start/end; `Esc` cancel, asking first if the text changed |
 | notes | `j`/`k`; `e` edit; `x` remove; `I` attach an image, `D` remove the last; click a bubble |
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
@@ -255,6 +256,14 @@ horizontal_margin = 2    # blank columns on each side
 All three default to `0`, which fills the terminal as before. The margin and `max_width`
 yield before the app drops below 80 columns, so a narrow pane keeps its notes rail; a
 narrow pane also lets the document shrink below `doc_width`.
+
+The comment box is 48 columns wide. `comment_width` changes that, down to a minimum of 38,
+and a narrower pane still narrows it:
+
+```toml
+[ui]
+comment_width = 72
+```
 
 A mouse selection is copied to the clipboard when you release the button. To leave the
 clipboard alone, as with Herdr's `ui.copy_on_select = false`, turn it off and press `y` on
