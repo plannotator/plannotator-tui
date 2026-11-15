@@ -36,12 +36,14 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui --annotate <file.md> <quote> <text> [comment|looks_good|delete] [--occurrence N]
   plannotator-tui --annotate-block <file.md> <block> <text>
   plannotator-tui --snapshot <file.md> [cols rows scroll] [select-quote] [menu]
+  plannotator-tui review [--staged | --base REF | --commit SHA] [DIR]
   plannotator-tui config
   plannotator-tui --version
   plannotator-tui herdr open [file.md | folder] [--placement overlay|split|popup] [--deliver-to <pane>]
                              [--gate] [--result-file <path>]
   plannotator-tui herdr last [--placement P] [--deliver-to <pane>] [--newest]
   plannotator-tui herdr terminal [--lines N] [--placement P] [--deliver-to <pane>] [--print]
+  plannotator-tui herdr review [--staged | --base REF | --commit SHA] [--placement P] [--deliver-to <pane>]
   plannotator-tui herdr pane
   plannotator-tui rex open [file.md | folder] [--block <id>] [--session <id>] [--paste]
                            [--placement split|popup] [--gate] [--result-file <path>]
@@ -176,7 +178,7 @@ fn wants_decision(args: &[String]) -> bool {
         Some(first) if decision_flag(first) => true,
         Some(first)
             if first.starts_with('-')
-                || matches!(first.as_str(), "config" | "herdr" | "rex" | "hc" | "pi" | "last") =>
+                || matches!(first.as_str(), "config" | "herdr" | "rex" | "hc" | "pi" | "last" | "review") =>
         {
             false
         }
@@ -235,9 +237,24 @@ fn tool(args: &[String]) -> Result<()> {
         Some("hc") => crate::hc::cli::run(args.get(1..).unwrap_or_default()),
         Some("pi") => crate::pi::cli::run(args.get(1..).unwrap_or_default()),
         Some("last") => last_command(args.get(1..).unwrap_or_default()),
+        Some("review") => code_review(args.get(1..).unwrap_or_default()),
         Some(flag) if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{USAGE}"),
         Some(_) => interactive(&path(0)?),
         None => anyhow::bail!(USAGE),
+    }
+}
+
+/// `plannotator-tui review [--staged | --base REF | --commit SHA] [DIR]`: a git diff, with notes
+/// for the agent (`src/review/`).
+fn code_review(args: &[String]) -> Result<()> {
+    #[cfg(unix)]
+    {
+        crate::review::cli::run(args)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = args;
+        anyhow::bail!("code review is not available on Windows yet")
     }
 }
 
@@ -320,6 +337,9 @@ fn herdr_launch(args: &[String]) -> Result<()> {
     }
     if sub == Some("terminal") {
         return herdr_terminal(args.get(1..).unwrap_or_default());
+    }
+    if sub == Some("review") {
+        return herdr_review(args.get(1..).unwrap_or_default());
     }
     if !matches!(sub, Some("open" | "last")) {
         anyhow::bail!(USAGE);
@@ -413,6 +433,32 @@ fn herdr_terminal(args: &[String]) -> Result<()> {
     run(&env, &launch)
 }
 
+/// `plannotator-tui herdr review …`: a code review of the focused pane's repository.
+fn herdr_review(args: &[String]) -> Result<()> {
+    #[cfg(unix)]
+    {
+        crate::review::herdr::launch(args)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = args;
+        anyhow::bail!("code review is not available on Windows yet")
+    }
+}
+
+/// The pane side of [`herdr_review`].
+fn review_pane(scope: &str, repo: Option<&Path>) -> Result<()> {
+    #[cfg(unix)]
+    {
+        crate::review::herdr::pane(scope, repo)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (scope, repo);
+        anyhow::bail!("code review is not available on Windows yet")
+    }
+}
+
 /// The pane entrypoint: Herdr runs this in the opened pane; the environment says what to show.
 fn herdr_pane() -> Result<()> {
     let env = HerdrEnv::from_env();
@@ -428,6 +474,8 @@ fn herdr_pane() -> Result<()> {
             newest: env.newest,
             ..crate::last::LastOptions::default()
         })
+    } else if let Some(scope) = &env.review {
+        review_pane(scope, env.repo.as_deref())
     } else {
         let path = env.file.clone().unwrap_or(std::env::current_dir().context("current directory")?);
         if env.gate { gated_pane(&path, env.result_file.as_deref()) } else { interactive(&path) }
@@ -518,6 +566,30 @@ pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
 
 /// `run_ui`, returning how a gated review ended; `None` for an ordinary one.
 fn run_review(build: impl FnOnce(usize) -> Result<App>) -> Result<Option<Decision>> {
+    with_terminal(|terminal, session| {
+        let width = doc_width(terminal.size().map_or(120, |s| s.width));
+        let mut app = build(width)?;
+        app.shift_enter = session.shift_enter;
+        app.keys = session.config.keys;
+        app.ui = session.config.ui;
+        app.editor = crate::editor::from_env(|key| std::env::var(key).ok());
+        event_loop(terminal, app)
+    })
+}
+
+/// What a screen learns while the terminal is being taken over.
+pub(crate) struct Session {
+    pub(crate) config: Config,
+    /// Whether the terminal reports Shift+Enter distinctly (kitty keyboard protocol).
+    pub(crate) shift_enter: bool,
+}
+
+/// Own the terminal for `run`: palette, alternate screen, mouse, paste and keyboard modes
+/// on the way in, all of it undone on the way out, whatever `run` returns. Document and
+/// code reviews both start here.
+pub(crate) fn with_terminal<T>(
+    run: impl FnOnce(&mut ratatui::DefaultTerminal, Session) -> Result<T>,
+) -> Result<T> {
     // Settle the palette before the screen is ours: the background-colour query talks to
     // the terminal directly, and it must not race the alternate screen or the event loop.
     // A config that fails to parse never kept the plain TUI from starting; it still does
@@ -536,14 +608,7 @@ fn run_review(build: impl FnOnce(usize) -> Result<App>) -> Result<Option<Decisio
     // gates the compose box's hint so it never advertises a key that cannot arrive.
     let shift_enter = ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
     claim_input(shift_enter);
-    let width = doc_width(terminal.size().map_or(120, |s| s.width));
-    let result = build(width).and_then(|mut app| {
-        app.shift_enter = shift_enter;
-        app.keys = config.keys;
-        app.ui = config.ui;
-        app.editor = crate::editor::from_env(|key| std::env::var(key).ok());
-        event_loop(&mut terminal, app)
-    });
+    let result = run(&mut terminal, Session { config, shift_enter });
     release_input(shift_enter);
     ratatui::restore();
     result

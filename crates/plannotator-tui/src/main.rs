@@ -21,12 +21,15 @@ mod keys;
 mod last;
 mod layout;
 mod pi;
+#[cfg(unix)]
+mod review;
 mod rex;
 mod srcmap;
 mod store;
 mod terminal;
 mod theme;
 mod tree;
+mod ui;
 mod workspace_paths;
 mod wrap;
 

@@ -35,6 +35,25 @@ impl std::fmt::Display for DeliveryError {
     }
 }
 
+impl DeliveryError {
+    /// Whether the feedback should go to the clipboard instead: the agent is at a dialog or
+    /// gone, so the person can paste it themselves. A failed transport copies nothing.
+    pub(crate) fn wants_copy(&self) -> bool {
+        matches!(self, Self::Blocked(_) | Self::Unavailable(_))
+    }
+
+    /// What the footer says about a send that did not land: `copied` when the text went to
+    /// the clipboard instead, and `retry` the key that tries again.
+    pub(crate) fn status(&self, target: &str, copied: bool, retry: char) -> String {
+        let copied = if copied { " · copied to clipboard" } else { "" };
+        match self {
+            Self::Blocked(_) => format!("{target} is at a dialog{copied} · {retry} retry"),
+            Self::Unavailable(msg) => format!("no agent to send to ({msg}){copied} · {retry} retry"),
+            Self::Failed(err) => format!("send failed: {err:#} · {retry} retry"),
+        }
+    }
+}
+
 impl From<std::io::Error> for DeliveryError {
     fn from(err: std::io::Error) -> Self {
         Self::Failed(err.into())

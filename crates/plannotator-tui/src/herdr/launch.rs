@@ -1,5 +1,5 @@
-//! `plannotator-tui herdr open`: resolve what to open, where feedback goes, and how the pane is
-//! placed, then run `herdr plugin pane open`. One command for humans (manifest actions)
+//! `plannotator-tui herdr open` (and `last`, `terminal`, `review`): resolve what to open, where
+//! feedback goes, and how the pane is placed, then run `herdr plugin pane open`. One command for humans (manifest actions)
 //! and agents (the skill). `plan` and `argv` are pure; only `run` touches a process.
 
 use std::path::{Path, PathBuf};
@@ -52,6 +52,8 @@ pub(crate) struct Launch {
     /// A gated review of `file`, and where its decision is published.
     pub(crate) gate: bool,
     pub(crate) result_file: Option<PathBuf>,
+    /// A code review of the repository at `file`, in this scope (`PLANNOTATOR_TUI_REVIEW`).
+    pub(crate) review: Option<String>,
 }
 
 /// Which pane's output the opened pane reads, and how much of it.
@@ -299,7 +301,37 @@ pub(crate) fn plan(env: &HerdrEnv, config: &Config, args: OpenArgs, cwd: &Path) 
         terminal: None,
         gate: args.gate,
         result_file: args.result_file,
+        review: None,
     })
+}
+
+#[cfg_attr(not(unix), allow(dead_code, reason = "code review is unix only"))]
+/// The folder `herdr review` looks for a repository in: the focused pane's, else the
+/// workspace's, else the launcher's own.
+pub(crate) fn review_folder(env: &HerdrEnv, cwd: &Path) -> PathBuf {
+    let context = env.context.as_ref();
+    context
+        .and_then(|c| c.focused_pane_cwd.clone())
+        .or_else(|| context.and_then(|c| c.workspace_cwd.clone()))
+        .map_or_else(|| cwd.to_path_buf(), PathBuf::from)
+}
+
+#[cfg_attr(not(unix), allow(dead_code, reason = "code review is unix only"))]
+/// Resolve a `review` launch of the repository at `root` (already checked to have changes)
+/// in `scope`. Delivery and placement resolve as for `open`.
+pub(crate) fn plan_review(
+    env: &HerdrEnv,
+    config: &Config,
+    args: OpenArgs,
+    root: &Path,
+    scope: String,
+) -> Result<Launch> {
+    let args =
+        OpenArgs { path: Some(root.to_path_buf()), newest: false, gate: false, result_file: None, ..args };
+    let mut launch = plan(env, config, args, root)?;
+    launch.cwd = root.to_path_buf();
+    launch.review = Some(scope);
+    Ok(launch)
 }
 
 /// The `herdr` arguments for a launch.
@@ -347,6 +379,10 @@ pub(crate) fn argv(launch: &Launch) -> Vec<String> {
                 }
                 None => {}
             }
+        }
+        (None, None) if let Some(scope) = &launch.review => {
+            out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_REVIEW={scope}")]);
+            out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_REPO={}", launch.file.display())]);
         }
         (None, None) => {
             out.extend(["--env".to_owned(), format!("PLANNOTATOR_TUI_FILE={}", launch.file.display())]);

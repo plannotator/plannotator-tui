@@ -70,6 +70,21 @@ pub(crate) struct AgentTarget {
     pub(crate) transcript: Option<String>,
 }
 
+/// The reviewed changeset of a code review (`FeedbackReviewTarget`): the refs that
+/// regenerate the diff, never the patch itself.
+#[cfg_attr(not(unix), allow(dead_code, reason = "only the code review sends one"))]
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReviewTarget {
+    pub(crate) vcs_type: &'static str,
+    pub(crate) diff_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) base: Option<String>,
+    pub(crate) cwd: String,
+    pub(crate) changed_files: usize,
+    pub(crate) patch_bytes: usize,
+}
+
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Target {
@@ -77,6 +92,8 @@ pub(crate) struct Target {
     pub(crate) file_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) agent: Option<AgentTarget>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) review: Option<ReviewTarget>,
 }
 
 impl Target {
@@ -91,13 +108,19 @@ impl Target {
         }
     }
 
+    #[cfg_attr(not(unix), allow(dead_code, reason = "only the code review sends one"))]
+    pub(crate) fn review(review: ReviewTarget) -> Self {
+        Self { review: Some(review), ..Self::default() }
+    }
+
     fn is_empty(&self) -> bool {
-        self.file_path.is_none() && self.agent.is_none()
+        self.file_path.is_none() && self.agent.is_none() && self.review.is_none()
     }
 }
 
-/// One submitted annotation, in the archive's lenient shallow shape.
-#[derive(Debug, Serialize)]
+/// One submitted annotation, in the archive's lenient shallow shape. A code-review note
+/// fills the file, line and side fields; a document note leaves them out.
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AnnotationRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -108,6 +131,18 @@ pub(crate) struct AnnotationRecord {
     pub(crate) text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) original_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) line_start: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) line_end: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) side: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) author: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -338,6 +373,7 @@ mod tests {
                 kind: Some("comment".to_owned()),
                 text: Some("tighten this".to_owned()),
                 original_text: Some("the selected text".to_owned()),
+                ..AnnotationRecord::default()
             }],
             count: 1,
             images: 0,

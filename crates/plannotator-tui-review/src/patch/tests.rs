@@ -179,3 +179,15 @@ fn header_paths_are_read_when_there_are_no_file_lines() {
 fn an_empty_patch_has_no_files() {
     assert_eq!(parse(""), []);
 }
+
+#[test]
+fn lines_walk_one_side_in_order() {
+    let files = files();
+    let added = file(&files, "added.txt");
+    assert_eq!(added.lines(Side::New).collect::<Vec<_>>(), [(1, "brand"), (2, "new")]);
+    assert_eq!(added.lines(Side::Old).count(), 0);
+    let code = file(&files, "code.rs");
+    let old: Vec<u32> = code.lines(Side::Old).map(|(n, _)| n).collect();
+    assert!(old.is_sorted(), "ascending: {old:?}");
+    assert_eq!(code.lines(Side::Old).find(|(_, text)| text.contains("two")), Some((3, "    two();")));
+}

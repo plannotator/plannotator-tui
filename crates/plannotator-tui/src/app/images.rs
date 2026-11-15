@@ -9,8 +9,8 @@ use anyhow::{Result, bail};
 use plannotator_tui_schema::Provenance;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::compose::{Compose, ComposeAction};
 use super::{App, Focus, Mode};
+use crate::ui::compose::{Compose, ComposeAction};
 use crate::workspace_paths;
 
 /// Extensions accepted as images, lowercase.

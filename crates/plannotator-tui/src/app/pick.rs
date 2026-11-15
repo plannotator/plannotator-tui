@@ -15,11 +15,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr as _;
 
-use super::draw::picker_help;
 use super::{App, Mode, Open};
 use crate::keys::{self, Action};
 use crate::last::message_source;
 use crate::theme::palette;
+use crate::ui::hints::picker as picker_help;
 
 const PICK_MAX_WIDTH: u16 = 90;
 

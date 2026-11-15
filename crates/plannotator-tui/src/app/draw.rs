@@ -14,6 +14,7 @@ use super::{App, Focus, GUTTER, Geometry, Mode, TOOLBAR, glyph, label};
 use crate::gate::Gate;
 use crate::keys::Action;
 use crate::theme::palette;
+use crate::ui::compose;
 use crate::wrap::wrap_line;
 
 const RAIL_WIDTH: u16 = 36;
@@ -39,28 +40,6 @@ fn priority(kind: Kind) -> u8 {
         Kind::LooksGood => 1,
         Kind::Delete => 2,
     }
-}
-
-/// Compose box columns not used for wrapping text: two borders, one of left padding, and one
-/// so the cursor can sit past the last character of a full row.
-const COMPOSE_CHROME: u16 = 4;
-const FOOTER_MAX_ROWS: usize = 3;
-
-/// Split a ` · `-separated title into what fits `width` columns on the box's top border,
-/// spaces included, and the rest for the bottom border, empty when it all fits.
-fn split_title(title: &str, width: usize) -> (String, String) {
-    const SEPARATOR: &str = " \u{b7} ";
-    let mut first = String::new();
-    let mut rest: Vec<&str> = Vec::new();
-    for part in title.trim().split(SEPARATOR) {
-        let joined = if first.is_empty() { part.to_owned() } else { format!("{first}{SEPARATOR}{part}") };
-        if first.is_empty() || (rest.is_empty() && joined.width() + 2 <= width) {
-            first = joined;
-        } else {
-            rest.push(part);
-        }
-    }
-    (format!(" {first} "), rest.join(SEPARATOR))
 }
 
 impl App {
@@ -305,19 +284,9 @@ impl App {
         self.geometry.toolbar = Some((rect, spans));
     }
 
-    /// The compose box title; the Shift+Enter hint appears only when the terminal
-    /// actually distinguishes it, so the hint is never a lie.
+    /// The compose box title, or its discard question.
     fn compose_title(&self, verb: &str) -> String {
-        if self.confirm_discard {
-            let answers = [(Action::Yes, "discard"), (Action::No, "keep editing")]
-                .into_iter()
-                .filter_map(|(action, label)| self.keys.labelled(action, label))
-                .collect::<Vec<_>>()
-                .join(" \u{b7} ");
-            return format!(" discard {verb}? {answers} ");
-        }
-        let newline = if self.shift_enter { "shift+enter new line" } else { "alt+enter new line" };
-        format!(" {verb} \u{b7} enter saves \u{b7} {newline} \u{b7} esc cancels ")
+        self.compose.heading(verb, self.shift_enter, &self.keys)
     }
 
     /// `[ui] comment_width`, raised to where the title still fits on the box's two borders.
@@ -329,7 +298,7 @@ impl App {
     /// its first frame, as configured.
     pub(super) fn compose_wrap(&self) -> usize {
         match self.geometry.compose_wrap {
-            0 => usize::from(self.compose_width().saturating_sub(COMPOSE_CHROME)),
+            0 => usize::from(self.compose_width().saturating_sub(compose::CHROME)),
             drawn => drawn,
         }
     }
@@ -348,39 +317,10 @@ impl App {
 
     fn draw_compose(&mut self, frame: &mut Frame, title: &str) {
         let width = self.compose_rect(frame.area(), 1).width;
-        let wrap_width = usize::from(width.saturating_sub(COMPOSE_CHROME));
+        let wrap_width = usize::from(width.saturating_sub(compose::CHROME));
         self.geometry.compose_wrap = wrap_width;
-        let (lines, cursor_row, cursor_col) = self.compose.wrapped(wrap_width);
-        let (title, title_rest) = split_title(title, usize::from(width.saturating_sub(2)));
-        let content_rows = lines.len().clamp(1, 8);
-        let height = content_rows as u16 + 2;
-        let rect = self.compose_rect(frame.area(), height);
-        frame.render_widget(Clear, rect);
-        let title_style = if self.confirm_discard { Style::new().bold() } else { Style::new().dim() };
-        let mut boxed = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::new().fg(palette().comment))
-            .title(Span::styled(title, title_style));
-        if !title_rest.is_empty() {
-            boxed = boxed.title_bottom(Span::styled(format!(" {title_rest} "), title_style));
-        }
-        let inner = boxed.inner(rect);
-        frame.render_widget(boxed, rect);
-        // Keep the cursor's row visible when the comment is taller than the box.
-        let scroll = cursor_row.saturating_sub(content_rows - 1);
-        for (i, line) in lines.iter().skip(scroll).take(content_rows).enumerate() {
-            let row = Rect {
-                x: inner.x + 1,
-                y: inner.y + i as u16,
-                width: inner.width.saturating_sub(1),
-                height: 1,
-            };
-            frame.render_widget(Paragraph::new(Line::from(line.clone())), row);
-        }
-        let cursor_x = inner.x + 1 + cursor_col as u16;
-        let cursor_y = inner.y + (cursor_row - scroll) as u16;
-        frame.set_cursor_position((cursor_x.min(inner.right().saturating_sub(1)), cursor_y));
+        let rect = self.compose_rect(frame.area(), compose::height(&self.compose, wrap_width));
+        compose::draw(frame, rect, &self.compose, title);
     }
 
     fn edit_origin(&self, height: u16, width: u16) -> Option<Rect> {
@@ -563,7 +503,7 @@ impl App {
         // One column stays free after the hints, and one between them and the text.
         let width = usize::from(viewport_width).saturating_sub(undo + 1);
         let beside_text = width.saturating_sub(text.width() + 1);
-        (text, flow_hints(&self.footer_help(), width, beside_text))
+        (text, crate::ui::hints::flow(&self.footer_help(), width, beside_text))
     }
 
     /// The key help for the focused pane, in the user's keys.
@@ -662,44 +602,8 @@ impl App {
     }
 }
 
-/// Hints in the fewest rows that hold them all, up to `FOOTER_MAX_ROWS`; past that, the last
-/// ones are dropped. Rows are `width` wide, except the last, which has `last_width`.
-fn flow_hints(hints: &[String], width: usize, last_width: usize) -> Vec<String> {
-    let fill = |rows: usize| {
-        let mut left = hints.iter().peekable();
-        let filled: Vec<String> = (1..=rows)
-            .map(|row| {
-                let limit = if row == rows { last_width } else { width };
-                let mut line = String::new();
-                while let Some(hint) = left.peek() {
-                    let joined =
-                        if line.is_empty() { (*hint).clone() } else { format!("{line} \u{b7} {hint}") };
-                    if joined.width() > limit {
-                        break;
-                    }
-                    line = joined;
-                    left.next();
-                }
-                line
-            })
-            .collect();
-        (filled, left.next().is_none())
-    };
-    (1..FOOTER_MAX_ROWS)
-        .map(fill)
-        .find_map(|(filled, complete)| complete.then_some(filled))
-        .unwrap_or_else(|| fill(FOOTER_MAX_ROWS).0)
-}
-
 /// The tail of an id, enough to tell bubbles apart: `anno_…F0123` → `F0123`.
 fn short_id(id: &str) -> String {
     let tail: Vec<char> = id.chars().rev().take(5).collect();
     tail.into_iter().rev().collect()
-}
-
-/// A picker's bottom help: the arrows that move its cursor, then the bound keys.
-pub(super) fn picker_help(moves: &str, keys: impl IntoIterator<Item = Option<String>>) -> String {
-    let parts: Vec<String> =
-        std::iter::once(format!("\u{2191}\u{2193} {moves}")).chain(keys.into_iter().flatten()).collect();
-    format!(" {} ", parts.join(" \u{b7} "))
 }

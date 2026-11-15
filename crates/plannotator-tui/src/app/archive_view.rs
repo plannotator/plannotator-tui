@@ -7,10 +7,10 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 
-use super::draw::picker_help;
 use super::{App, Mode, label};
 use crate::keys::{self, Action};
 use crate::theme::palette;
+use crate::ui::hints::picker as picker_help;
 
 impl App {
     pub(super) fn archive_key(&mut self, key: KeyEvent) {

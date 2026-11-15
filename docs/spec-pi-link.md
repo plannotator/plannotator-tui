@@ -51,7 +51,8 @@ on every `session_start` (a `/new`, `/resume` or `/fork` removes the old entry f
 ```
 
 `files` lists the absolute paths of the documents it can take notes for: the open file
-first. It is rewritten when the open file changes.
+first. It is rewritten when the open file changes. In a code review (`plannotator-tui
+review`) it lists every changed file in the diff, and is rewritten when `r` recaptures it.
 
 ## Wire
 
@@ -95,11 +96,16 @@ Reply: `{"ok":true,"busy":false,"name":"…","id":"…"}`.
 - `file` is absolute. `quote` is text copied exactly from the file's source. `line` is an
   optional 1-based source line. With both, the note goes on the occurrence of `quote`
   nearest that line; with only `quote`, on its first occurrence; with only `line`, on the
-  block that holds that line; with neither, on the first block. A code review (diff) target
-  will take the same fields, with `line` a line of the new file.
+  block that holds that line; with neither, on the first block.
+- A code review takes the same fields. `file` is a changed file. `line` is a line of the
+  new version, and the diff must show it (an added or context line in a hunk); the note is
+  a comment on that line. With `quote`, the note goes on the new-side line holding it that
+  is nearest `line`. With neither, the note is on the whole file. A deleted file takes only
+  file notes.
 - Reply: `{"ok":true}`, or `{"ok":false,"code":…,"message":"…"}` with `code` one of
-  `not_open` (that file is not the open document), `quote_not_found`, `empty`,
-  `busy` (the person is typing a note; try again shortly), `bad_request`.
+  `not_open` (that file is not the open document, or not a changed file of the code
+  review), `not_in_diff` (a code review does not show that line), `quote_not_found`,
+  `empty`, `busy` (the person is typing a note; try again shortly), `bad_request`.
 
 ## The Pi extension
 
@@ -124,7 +130,7 @@ Reply: `{"ok":true,"busy":false,"name":"…","id":"…"}`.
 - `P` (`pick-target`) opens the Pi picker: live Pi sessions, the ones in the document's folder first. The
   pick becomes the Send target until changed; the picker also offers going back to the
   target the review started with.
-- A note from Pi is added to the open document with the author shown, and the footer says
-  so. Notes from Pi are sent with the rest of the review like any other note.
+- A note from Pi is added to the open document, or to the diff in a code review, with the
+  author shown, and the footer says so. Notes from Pi are sent with the rest of the review like any other note.
 - `plannotator-tui pi list` prints live Pi sessions. `plannotator-tui pi send --session <id>`
   sends stdin to one.

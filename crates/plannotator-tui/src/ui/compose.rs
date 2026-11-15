@@ -1,4 +1,4 @@
-//! The comment box: a small multi-line editor.
+//! The comment box: a small multi-line editor, shared by document and code reviews.
 //!
 //! Enter saves; Shift+Enter (where the terminal's keyboard protocol distinguishes it),
 //! Alt+Enter and Ctrl+J insert a new line; Esc cancels. The usual readline keys edit by word
@@ -8,23 +8,33 @@
 
 use std::ops::Range;
 
+use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use unicode_width::UnicodeWidthChar;
+use ratatui::layout::Rect;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr as _};
+
+use crate::keys::{self, Action, Keymap};
+use crate::theme::palette;
 
 /// What a keystroke did to the compose box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ComposeAction {
+pub(crate) enum ComposeAction {
     Edited,
     Save,
     Cancel,
 }
 
 #[derive(Debug, Default)]
-pub(super) struct Compose {
+pub(crate) struct Compose {
     chars: Vec<char>,
     cursor: usize,
     /// The text the box opened with, to tell whether cancelling would lose anything.
     initial: String,
+    /// Esc was pressed with changed text, and the box is asking whether to discard it.
+    asking: bool,
 }
 
 fn width_of(c: char) -> usize {
@@ -32,25 +42,63 @@ fn width_of(c: char) -> usize {
 }
 
 impl Compose {
-    pub(super) fn with_text(text: &str) -> Self {
+    pub(crate) fn with_text(text: &str) -> Self {
         let chars: Vec<char> = text.chars().collect();
         let cursor = chars.len();
-        Self { chars, cursor, initial: text.to_owned() }
+        Self { chars, cursor, initial: text.to_owned(), asking: false }
     }
 
-    pub(super) fn value(&self) -> String {
+    pub(crate) fn value(&self) -> String {
         self.chars.iter().collect()
     }
 
     /// Whether saving would store something other than what the box opened with. Saving
     /// trims, so whitespace at the edges does not count.
-    pub(super) fn has_changes(&self) -> bool {
+    pub(crate) fn has_changes(&self) -> bool {
         self.value().trim() != self.initial.trim()
+    }
+
+    /// Apply one keystroke as a comment box: like [`Compose::handle_key`], except that Esc
+    /// with changed text asks first. While it asks, only `yes` (which cancels) and `no` or
+    /// `back` (which go back to editing) do anything; Enter is no answer, so a slip
+    /// cannot lose the text.
+    pub(crate) fn key(&mut self, keymap: &Keymap, key: KeyEvent, wrap_width: usize) -> ComposeAction {
+        if self.asking {
+            match keymap.action(&key, keys::CONFIRM_CLEAR) {
+                Some(Action::Yes) => {
+                    self.asking = false;
+                    return ComposeAction::Cancel;
+                }
+                Some(Action::No | Action::Back) => self.asking = false,
+                _ => {}
+            }
+            return ComposeAction::Edited;
+        }
+        match self.handle_key(key, wrap_width) {
+            ComposeAction::Cancel if self.has_changes() => {
+                self.asking = true;
+                ComposeAction::Edited
+            }
+            action => action,
+        }
+    }
+
+    /// The box's title: [`title`], or the discard question while it asks.
+    pub(crate) fn heading(&self, verb: &str, shift_enter: bool, keymap: &Keymap) -> String {
+        if !self.asking {
+            return title(verb, shift_enter);
+        }
+        let answers = [(Action::Yes, "discard"), (Action::No, "keep editing")]
+            .into_iter()
+            .filter_map(|(action, label)| keymap.labelled(action, label))
+            .collect::<Vec<_>>()
+            .join(" \u{b7} ");
+        format!(" discard {verb}? {answers} ")
     }
 
     /// Apply one keystroke. `wrap_width` is the width the box last wrapped to, which Up and
     /// Down move within.
-    pub(super) fn handle_key(&mut self, key: KeyEvent, wrap_width: usize) -> ComposeAction {
+    pub(crate) fn handle_key(&mut self, key: KeyEvent, wrap_width: usize) -> ComposeAction {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         match key.code {
@@ -99,7 +147,9 @@ impl Compose {
     }
 
     /// Insert pasted text as typed characters, newlines included.
-    pub(super) fn insert_text(&mut self, text: &str) {
+    pub(crate) fn insert_text(&mut self, text: &str) {
+        // A paste during the discard question is an answer too: keep editing.
+        self.asking = false;
         for c in text.replace("\r\n", "\n").replace('\r', "\n").chars() {
             self.insert(c);
         }
@@ -235,7 +285,7 @@ impl Compose {
     }
 
     /// The buffer as display rows at `width`, with the cursor's (row, col) in them.
-    pub(super) fn wrapped(&self, width: usize) -> (Vec<String>, usize, usize) {
+    pub(crate) fn wrapped(&self, width: usize) -> (Vec<String>, usize, usize) {
         let rows = self.rows(width);
         let (cursor_row, cursor_col) = self.cursor_position(&rows);
         let lines = rows
@@ -244,6 +294,77 @@ impl Compose {
             .collect();
         (lines, cursor_row, cursor_col)
     }
+}
+
+/// Compose box columns not used for wrapping text: two borders, one of left padding, and one
+/// so the cursor can sit past the last character of a full row.
+pub(crate) const CHROME: u16 = 4;
+
+/// The box's usual title: what it does and the keys it answers. The Shift+Enter hint
+/// appears only when the terminal distinguishes it, so the hint is never a lie.
+pub(crate) fn title(verb: &str, shift_enter: bool) -> String {
+    let newline = if shift_enter { "shift+enter new line" } else { "alt+enter new line" };
+    format!(" {verb} \u{b7} enter saves \u{b7} {newline} \u{b7} esc cancels ")
+}
+
+/// Split a ` · `-separated title into what fits `width` columns on the box's top border,
+/// spaces included, and the rest for the bottom border, empty when it all fits.
+fn split_title(title: &str, width: usize) -> (String, String) {
+    const SEPARATOR: &str = " \u{b7} ";
+    let mut first = String::new();
+    let mut rest: Vec<&str> = Vec::new();
+    for part in title.trim().split(SEPARATOR) {
+        let joined = if first.is_empty() { part.to_owned() } else { format!("{first}{SEPARATOR}{part}") };
+        if first.is_empty() || (rest.is_empty() && joined.width() + 2 <= width) {
+            first = joined;
+        } else {
+            rest.push(part);
+        }
+    }
+    (format!(" {first} "), rest.join(SEPARATOR))
+}
+
+/// Text rows the box shows for `compose` wrapped at `wrap_width`: one to eight.
+fn content_rows(compose: &Compose, wrap_width: usize) -> usize {
+    compose.wrapped(wrap_width).0.len().clamp(1, 8)
+}
+
+/// The box's height, borders included, for `compose` wrapped at `wrap_width`.
+pub(crate) fn height(compose: &Compose, wrap_width: usize) -> u16 {
+    content_rows(compose, wrap_width) as u16 + 2
+}
+
+/// Draw the box in `rect` (as tall as [`height`] says) with its text wrapped at
+/// `rect.width - CHROME`, and put the terminal cursor at the insertion point. A title too
+/// long for the top border continues on the bottom one. It is dim, and bold while the box
+/// asks to discard its text.
+pub(crate) fn draw(frame: &mut Frame, rect: Rect, compose: &Compose, title: &str) {
+    let title_style = if compose.asking { Style::new().bold() } else { Style::new().dim() };
+    let wrap_width = usize::from(rect.width.saturating_sub(CHROME));
+    let (lines, cursor_row, cursor_col) = compose.wrapped(wrap_width);
+    let content_rows = content_rows(compose, wrap_width);
+    let (title, title_rest) = split_title(title, usize::from(rect.width.saturating_sub(2)));
+    frame.render_widget(Clear, rect);
+    let mut boxed = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(palette().comment))
+        .title(Span::styled(title, title_style));
+    if !title_rest.is_empty() {
+        boxed = boxed.title_bottom(Span::styled(format!(" {title_rest} "), title_style));
+    }
+    let inner = boxed.inner(rect);
+    frame.render_widget(boxed, rect);
+    // Keep the cursor's row visible when the text is taller than the box.
+    let scroll = cursor_row.saturating_sub(content_rows - 1);
+    for (i, line) in lines.iter().skip(scroll).take(content_rows).enumerate() {
+        let row =
+            Rect { x: inner.x + 1, y: inner.y + i as u16, width: inner.width.saturating_sub(1), height: 1 };
+        frame.render_widget(Paragraph::new(Line::from(line.clone())), row);
+    }
+    let cursor_x = inner.x + 1 + cursor_col as u16;
+    let cursor_y = inner.y + (cursor_row - scroll) as u16;
+    frame.set_cursor_position((cursor_x.min(inner.right().saturating_sub(1)), cursor_y));
 }
 
 #[cfg(test)]

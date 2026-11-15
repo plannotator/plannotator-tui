@@ -53,6 +53,11 @@ impl FilePatch {
         self.side(side).get(&n).map(|l| l.text.as_str())
     }
 
+    /// Every line `side` shows, in line order, with its number.
+    pub fn lines(&self, side: Side) -> impl Iterator<Item = (u32, &str)> {
+        self.side(side).iter().map(|(n, line)| (*n, line.text.as_str()))
+    }
+
     /// True when every line of `first..=last` on `side` is shown in this file's hunks.
     pub fn shows(&self, side: Side, first: u32, last: u32) -> bool {
         first >= 1 && first <= last && (first..=last).all(|n| self.side(side).contains_key(&n))

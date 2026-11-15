@@ -300,6 +300,7 @@ impl Palette {
 }
 
 static PALETTE: OnceLock<Palette> = OnceLock::new();
+static THEME: OnceLock<Theme> = OnceLock::new();
 
 /// The palette in force. Dark until [`install`] says otherwise, which is what tests,
 /// `--snapshot`, `--export` and every other headless run get.
@@ -310,6 +311,14 @@ pub(crate) fn palette() -> &'static Palette {
 /// Fix the palette for this process. The first call wins; later ones are ignored.
 pub(crate) fn install(theme: Theme, colors: &Colors) {
     let _ = PALETTE.set(theme.palette().with(colors));
+    let _ = THEME.set(theme);
+}
+
+/// The theme in force: dark until [`install`] says otherwise. The diff viewer colours its
+/// code by it.
+#[cfg_attr(not(unix), allow(dead_code, reason = "only the code review reads it"))]
+pub(crate) fn theme() -> Theme {
+    THEME.get().copied().unwrap_or(Theme::Dark)
 }
 
 /// Ask the terminal whether its background is light or dark.

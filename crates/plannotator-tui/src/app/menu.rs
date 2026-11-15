@@ -10,10 +10,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr as _;
 
-use super::draw::picker_help;
 use super::{App, Mode};
 use crate::keys::{self, Action};
 use crate::theme::palette;
+use crate::ui::hints::picker as picker_help;
 
 #[cfg(test)]
 mod tests;

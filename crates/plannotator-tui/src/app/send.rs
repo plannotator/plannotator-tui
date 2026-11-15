@@ -15,12 +15,7 @@ use crate::store::{Location, Store};
 #[cfg(test)]
 mod tests;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum SendState {
-    Ready,
-    Sent,
-    Blocked(String),
-}
+pub(super) use crate::ui::send_button::SendState;
 
 impl App {
     pub(super) fn send_feedback(&mut self) -> Result<()> {
@@ -82,19 +77,13 @@ impl App {
                     self.quit = true;
                 }
             }
-            Err(DeliveryError::Blocked(msg)) => {
-                let copied = if self.copy_fallback(&feedback.text) { " · copied to clipboard" } else { "" };
-                self.status = Some(format!("{target} is at a dialog{copied} · {retry} retry"));
-                self.send_state = SendState::Blocked(msg);
-            }
-            Err(DeliveryError::Unavailable(msg)) => {
-                let copied = if self.copy_fallback(&feedback.text) { " · copied to clipboard" } else { "" };
-                self.status = Some(format!("no agent to send to ({msg}){copied} · {retry} retry"));
+            Err(error) => {
+                let copied = error.wants_copy() && self.copy_fallback(&feedback.text);
+                self.status = Some(error.status(&target, copied, retry));
                 self.derive_send_state();
-            }
-            Err(DeliveryError::Failed(err)) => {
-                self.status = Some(format!("send failed: {err:#} · {retry} retry"));
-                self.derive_send_state();
+                if let DeliveryError::Blocked(msg) = error {
+                    self.send_state = SendState::Blocked(msg);
+                }
             }
         }
         Ok(())

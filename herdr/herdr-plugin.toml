@@ -60,6 +60,15 @@ title = "Annotate: terminal output"
 contexts = ["pane"]
 command = ["./bin/plannotator-tui.exe", "herdr", "terminal"]
 
+# A code review of the focused pane's git repository; no default key. Unix only, like the
+# review itself.
+[[actions]]
+id = "review"
+title = "Annotate: review changes"
+contexts = ["pane", "workspace"]
+platforms = ["macos", "linux"]
+command = ["./bin/plannotator-tui.exe", "herdr", "review"]
+
 [[link_handlers]]
 id = "markdown-file"
 title = "Annotate this file"

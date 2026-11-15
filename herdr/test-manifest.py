@@ -19,6 +19,10 @@ ACTION_COMMANDS = {
     ("actions", "last"): [PROGRAM, "herdr", "last"],
     ("actions", "terminal"): [PROGRAM, "herdr", "terminal"],
 }
+# Code review is not built on Windows, so its action is offered on macOS and Linux only.
+UNIX_ACTION_COMMANDS = {
+    ("actions", "review"): [PROGRAM, "herdr", "review"],
+}
 LINK_HANDLERS = {"markdown-file": "open-link"}
 DEVELOPMENT_BUILDS = [
     ["cargo", "build", "--release", "--manifest-path", "../Cargo.toml"],
@@ -87,6 +91,14 @@ def check_entries(path: Path) -> None:
         item = entry(path, manifest, table, entry_id)
         if "windows" not in platforms(manifest, item):
             fail(path, f"{table}.{entry_id} must retain Windows support")
+        command = item.get("command")
+        if command != expected:
+            fail(path, f"{table}.{entry_id} command is {command!r}, expected {expected!r}")
+
+    for (table, entry_id), expected in UNIX_ACTION_COMMANDS.items():
+        item = entry(path, manifest, table, entry_id)
+        if platforms(manifest, item) != {"macos", "linux"}:
+            fail(path, f"{table}.{entry_id} must be macOS and Linux only")
         command = item.get("command")
         if command != expected:
             fail(path, f"{table}.{entry_id} command is {command!r}, expected {expected!r}")

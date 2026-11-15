@@ -2,6 +2,7 @@
 
 use super::super::review_test_support::file_app;
 use super::*;
+use crate::pi::PiEntry;
 use crate::pi::link::Note;
 
 fn note(app: &mut App, file: PathBuf, quote: Option<&str>, line: Option<usize>) -> Value {

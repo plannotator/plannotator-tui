@@ -7,8 +7,9 @@ A Pi extension that links Pi sessions with plannotator-tui. The extension file i
   127.0.0.1 with a secret token. In plannotator-tui, press `P` to pick a Pi session. Send
   then delivers your review to that session as a user message. If Pi is busy, the message
   waits in Pi's queue until the current work is done.
-- **Notes from Pi.** The model can leave a note in a plannotator-tui that has a file open.
-  The note shows up next to the text, with the author "pi · <session name>".
+- **Notes from Pi.** The model can leave a note in a plannotator-tui that has a file open,
+  or on a changed line in a code review (`plannotator-tui review`). The note shows up next
+  to the text, with the author "pi · <session name>".
 
 The registry and wire format are in [`docs/spec-pi-link.md`](../../docs/spec-pi-link.md).
 All traffic stays on this computer.
