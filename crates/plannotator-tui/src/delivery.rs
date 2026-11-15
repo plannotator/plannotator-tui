@@ -3,7 +3,8 @@
 //! The app renders feedback with one function regardless of target; only the target
 //! varies. Clipboard is the standalone default. Inside Herdr the target is an agent's pane
 //! and the transport is `herdr agent prompt`; inside Rex it is an agent's block and the `rex`
-//! CLI (`crate::rex::agent`). Nothing else in the app knows which is in use; it only
+//! CLI (`crate::rex::agent`); inside herdr-core it is an agent's terminal and `hc send`
+//! (`crate::hc::agent`). Nothing else in the app knows which is in use; it only
 //! distinguishes the three outcomes below.
 
 use std::io::Write as _;
@@ -13,9 +14,9 @@ use std::process::{Command, Stdio};
 /// Why a send did not land. The app reacts differently to each.
 #[derive(Debug)]
 pub(crate) enum DeliveryError {
-    /// The agent is at a dialog and its host (Herdr or Rex) refused the prompt; retry later.
+    /// The agent is at a dialog and its host (Herdr, Rex or hc) refused the prompt; retry later.
     Blocked(String),
-    /// No agent to send to: pane gone, agent not detected yet, herdr or rex binary missing.
+    /// No agent to send to: pane gone, agent not detected yet, herdr, rex or hc binary missing.
     Unavailable(String),
     /// Anything else, with whatever the transport said.
     Failed(anyhow::Error),

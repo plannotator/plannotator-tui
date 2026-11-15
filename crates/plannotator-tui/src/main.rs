@@ -14,6 +14,7 @@ mod file_search;
 mod gate;
 #[cfg(unix)]
 mod hangup;
+mod hc;
 mod herdr;
 mod keys;
 mod last;

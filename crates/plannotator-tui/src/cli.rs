@@ -22,6 +22,7 @@ use crate::config::Config;
 use crate::delivery::{Caller, Clipboard, Delivery, Discard, HerdrAgent};
 use crate::doc::Document;
 use crate::gate::{self, Decision, GateError, ReviewArgs};
+use crate::hc::agent::HcAgent;
 use crate::herdr::context::HerdrEnv;
 use crate::layout::DocLayout;
 use crate::rex::agent::RexAgent;
@@ -52,6 +53,10 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui pi list [--json]
   plannotator-tui pi send --session <id or name> < feedback.md
   plannotator-tui pi install [--dry-run | --print]
+  plannotator-tui hc open [file.md | folder] [--terminal <t>] [--placement overlay|split|popup]
+                          [--gate] [--result-file <path>]
+  plannotator-tui hc last [--terminal <t>] [--placement P] [--newest] [--session <transcript>]
+  plannotator-tui hc pane (open <path> [--gate [--result-file <path>]] | last <last args>)
   plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes|opencode|cmd|agy] [--pid N] [--session <transcript>]
                        [--session-id <id>] [--stdin] [--print] [--pick N] [--newest]";
 
@@ -66,8 +71,8 @@ fn open_file(path: &PathBuf) -> Result<DocumentSource> {
 }
 
 /// A file opens on its own; a folder opens in folder mode on its first markdown file.
-/// Interactive runs send to the Rex block or Herdr agent pane named by the environment, else the
-/// clipboard; headless runs send nowhere.
+/// Interactive runs send to the Rex block, hc terminal or Herdr agent pane named by the
+/// environment, else the clipboard; headless runs send nowhere.
 pub(crate) fn delivery(interactive: bool) -> Box<dyn Delivery> {
     if !interactive {
         return Box::new(Discard);
@@ -80,9 +85,12 @@ fn gate_delivery() -> Box<dyn Delivery> {
     agent_pane().unwrap_or_else(|| Box::new(Caller))
 }
 
-/// The Rex block or Herdr agent pane the environment names, if any.
+/// The Rex block, hc terminal or Herdr agent pane the environment names, if any.
 fn agent_pane() -> Option<Box<dyn Delivery>> {
     if let Some(agent) = RexAgent::from_lookup(|k| std::env::var(k).ok()) {
+        return Some(Box::new(agent));
+    }
+    if let Some(agent) = HcAgent::from_lookup(|k| std::env::var(k).ok()) {
         return Some(Box::new(agent));
     }
     let env = HerdrEnv::from_env();
@@ -153,7 +161,7 @@ fn wants_decision(args: &[String]) -> bool {
         Some(first) if decision_flag(first) => true,
         Some(first)
             if first.starts_with('-')
-                || matches!(first.as_str(), "config" | "herdr" | "rex" | "pi" | "last") =>
+                || matches!(first.as_str(), "config" | "herdr" | "rex" | "hc" | "pi" | "last") =>
         {
             false
         }
@@ -209,6 +217,7 @@ fn tool(args: &[String]) -> Result<()> {
         Some("config") => show_config(),
         Some("herdr") => herdr_command(args.get(1..).unwrap_or_default()),
         Some("rex") => crate::rex::cli::run(args.get(1..).unwrap_or_default()),
+        Some("hc") => crate::hc::cli::run(args.get(1..).unwrap_or_default()),
         Some("pi") => crate::pi::cli::run(args.get(1..).unwrap_or_default()),
         Some("last") => last_command(args.get(1..).unwrap_or_default()),
         Some(flag) if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{USAGE}"),
@@ -451,8 +460,8 @@ pub(crate) fn last_command(args: &[String]) -> Result<()> {
     crate::last::run(&options)
 }
 
-/// A gated review in a Herdr or Rex pane: the agent hears the decision through delivery, and the
-/// result file, when asked for, records it. The pane has no caller reading its stdout.
+/// A gated review in a Herdr, Rex or hc pane: the agent hears the decision through delivery,
+/// and the result file, when asked for, records it. The pane has no caller reading its stdout.
 pub(crate) fn gated_pane(path: &PathBuf, result_file: Option<&Path>) -> Result<()> {
     if let Some(file) = result_file {
         gate::check_result_file(file)?;
