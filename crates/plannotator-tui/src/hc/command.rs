@@ -19,6 +19,8 @@ pub(crate) enum HcError {
     Gone(String),
     /// `hc run` was given a name a live terminal already holds.
     Taken(String),
+    /// The text is longer than the OS lets one argument be, so `hc` never ran.
+    TooLong(String),
     /// Anything else, with whatever `hc` said.
     Failed(anyhow::Error),
 }
@@ -26,7 +28,7 @@ pub(crate) enum HcError {
 impl std::fmt::Display for HcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Blocked(msg) | Self::Gone(msg) | Self::Taken(msg) => f.write_str(msg),
+            Self::Blocked(msg) | Self::Gone(msg) | Self::Taken(msg) | Self::TooLong(msg) => f.write_str(msg),
             Self::Failed(err) => write!(f, "{err:#}"),
         }
     }
@@ -58,7 +60,8 @@ impl Hc {
             match err.kind() {
                 // Text travels as one argument; the OS caps its size.
                 std::io::ErrorKind::ArgumentListTooLong => {
-                    HcError::Failed(anyhow::anyhow!("too much text for one hc call: {err}"))
+                    let bytes: usize = args.iter().map(|a| a.as_ref().len()).sum();
+                    HcError::TooLong(format!("{} KiB is too much text for one hc call", bytes.div_ceil(1024)))
                 }
                 _ => HcError::Gone(format!("cannot run {}: {err}", self.bin.display())),
             }
@@ -130,13 +133,14 @@ mod tests {
         assert_eq!(classify("").to_string(), "hc failed with no output");
     }
 
-    #[cfg(target_os = "linux")]
+    /// More than Linux takes in one argument (128 KiB) and macOS in all of them (1 MiB).
+    #[cfg(unix)]
     #[test]
     fn text_over_the_argument_limit_is_a_size_problem_not_a_missing_terminal() {
-        let hc = Hc { bin: PathBuf::from("/bin/true") };
-        let err = hc.send("t7", &"x".repeat(300_000)).expect_err("too long for one argument");
-        assert!(matches!(err, HcError::Failed(_)), "{err}");
-        assert!(err.to_string().starts_with("too much text for one hc call"), "{err}");
+        let hc = Hc { bin: PathBuf::from("/bin/sh") };
+        let err = hc.send("t7", &"x".repeat(4 << 20)).expect_err("too long for one argument");
+        assert!(matches!(err, HcError::TooLong(_)), "{err}");
+        assert!(err.to_string().ends_with("KiB is too much text for one hc call"), "{err}");
     }
 
     #[test]

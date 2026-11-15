@@ -168,8 +168,10 @@ pub(crate) fn run(
     })?;
     let started: Value = serde_json::from_str(&started).context("reading hc run's reply")?;
     let address = started.get("address").and_then(Value::as_str).context("hc run named no terminal")?;
-    if !show_and_release(hc, address, placement, direction)? {
-        println!("review running as {address}; attach with `hc attach {address}`");
+    if let Some(reason) = show_and_release(hc, address, placement, direction)? {
+        println!(
+            "review running as {address}; herdr-app did not show it ({reason}); attach with `hc attach {address}`"
+        );
     }
     Ok(())
 }

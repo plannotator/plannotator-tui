@@ -67,7 +67,8 @@ impl Delivery for HcAgent {
 fn delivery_error(err: HcError) -> DeliveryError {
     match err {
         HcError::Blocked(message) => DeliveryError::Blocked(message),
-        HcError::Gone(message) => DeliveryError::Unavailable(message),
+        // Neither reached the agent, so the review copies instead.
+        HcError::Gone(message) | HcError::TooLong(message) => DeliveryError::Unavailable(message),
         HcError::Taken(message) => DeliveryError::Failed(anyhow::anyhow!(message)),
         HcError::Failed(err) => DeliveryError::Failed(err),
     }
@@ -127,5 +128,67 @@ mod tests {
             unready(&silent, 7, "pi", "t7").as_deref(),
             Some("pi in t7 has not reported its state to hc")
         );
+    }
+
+    /// An `hc` that answers `get` with the file `get` in its folder and logs each `send`;
+    /// `blocked` there makes `send` refuse the way `hc` does for an agent at a dialog.
+    #[cfg(unix)]
+    fn fake_hc(tag: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!("plannotator-tui-hc-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let script = format!(
+            r#"#!/bin/sh
+case "$1" in
+  get) cat {dir}/get ;;
+  send)
+    if [ -f {dir}/blocked ]; then
+      echo '{{"error":{{"kind":"blocked","message":"t7 is blocked on a permission prompt"}}}}' >&2; exit 1
+    fi
+    echo "$2" >> {dir}/sent ;;
+esac
+"#,
+            dir = dir.display()
+        );
+        std::fs::write(dir.join("hc"), script).expect("write hc");
+        std::fs::set_permissions(dir.join("hc"), std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        dir
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_send_reaches_only_a_ready_agent_and_every_refusal_lets_the_review_copy_or_retry() {
+        let dir = fake_hc("send");
+        let bin = dir.join("hc").display().to_string();
+        let target = agent(&[
+            (TERMINAL_VAR, "t7"),
+            (PID_VAR, "7"),
+            (AGENT_VAR, "pi"),
+            (crate::hc::command::BIN_VAR, &bin),
+        ])
+        .expect("a target");
+        let facts = |json: Value| std::fs::write(dir.join("get"), json.to_string()).expect("get");
+        let sent = || std::fs::read_to_string(dir.join("sent")).map_or(0, |s| s.lines().count());
+
+        facts(json!({"state":"live","reported":true,"foreground":{"pid":7,"name":"pi"}}));
+        target.deliver("notes").expect("a ready agent takes it");
+        assert_eq!(sent(), 1);
+
+        std::fs::write(dir.join("blocked"), "").expect("flag");
+        let blocked = target.deliver("notes").expect_err("refused at a dialog");
+        assert!(matches!(&blocked, DeliveryError::Blocked(m) if m.contains("permission")), "{blocked}");
+        std::fs::remove_file(dir.join("blocked")).expect("flag");
+
+        // Over the argument limit, `hc` never runs; the review copies instead.
+        let long = target.deliver(&"x".repeat(4 << 20)).expect_err("too long");
+        assert!(
+            matches!(&long, DeliveryError::Unavailable(m) if m.ends_with("too much text for one hc call"))
+        );
+
+        facts(json!({"state":"live","reported":true,"foreground":{"pid":9,"name":"zsh"}}));
+        let gone = target.deliver("notes").expect_err("the agent left");
+        assert!(matches!(&gone, DeliveryError::Unavailable(m) if m == "pi no longer runs in t7"), "{gone}");
+        assert_eq!(sent(), 1, "nothing but the first send was typed");
+        std::fs::remove_dir_all(dir).ok();
     }
 }

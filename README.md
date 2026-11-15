@@ -419,9 +419,11 @@ Each starts plannotator-tui in a terminal of its own, `annotate-<terminal>`, and
 herdr-app: over the tab for `overlay` and `popup` (the default), or in a pane beside the focused
 one for `split`, from `--placement` or `[herdr] placement`. The review starts once herdr-app shows
 it: until herdr-app tells a new terminal its colours, the terminal answers a colour query with the
-core's dark default, so asking sooner would draw a dark palette on a light window. Without herdr-app
-the review starts at once and cannot know your colours (the launcher prints the `hc attach`
-command); set `[ui] theme` then. The terminal is removed when the review
+core's dark default, so asking sooner would draw a dark palette on a light window. herdr-app needs
+a moment to learn of a new terminal, so the launcher asks again for up to 3 s while it answers
+"no running terminal"; any other refusal, or no herdr-app window at all, ends that at once. Then the
+review starts anyway and cannot know your colours: the launcher prints herdr-app's reason and the
+`hc attach` command. Set `[ui] theme` for that case. The terminal is removed when the review
 ends, and hc does not type a note about it into the agent's prompt. One review per terminal at a
 time.
 
@@ -438,7 +440,8 @@ hc has no exact session for an agent, so `hc last` reads the newest transcript i
 Another agent in that folder may have written one more recently; `--session` names the right
 transcript. Terminals on another machine and `terminal` reviews (a terminal's recent output) are not
 supported yet. The feedback travels as one argument to `hc send`, so the OS caps its size (128 KiB
-on Linux); a longer review fails with that reason and is copied.
+on Linux, about 1 MiB on macOS). A longer review is not sent: the review copies it instead and says
+why.
 
 ## Pi
 
