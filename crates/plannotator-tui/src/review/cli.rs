@@ -5,6 +5,7 @@
 //! reader thread that pokes the same channel. The loop waits on it, with a 100 ms tick so
 //! the viewer's progressive drawing and the Pi link are never starved.
 
+use std::io::IsTerminal as _;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::time::Duration;
@@ -65,6 +66,11 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
         None => std::env::current_dir().context("current directory")?,
     };
     let (repo, capture) = super::capture(&dir, &args.request)?;
+    // The review is drawn on stdout; redirected, there is nothing to draw on.
+    anyhow::ensure!(
+        std::io::stdout().is_terminal(),
+        "the code review is drawn on the terminal, and stdout is not one"
+    );
     let data_dir = crate::workspace_paths::data_dir();
     crate::cli::with_terminal(|terminal, session| {
         let (wake, ready) = mpsc::sync_channel(1);

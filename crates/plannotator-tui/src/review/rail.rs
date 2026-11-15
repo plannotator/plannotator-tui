@@ -1,7 +1,8 @@
 //! The notes rail: a heading per file, a bubble per note, the outdated ones last. Bubbles
-//! are drawn like a document review's; the selected one is kept in view.
+//! are drawn like a document review's; the selected one is kept in view, and moving to a
+//! note moves the diff to it.
 
-use plannotator_tui_review::CodeAnnotation;
+use plannotator_tui_review::{CodeAnnotation, NoteScope, Side};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
@@ -32,6 +33,58 @@ impl Piece {
 }
 
 impl Screen {
+    pub(super) fn rail_order(&self) -> Vec<usize> {
+        notes::order(self.store.annotations())
+    }
+
+    pub(super) fn note_id(&self, index: usize) -> Option<&str> {
+        self.store.annotations().get(index).map(|n| n.id.as_str())
+    }
+
+    pub(super) fn selected_note(&self) -> Option<&CodeAnnotation> {
+        let index = *self.rail_order().get(self.rail_cursor)?;
+        self.store.annotations().get(index)
+    }
+
+    pub(super) fn clamp_rail_cursor(&mut self) {
+        self.rail_cursor = self.rail_cursor.min(self.store.annotations().len().saturating_sub(1));
+    }
+
+    /// Move the rail's cursor by `delta` notes and show the note in the diff.
+    pub(super) fn move_rail(&mut self, delta: isize) {
+        let count = self.store.annotations().len();
+        if count == 0 {
+            return;
+        }
+        self.rail_cursor = self.rail_cursor.saturating_add_signed(delta).min(count - 1);
+        self.show_selected_note();
+    }
+
+    /// Scroll the diff to the selected note: its first line, or its file's first shown line
+    /// for a file note. An outdated note has no place to go.
+    pub(super) fn show_selected_note(&mut self) {
+        let Some(note) = self.selected_note() else { return };
+        let path = note.file_path.clone();
+        let place = match note.scope {
+            NoteScope::Line if notes::in_diff(note) => Some((note.side, note.line_start)),
+            NoteScope::Line if notes::is_outdated(note) => {
+                self.status = Some("outdated: its code is gone from the diff".into());
+                return;
+            }
+            _ => self.file(&path).and_then(|file| {
+                let new = file.lines(Side::New).next().map(|(n, _)| (Side::New, n));
+                new.or_else(|| file.lines(Side::Old).next().map(|(n, _)| (Side::Old, n)))
+            }),
+        };
+        let Some((side, line)) = place else {
+            self.status = Some("not in the diff: its lines are unchanged now".into());
+            return;
+        };
+        if let Err(err) = self.diff.reveal(&path, side, line) {
+            self.status = Some(format!("{err:#}"));
+        }
+    }
+
     pub(super) fn draw_rail(&mut self, frame: &mut Frame, rail: Rect) {
         let notes = self.store.annotations();
         if notes.is_empty() {
@@ -123,9 +176,7 @@ impl Screen {
         if let Some(name) = note.author_name.as_deref().filter(|n| !n.is_empty()) {
             tags.push(name.to_owned());
         }
-        let off_diff = !notes::is_outdated(note)
-            && note.scope == plannotator_tui_review::NoteScope::Line
-            && !notes::in_diff(note);
+        let off_diff = !notes::is_outdated(note) && note.scope == NoteScope::Line && !notes::in_diff(note);
         if off_diff {
             tags.push("not in diff".to_owned());
         }
