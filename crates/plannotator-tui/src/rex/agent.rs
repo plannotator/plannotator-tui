@@ -12,11 +12,13 @@
 //! agent that has not could be at a dialog Rex cannot see.
 
 use std::cell::RefCell;
+use std::path::PathBuf;
 
 use serde_json::{Value, json};
 
 use super::command::{Rex, RexError, short_id};
 use super::launch::foreground;
+use super::pi::PiSession;
 use crate::delivery::{Delivery, DeliveryError};
 
 /// `PLANNOTATOR_TUI_REX_BLOCK`: the block to send feedback to, set by `plannotator-tui rex`.
@@ -27,6 +29,31 @@ pub(crate) const AGENT_VAR: &str = "PLANNOTATOR_TUI_DELIVER_AGENT";
 pub(crate) const PID_VAR: &str = "PLANNOTATOR_TUI_REX_PID";
 /// `PLANNOTATOR_TUI_REX_SUBMIT=0`: paste into the agent's prompt without pressing Enter.
 pub(crate) const SUBMIT_VAR: &str = "PLANNOTATOR_TUI_REX_SUBMIT";
+/// The Pi session ID captured when a Rex Pi last review opened.
+pub(crate) const PI_SESSION_ID_VAR: &str = "PLANNOTATOR_TUI_REX_PI_SESSION_ID";
+/// The Pi session path captured when a Rex Pi last review opened.
+pub(crate) const PI_SESSION_PATH_VAR: &str = "PLANNOTATOR_TUI_REX_PI_SESSION_PATH";
+
+#[derive(Debug)]
+struct PiSessionIdentity {
+    session_id: String,
+    session_path: PathBuf,
+}
+
+#[derive(Debug)]
+enum PiSessionGuard {
+    NotRequired,
+    Bound(PiSessionIdentity),
+    Incomplete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PiSessionDeliveryCheck {
+    NotNeeded,
+    Matches,
+    Unavailable,
+    Changed,
+}
 
 #[derive(Debug)]
 pub(crate) struct RexAgent {
@@ -35,6 +62,8 @@ pub(crate) struct RexAgent {
     agent: Option<String>,
     /// The agent's process ID at launch. A send needs this process in the block's foreground.
     pid: u32,
+    /// Only a Pi `last` review is bound; other reviews do not need a Pi session check.
+    pi_session_guard: PiSessionGuard,
     /// Press Enter after the paste; `false` leaves the feedback in the prompt to edit.
     submit: bool,
     /// What the last send left for you to do: Enter, when it did not reach the agent.
@@ -47,9 +76,24 @@ impl RexAgent {
         let non_empty = |k: &str| env(k).filter(|v| !v.is_empty());
         let block = non_empty(BLOCK_VAR)?;
         let pid = non_empty(PID_VAR)?.parse().ok()?;
+        let pi_session_guard = match (env(PI_SESSION_ID_VAR), env(PI_SESSION_PATH_VAR)) {
+            (None, None) => PiSessionGuard::NotRequired,
+            (Some(session_id), Some(session_path)) => {
+                PiSessionGuard::Bound(PiSessionIdentity { session_id, session_path: session_path.into() })
+            }
+            _ => PiSessionGuard::Incomplete,
+        };
         let rex = Rex::from_lookup(&env, None).ok()?;
         let submit = env(SUBMIT_VAR).as_deref() != Some("0");
-        Some(Self { rex, block, agent: non_empty(AGENT_VAR), pid, submit, notice: RefCell::default() })
+        Some(Self {
+            rex,
+            block,
+            agent: non_empty(AGENT_VAR),
+            pid,
+            pi_session_guard,
+            submit,
+            notice: RefCell::default(),
+        })
     }
 }
 
@@ -90,6 +134,26 @@ impl Delivery for RexAgent {
                 short_id(&self.block)
             )));
         }
+        let live_pi_session = match &self.pi_session_guard {
+            PiSessionGuard::Bound(_) => super::pi::current_session(self.pid).ok(),
+            PiSessionGuard::NotRequired | PiSessionGuard::Incomplete => None,
+        };
+        match pi_session_delivery_check(&self.pi_session_guard, live_pi_session.as_ref()) {
+            PiSessionDeliveryCheck::NotNeeded | PiSessionDeliveryCheck::Matches => {}
+            PiSessionDeliveryCheck::Unavailable => {
+                return Err(DeliveryError::Unavailable(
+                    "cannot verify the current Pi session; feedback was not sent".to_owned(),
+                ));
+            }
+            PiSessionDeliveryCheck::Changed => {
+                return Err(DeliveryError::Unavailable(
+                    "the Pi session changed while the review was open; feedback was not sent".to_owned(),
+                ));
+            }
+        }
+        // The snapshot check and terminal paste are separate operations, not an atomic
+        // conditional send. This catches a session switch while the review is open, but a
+        // switch between this check and paste can still deliver to the replacement session.
         self.notice.take();
         let paste = json!({
             "block_id": self.block,
@@ -111,6 +175,22 @@ impl Delivery for RexAgent {
 
     fn notice(&self) -> Option<String> {
         self.notice.take()
+    }
+}
+
+fn pi_session_delivery_check(guard: &PiSessionGuard, current: Option<&PiSession>) -> PiSessionDeliveryCheck {
+    let expected = match guard {
+        PiSessionGuard::NotRequired => return PiSessionDeliveryCheck::NotNeeded,
+        PiSessionGuard::Incomplete => return PiSessionDeliveryCheck::Unavailable,
+        PiSessionGuard::Bound(expected) => expected,
+    };
+    let Some(current) = current else {
+        return PiSessionDeliveryCheck::Unavailable;
+    };
+    if expected.session_id == current.session_id && expected.session_path == current.session_path {
+        PiSessionDeliveryCheck::Matches
+    } else {
+        PiSessionDeliveryCheck::Changed
     }
 }
 
@@ -212,7 +292,7 @@ mod tests {
     /// process is pid 42 and reports itself idle; `silent` in the directory makes it report
     /// nothing, and `enter-fails` makes `send-key` fail.
     #[cfg(unix)]
-    fn fake_rex(tag: &str) -> std::path::PathBuf {
+    fn fake_rex(tag: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt as _;
         let dir = std::env::temp_dir().join(format!("plannotator-tui-rex-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
@@ -303,5 +383,47 @@ esac
         assert!(matches!(&err, DeliveryError::Unavailable(m) if named_once(m)), "{err}");
         assert_eq!(pastes(&dir), 0);
         std::fs::remove_dir_all(dir).ok();
+    }
+    #[test]
+    fn a_pi_last_review_requires_the_same_session_id_and_path_but_not_the_same_leaf() {
+        let expected = PiSessionGuard::Bound(PiSessionIdentity {
+            session_id: "session-1".to_owned(),
+            session_path: PathBuf::from("/sessions/session-1.jsonl"),
+        });
+        let continued = PiSession {
+            session_id: "session-1".to_owned(),
+            session_path: PathBuf::from("/sessions/session-1.jsonl"),
+            leaf_id: Some("new-leaf".to_owned()),
+        };
+        let different_id = PiSession { session_id: "session-2".to_owned(), ..continued.clone() };
+        let different_path =
+            PiSession { session_path: PathBuf::from("/sessions/replaced.jsonl"), ..continued.clone() };
+
+        assert_eq!(pi_session_delivery_check(&expected, Some(&continued)), PiSessionDeliveryCheck::Matches);
+        assert_eq!(
+            pi_session_delivery_check(&expected, Some(&different_id)),
+            PiSessionDeliveryCheck::Changed
+        );
+        assert_eq!(
+            pi_session_delivery_check(&expected, Some(&different_path)),
+            PiSessionDeliveryCheck::Changed
+        );
+        assert_eq!(pi_session_delivery_check(&expected, None), PiSessionDeliveryCheck::Unavailable);
+    }
+
+    #[test]
+    fn a_review_without_a_pi_session_binding_keeps_the_existing_delivery_fallback() {
+        assert_eq!(
+            pi_session_delivery_check(&PiSessionGuard::NotRequired, None),
+            PiSessionDeliveryCheck::NotNeeded
+        );
+    }
+
+    #[test]
+    fn an_incomplete_pi_session_binding_fails_closed() {
+        assert_eq!(
+            pi_session_delivery_check(&PiSessionGuard::Incomplete, None),
+            PiSessionDeliveryCheck::Unavailable
+        );
     }
 }

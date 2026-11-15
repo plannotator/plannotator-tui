@@ -9,6 +9,7 @@ use plannotator_tui_hosts::{Role, claude, codex, copilot, droid, omp, pi};
 
 const NAMED_CODEX_ID: &str = "11111111-1111-4111-8111-111111111111";
 const NEWER_CODEX_ID: &str = "22222222-2222-4222-8222-222222222222";
+const PI_SESSION_ID: &str = "01a04968-90e4-745a-a8d3-6903d935f391";
 
 fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_plannotator-tui"))
@@ -285,6 +286,166 @@ fn print_writes_the_newest_assistant_message_of_a_pi_session() {
         .expect("runs");
     assert!(out.status.success());
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), expected.trim_end());
+}
+fn branched_pi_transcript(tag: &str) -> (PathBuf, PathBuf) {
+    let root = temp_dir(tag);
+    let transcript = root.join("snapshot.jsonl");
+    let mut jsonl = std::fs::read_to_string(fixtures().join("pi.jsonl")).expect("fixture");
+    jsonl.push('\n');
+    jsonl.push_str(
+        r#"{"type":"message","id":"beadfeed","parentId":"dbcc01c1","timestamp":"2026-08-28T17:28:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"assistant text appended on abandoned branch"}]}}"#,
+    );
+    std::fs::write(&transcript, jsonl).expect("branched session");
+    (root, transcript)
+}
+
+#[test]
+fn pi_leaf_id_selects_the_requested_branch_and_absence_keeps_legacy_selection() {
+    let (root, transcript) = branched_pi_transcript("pi branch selection");
+    let selected = bin()
+        .args(["last", "--host", "pi", "--session"])
+        .arg(&transcript)
+        .args(["--session-id", PI_SESSION_ID, "--pi-leaf-id", "0c0c0c0c", "--print"])
+        .output()
+        .expect("runs");
+    assert!(selected.status.success(), "{}", String::from_utf8_lossy(&selected.stderr));
+    assert_eq!(String::from_utf8_lossy(&selected.stdout).trim(), "assistant text 3");
+
+    let legacy = bin()
+        .args(["last", "--host", "pi", "--session"])
+        .arg(&transcript)
+        .args(["--session-id", PI_SESSION_ID, "--print"])
+        .output()
+        .expect("runs");
+    assert!(legacy.status.success(), "{}", String::from_utf8_lossy(&legacy.stderr));
+    assert_eq!(String::from_utf8_lossy(&legacy.stdout).trim(), "assistant text appended on abandoned branch");
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn a_pi_leaf_id_must_match_the_session_header_id() {
+    let transcript = fixtures().join("pi.jsonl");
+    let out = bin()
+        .args(["last", "--host", "pi", "--session"])
+        .arg(&transcript)
+        .args(["--session-id", "22222222-2222-4222-8222-222222222222", "--pi-leaf-id", "0c0c0c0c", "--print"])
+        .output()
+        .expect("runs");
+    assert!(out.status.success(), "--print keeps its exit-zero contract");
+    assert!(out.stdout.is_empty(), "a mismatched file is never read as the requested session");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("does not match supplied id"));
+}
+
+#[test]
+fn null_or_unknown_pi_leaf_never_falls_back_to_another_branch() {
+    let (root, transcript) = branched_pi_transcript("pi null leaf");
+    for leaf in ["", "missing-leaf"] {
+        let out = bin()
+            .args(["last", "--host", "pi", "--session"])
+            .arg(&transcript)
+            .args(["--session-id", PI_SESSION_ID, "--pi-leaf-id"])
+            .arg(leaf)
+            .arg("--print")
+            .output()
+            .expect("runs");
+        assert!(out.status.success(), "--print keeps its exit-zero contract");
+        assert!(out.stdout.is_empty(), "leaf {leaf:?} must not print another branch");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("no assistant messages"),
+            "leaf {leaf:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn a_pi_snapshot_requires_a_valid_session_header() {
+    let root = temp_dir("pi headers");
+    for (name, content, error) in [
+        ("empty", "", "missing Pi session header"),
+        ("invalid", "not-json", "invalid Pi session header"),
+        ("wrong-type", r#"{"type":"message"}"#, "expected type=session"),
+        ("missing-id", r#"{"type":"session"}"#, "missing an id"),
+    ] {
+        let transcript = root.join(format!("{name}.jsonl"));
+        std::fs::write(&transcript, content).expect("write header");
+        let out = bin()
+            .args(["last", "--host", "pi", "--session"])
+            .arg(&transcript)
+            .args(["--session-id", PI_SESSION_ID, "--pi-leaf-id", "leaf", "--print"])
+            .output()
+            .expect("runs");
+        assert!(out.stdout.is_empty(), "{name} header must fail closed");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(error),
+            "{name}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let missing = root.join("missing.jsonl");
+    let out = bin()
+        .args(["last", "--host", "pi", "--session"])
+        .arg(&missing)
+        .args(["--session-id", PI_SESSION_ID, "--pi-leaf-id", "leaf", "--print"])
+        .output()
+        .expect("runs");
+    assert!(out.stdout.is_empty(), "a missing file is never replaced by a discovered session");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("reading "));
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn pi_leaf_flags_reject_missing_values_duplicates_and_stdin() {
+    for (args, error) in [
+        (&["last", "--host", "pi", "--pi-leaf-id"][..], "--pi-leaf-id needs a value"),
+        (&["last", "--host", "pi", "--pi-leaf-id", "--print"][..], "--pi-leaf-id needs a value"),
+        (
+            &["last", "--host", "pi", "--pi-leaf-id", "leaf", "--pi-leaf-id", "other"][..],
+            "may be used only once",
+        ),
+        (&["last", "--host", "pi", "--pi-leaf-id", "leaf", "--stdin"][..], "cannot be used with --stdin"),
+    ] {
+        let out = bin().args(args).output().expect("runs");
+        assert!(!out.status.success(), "{args:?} should be rejected");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(error),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+#[test]
+fn pi_leaf_flag_requires_an_explicit_transcript_and_session_id() {
+    let transcript = fixtures().join("pi.jsonl");
+    for (args, error) in [
+        (
+            vec!["last", "--host", "pi", "--session-id", PI_SESSION_ID, "--pi-leaf-id", "leaf", "--print"],
+            "--pi-leaf-id needs --session",
+        ),
+        (
+            vec![
+                "last",
+                "--host",
+                "pi",
+                "--session",
+                transcript.to_str().expect("path"),
+                "--pi-leaf-id",
+                "leaf",
+                "--print",
+            ],
+            "--pi-leaf-id needs --session-id",
+        ),
+    ] {
+        let out = bin().args(args).output().expect("runs");
+        assert!(out.status.success(), "--print keeps its exit-zero contract");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(error),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
 }
 
 fn newest_pi_reply() -> (PathBuf, String) {

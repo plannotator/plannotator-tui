@@ -205,8 +205,30 @@ fn iso_timestamp(value: &Value) -> Option<String> {
 /// `getBranch()` returns; entries orphaned by a rewind are absent. A chain that cannot be
 /// reconstructed (missing parent, cycle) yields nothing rather than the wrong messages.
 pub fn parse_messages(jsonl: &str, n: usize) -> Vec<Message> {
-    let entries: Vec<Entry> = jsonl.lines().filter_map(Entry::parse).collect();
+    let entries = parse_entries(jsonl);
     let Some(active) = active_branch(&entries) else { return Vec::new() };
+    messages_on_branch(&entries, n, &active)
+}
+
+/// Messages on the branch ending at `leaf_id`, newest first, through the `n`th newest
+/// reply. `None` selects an empty branch; an unknown leaf or unreconstructable chain
+/// yields nothing rather than falling back to another branch.
+pub fn parse_messages_at_leaf(jsonl: &str, n: usize, leaf_id: Option<&str>) -> Vec<Message> {
+    let Some(leaf_id) = leaf_id else { return Vec::new() };
+    let entries = parse_entries(jsonl);
+    let Some(active) = branch_at_leaf(&entries, leaf_id) else { return Vec::new() };
+    messages_on_branch(&entries, n, &active)
+}
+
+fn parse_entries(jsonl: &str) -> Vec<Entry> {
+    jsonl.lines().filter_map(Entry::parse).collect()
+}
+
+fn messages_on_branch(
+    entries: &[Entry],
+    n: usize,
+    active: &std::collections::HashSet<String>,
+) -> Vec<Message> {
     let messages =
         entries.iter().rev().filter(|e| e.id.as_ref().is_some_and(|i| active.contains(i))).filter_map(|e| {
             let (role, text) = e.message.as_ref()?;
@@ -227,10 +249,19 @@ pub fn parse_messages(jsonl: &str, n: usize) -> Vec<Message> {
 
 fn active_branch(entries: &[Entry]) -> Option<std::collections::HashSet<String>> {
     let newest = entries.iter().rev().find(|e| e.id.is_some())?;
+    branch_from_entry(entries, newest)
+}
+
+fn branch_at_leaf(entries: &[Entry], leaf_id: &str) -> Option<std::collections::HashSet<String>> {
+    let leaf = entries.iter().rev().find(|e| e.id.as_deref() == Some(leaf_id))?;
+    branch_from_entry(entries, leaf)
+}
+
+fn branch_from_entry(entries: &[Entry], leaf: &Entry) -> Option<std::collections::HashSet<String>> {
     let by_id: std::collections::HashMap<&str, &Entry> =
         entries.iter().filter_map(|e| e.id.as_deref().map(|i| (i, e))).collect();
     let mut chain = std::collections::HashSet::new();
-    let mut current = newest;
+    let mut current = leaf;
     loop {
         let id = current.id.as_deref()?;
         if !chain.insert(id.to_owned()) {

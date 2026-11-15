@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use plannotator_tui_hosts::pi::{encoded_dir, find_transcript, parse_messages};
+use plannotator_tui_hosts::pi::{encoded_dir, find_transcript, parse_messages, parse_messages_at_leaf};
 use plannotator_tui_hosts::{Host, Role, detect_host};
 
 fn fixture(name: &str) -> String {
@@ -73,6 +73,66 @@ fn the_newest_assistant_message_comes_first_and_the_later_rewind_branch_wins() {
     );
     assert_eq!(messages[0].id, "0c0c0c0c");
     assert_eq!(messages[0].at.as_deref(), Some("2026-08-28T17:27:20.000Z"));
+}
+
+#[test]
+fn an_explicit_leaf_selects_its_branch_when_the_last_entry_is_abandoned() {
+    let mut jsonl = fixture("pi.jsonl");
+    jsonl.push('\n');
+    jsonl.push_str(
+        r#"{"type":"message","id":"beadfeed","parentId":"dbcc01c1","timestamp":"2026-08-28T17:28:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"assistant text appended on abandoned branch"}]}}"#,
+    );
+
+    let default_branch = parse_messages(&jsonl, 25);
+    assert_eq!(
+        default_branch.first().map(|message| message.text.as_str()),
+        Some("assistant text appended on abandoned branch"),
+        "the legacy API still follows the last on-disk entry",
+    );
+
+    let selected_branch = parse_messages_at_leaf(&jsonl, 25, Some("0c0c0c0c"));
+    let assistant: Vec<&str> = selected_branch
+        .iter()
+        .filter(|message| message.role == Role::Assistant)
+        .map(|message| message.text.as_str())
+        .collect();
+    assert_eq!(assistant, vec!["assistant text 3", "assistant text 1"]);
+}
+
+#[test]
+fn an_explicit_empty_missing_root_or_cyclic_branch_is_handled_exactly() {
+    let root = r#"{"type":"message","id":"root","parentId":null,"message":{"role":"assistant","content":[{"type":"text","text":"root reply"}]}}"#;
+    assert_eq!(
+        parse_messages_at_leaf(root, 1, None),
+        Vec::<plannotator_tui_hosts::Message>::new(),
+        "None is an explicit empty branch",
+    );
+    assert_eq!(
+        parse_messages_at_leaf(root, 1, Some("missing")),
+        Vec::<plannotator_tui_hosts::Message>::new(),
+        "an unknown leaf does not fall back to the root",
+    );
+    assert_eq!(
+        parse_messages_at_leaf(&fixture("pi-dangling.jsonl"), 25, Some("deadbeef")),
+        Vec::<plannotator_tui_hosts::Message>::new(),
+        "a selected leaf with a missing parent fails closed",
+    );
+    assert_eq!(
+        parse_messages_at_leaf(root, 1, Some("root")).first().map(|message| message.text.as_str()),
+        Some("root reply"),
+        "a root leaf with no parent is a valid branch",
+    );
+
+    let cycle = format!(
+        "{}\n{}",
+        r#"{"type":"message","id":"a","parentId":"b","message":{"role":"assistant","content":[{"type":"text","text":"a"}]}}"#,
+        r#"{"type":"message","id":"b","parentId":"a","message":{"role":"assistant","content":[{"type":"text","text":"b"}]}}"#,
+    );
+    assert_eq!(
+        parse_messages_at_leaf(&cycle, 1, Some("a")),
+        Vec::<plannotator_tui_hosts::Message>::new(),
+        "a cycle fails closed instead of returning partial messages",
+    );
 }
 
 #[test]

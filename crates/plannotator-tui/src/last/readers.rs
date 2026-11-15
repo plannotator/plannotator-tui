@@ -163,3 +163,29 @@ pub(super) fn pi_messages(path: &Path, pick: usize) -> Result<Vec<Message>> {
     let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     Ok(pi::parse_messages(&text, pick))
 }
+
+/// Read the exact Pi snapshot selected by a launcher, without falling back to the active branch.
+pub(super) fn pi_snapshot(
+    path: &Path,
+    session_id: &str,
+    leaf_id: Option<&str>,
+    pick: usize,
+) -> Result<Vec<Message>> {
+    let session_id = plannotator_tui_hosts::validate_session_id(session_id)?;
+    let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let header_line = text.lines().next().context("missing Pi session header")?;
+    let header: serde_json::Value = serde_json::from_str(header_line)
+        .with_context(|| format!("invalid Pi session header in {}", path.display()))?;
+    anyhow::ensure!(
+        header.get("type").and_then(serde_json::Value::as_str) == Some("session"),
+        "invalid Pi session header in {}: expected type=session",
+        path.display()
+    );
+    let header_id =
+        header.get("id").and_then(serde_json::Value::as_str).context("Pi session header is missing an id")?;
+    anyhow::ensure!(
+        header_id == session_id,
+        "Pi session header id {header_id:?} does not match supplied id {session_id:?}"
+    );
+    Ok(pi::parse_messages_at_leaf(&text, pick, leaf_id.filter(|id| !id.is_empty())))
+}

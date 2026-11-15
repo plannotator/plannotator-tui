@@ -25,6 +25,10 @@ pub(crate) struct Located {
 }
 
 pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
+    if options.pi_leaf_id.is_some() {
+        anyhow::ensure!(options.session.is_some(), "--pi-leaf-id needs --session");
+        anyhow::ensure!(options.session_id.is_some(), "--pi-leaf-id needs --session-id");
+    }
     let session = options.session.as_deref().map(expand_home);
     let host = match &session {
         // A path without a host name: Herdr hands us the exact transcript for agents it
@@ -32,9 +36,18 @@ pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
         Some(path) if !host_named(options) => sniff(&head(path)?).map_or_else(|| host_for(options), Ok)?,
         _ => host_for(options)?,
     };
+    if options.pi_leaf_id.is_some() && host != Host::Pi {
+        bail!("--pi-leaf-id requires a Pi session");
+    }
     let pick = options.pick.max(1);
     let roots = Roots::from_env();
-    let (transcript, messages, discovery) = if let Some(path) = session {
+    let (transcript, messages, discovery) = if options.pi_leaf_id.is_some() {
+        let path = session.as_deref().context("--pi-leaf-id needs --session")?;
+        let session_id = options.session_id.as_deref().context("--pi-leaf-id needs --session-id")?;
+        let session_id = plannotator_tui_hosts::validate_session_id(session_id)?;
+        let messages = readers::pi_snapshot(path, session_id, options.pi_leaf_id.as_deref(), pick)?;
+        (path.to_path_buf(), messages, Discovery::Exact)
+    } else if let Some(path) = session {
         // An id given next to a path is validated like any other before a reader sees it.
         let supplied =
             options.session_id.as_deref().map(plannotator_tui_hosts::validate_session_id).transpose()?;
