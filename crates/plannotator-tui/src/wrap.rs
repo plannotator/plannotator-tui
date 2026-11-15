@@ -3,13 +3,17 @@
 //! `tui-markdown` emits one `Line` per logical line and never wraps; the layout needs
 //! exact row counts and the selection needs to know which source byte sits under each
 //! screen column, so both live here. Generic text wrapping — no markdown knowledge.
-//! Reflowing a rendered table is the one shape-aware job, and it lives in `wrap::table`.
+//! Where a line may break is `wrap::breaks`. Reflowing a rendered table is the one
+//! shape-aware job, and it lives in `wrap::table`.
 
+mod breaks;
 mod table;
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthChar;
+
+use breaks::token_len;
 
 pub(crate) use table::wrap_table;
 
@@ -87,59 +91,6 @@ fn finish_row(cells: Vec<Cell>, line_style: Style) -> Row {
     Row { line: Line::from(spans).style(line_style), cells: columns }
 }
 
-/// Punctuation that must not end a row, because it belongs to the text after it.
-fn opens_text(ch: char) -> bool {
-    matches!(ch, '（' | '「' | '『' | '【' | '《' | '〈' | '〔' | '［' | '｛' | '“' | '‘')
-}
-
-/// Punctuation that must not start a row, because it belongs to the text before it.
-fn closes_text(ch: char) -> bool {
-    matches!(
-        ch,
-        '，' | '。'
-            | '、'
-            | '：'
-            | '；'
-            | '！'
-            | '？'
-            | '）'
-            | '」'
-            | '』'
-            | '】'
-            | '》'
-            | '〉'
-            | '〕'
-            | '］'
-            | '｝'
-            | '”'
-            | '’'
-            | '…'
-            | '—'
-    )
-}
-
-/// Length of the unbreakable run at the front of `cells`: a run of whitespace, or a word or
-/// single wide character together with any punctuation that must stay attached to it. Wide
-/// characters break individually because CJK text has no spaces to break at.
-fn token_len(cells: &[Cell]) -> usize {
-    let is_space = |cell: &Cell| cell.ch.is_whitespace();
-    let is_wide = |cell: &Cell| cell.width > 1;
-    if cells.first().is_some_and(is_space) {
-        return cells.iter().take_while(|cell| is_space(cell)).count();
-    }
-    let mut len = cells.iter().take_while(|cell| opens_text(cell.ch)).count();
-    if cells.get(len).is_some_and(is_wide) {
-        len += 1;
-    } else {
-        let word = cells.get(len..).unwrap_or_default();
-        len +=
-            word.iter().take_while(|cell| !is_space(cell) && !is_wide(cell) && !opens_text(cell.ch)).count();
-    }
-    let tail = cells.get(len..).unwrap_or_default();
-    len += tail.iter().take_while(|cell| closes_text(cell.ch)).count();
-    len.max(1)
-}
-
 /// Split cells into the runs that fit `width` columns each. One empty piece for no cells.
 ///
 /// Cells, not `Row`s: a `Row` records one offset per *column*, so reading offsets back out
@@ -214,11 +165,11 @@ mod tests {
     use super::*;
     use ratatui::style::{Modifier, Stylize};
 
-    fn plain(rows: &[Row]) -> Vec<String> {
+    pub(super) fn plain(rows: &[Row]) -> Vec<String> {
         rows.iter().map(|r| r.line.to_string()).collect()
     }
 
-    fn identity(n: usize) -> Vec<Option<usize>> {
+    pub(super) fn identity(n: usize) -> Vec<Option<usize>> {
         (0..n).map(Some).collect()
     }
 
@@ -250,27 +201,6 @@ mod tests {
         );
         let row = clip_line(&Line::from("日本"), &identity(2), 10);
         assert_eq!(row.cells, [Some(0), Some(0), Some(1), Some(1)]);
-    }
-
-    #[test]
-    fn cjk_text_breaks_between_characters_and_not_after_the_marker() {
-        let source = "- 甲乙丙丁戊己庚辛壬癸";
-        let rows = wrap_line(&Line::from(source), &identity(source.chars().count()), 10);
-        assert_eq!(plain(&rows), ["- 甲乙丙丁", "戊己庚辛壬", "癸"]);
-    }
-
-    #[test]
-    fn cjk_punctuation_stays_with_its_text() {
-        let source = "甲乙丙，丁（戊）";
-        let rows = wrap_line(&Line::from(source), &identity(source.chars().count()), 6);
-        assert_eq!(plain(&rows), ["甲乙", "丙，丁", "（戊）"]);
-    }
-
-    #[test]
-    fn latin_words_inside_cjk_stay_whole() {
-        let source = "甲乙Dandadan丙";
-        let rows = wrap_line(&Line::from(source), &identity(source.chars().count()), 8);
-        assert_eq!(plain(&rows), ["甲乙", "Dandadan", "丙"]);
     }
 
     #[test]
