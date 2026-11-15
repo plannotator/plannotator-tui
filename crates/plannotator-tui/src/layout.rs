@@ -1,8 +1,9 @@
 //! Per-block rendering and the row map.
 //!
 //! Each block is rendered in isolation through `tui-markdown` (cached, width-independent),
-//! aligned back to its source bytes, and wrapped to the current column width. Every screen
-//! cell therefore knows its block and, where it shows real text, its source byte.
+//! aligned back to its source bytes, and wrapped to the current column width. List and quote
+//! blocks are decorated in between (`decorate`). Every screen cell therefore knows its block
+//! and, where it shows real text, its source byte.
 
 use std::borrow::Cow;
 use std::ops::Range;
@@ -12,10 +13,11 @@ use ratatui::text::{Line, Text};
 use tui_markdown::{Options, StyleSheet};
 
 use crate::cjk_emphasis::{protect, strip_marks};
+use crate::decorate::{self, Decorated, RULE, Syntax};
 use crate::doc::{BlockKind, Document};
 use crate::srcmap::{LineOffsets, align};
 use crate::theme::palette;
-use crate::wrap::{Row, clip_line, wrap_line, wrap_table};
+use crate::wrap::{Hang, Row, clip_line, rule_row, wrap_line, wrap_line_hanging, wrap_table};
 
 /// Rows of vertical space between blocks.
 const BLOCK_GAP: usize = 1;
@@ -54,6 +56,8 @@ pub(crate) struct RenderedBlock {
     /// Per line, per char: absolute source byte offset (cached with `text`).
     offsets: Vec<LineOffsets>,
     kind: BlockKind,
+    /// Per line, how its wrapped rows start; empty when nothing hangs.
+    hangs: Vec<Hang>,
     /// Rows for the current width.
     pub(crate) rows: Vec<Row>,
     /// First screen row of this block in document coordinates.
@@ -67,15 +71,21 @@ pub(crate) struct DocLayout {
     pub(crate) total_rows: usize,
 }
 
-fn render_block(doc: &Document, index: usize) -> (Text<'static>, Vec<LineOffsets>) {
+fn render_block(doc: &Document, index: usize) -> Decorated {
     let source = doc.block_text(index);
     let protected = protect(source);
     let text = own(tui_markdown::from_str_with_options(&protected, &Options::new(Styles)));
     let text = if matches!(protected, Cow::Owned(_)) { strip_marks(text) } else { text };
     let plain: Vec<String> = text.lines.iter().map(ToString::to_string).collect();
-    let base = doc.blocks.get(index).map_or(0, |b| b.range.start);
-    let offsets = align(&plain, source, base);
-    (text, offsets)
+    let block = doc.blocks.get(index);
+    let base = block.map_or(0, |b| b.range.start);
+    if !block.is_some_and(|b| matches!(b.kind, BlockKind::List | BlockKind::BlockQuote)) {
+        let offsets = align(&plain, source, base);
+        return Decorated { text, offsets, hangs: Vec::new() };
+    }
+    let syntax = Syntax::parse(source, base);
+    let offsets = align(&plain, &syntax.aligned_source(source, base), base);
+    decorate::decorate(&syntax, source, base, text, offsets)
 }
 
 pub(crate) fn own(text: Text<'_>) -> Text<'static> {
@@ -99,8 +109,8 @@ impl DocLayout {
             .iter()
             .enumerate()
             .map(|(i, block)| {
-                let (text, offsets) = render_block(doc, i);
-                RenderedBlock { text, offsets, kind: block.kind, rows: Vec::new(), first_row: 0 }
+                let Decorated { text, offsets, hangs } = render_block(doc, i);
+                RenderedBlock { text, offsets, kind: block.kind, hangs, rows: Vec::new(), first_row: 0 }
             })
             .collect();
         let mut layout = Self { width: 0, blocks, total_rows: 0 };
@@ -116,12 +126,17 @@ impl DocLayout {
         for block in &mut self.blocks {
             block.first_row = row;
             let lines = || block.text.lines.iter().zip(&block.offsets);
-            block.rows = if block.kind == BlockKind::Table {
+            block.rows = if block.kind == BlockKind::Rule {
+                let offset = block.offsets.iter().flatten().flatten().next().copied();
+                vec![rule_row(RULE, Style::new().fg(palette().idle_fg), offset, width)]
+            } else if block.kind == BlockKind::Table {
                 wrap_table(&block.text.lines, &block.offsets, width)
             } else if block.kind.preserves_columns() {
                 lines().map(|(l, o)| clip_line(l, o, width)).collect()
-            } else {
+            } else if block.hangs.is_empty() {
                 lines().flat_map(|(l, o)| wrap_line(l, o, width)).collect()
+            } else {
+                lines().zip(&block.hangs).flat_map(|((l, o), h)| wrap_line_hanging(l, o, h, width)).collect()
             };
             row += block.rows.len() + BLOCK_GAP;
         }

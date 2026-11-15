@@ -829,6 +829,30 @@ fn two_row_paragraph_app() -> App {
     app
 }
 
+#[test]
+fn dragging_across_a_hanging_row_from_its_indent_selects_only_its_text() {
+    let source = DocumentSource::new(
+        "- alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron\n".to_owned(),
+        "doc.md",
+        true,
+        Provenance::Stdin,
+    );
+    let mut app = App::open(source, 60, Box::new(Discard)).expect("app opens");
+    app.data_dir = scratch_data_dir();
+    draw_sized(&mut app, 60, 20);
+    let block = &app.open.layout.blocks[0];
+    let row = block.rows.get(1).expect("the item wraps");
+    let visible = row.line.to_string();
+    assert!(visible.starts_with("  "), "{visible:?}");
+    assert_ne!(visible.trim_start(), "");
+    let (doc, y) = (app.geometry.doc, app.geometry.doc.y + u16::try_from(block.first_row + 1).expect("row"));
+    let end = doc.x + u16::try_from(row.cells.len() - 1).expect("width");
+    click(&mut app, MouseEventKind::Down(MouseButton::Left), doc.x, y);
+    click(&mut app, MouseEventKind::Drag(MouseButton::Left), end, y);
+    click(&mut app, MouseEventKind::Up(MouseButton::Left), end, y);
+    assert_eq!(selected_text(&app), Some(visible.trim_start()));
+}
+
 fn press_char(app: &mut App, c: char) {
     app.handle_event(&key(KeyCode::Char(c), KeyModifiers::NONE)).expect("key");
 }
