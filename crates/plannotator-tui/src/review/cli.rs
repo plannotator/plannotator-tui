@@ -60,7 +60,11 @@ impl ReviewArgs {
 /// Capture the diff first, so a folder that is no repository or has no changes fails
 /// before the screen is taken; then run the review until it quits.
 pub(crate) fn run(args: &[String]) -> Result<()> {
-    let args = ReviewArgs::parse(args)?;
+    open(ReviewArgs::parse(args)?)
+}
+
+/// [`run`] for arguments already parsed: from the command line, or from a Herdr pane.
+pub(super) fn open(args: ReviewArgs) -> Result<()> {
     let dir = match args.dir {
         Some(dir) => crate::workspace_paths::absolute(&dir),
         None => std::env::current_dir().context("current directory")?,

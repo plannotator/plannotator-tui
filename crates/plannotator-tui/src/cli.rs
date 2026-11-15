@@ -43,6 +43,7 @@ pub(crate) const USAGE: &str = "usage:
                              [--gate] [--result-file <path>]
   plannotator-tui herdr last [--placement P] [--deliver-to <pane>] [--newest]
   plannotator-tui herdr terminal [--lines N] [--placement P] [--deliver-to <pane>] [--print]
+  plannotator-tui herdr review [--staged | --base REF | --commit SHA] [--placement P] [--deliver-to <pane>]
   plannotator-tui herdr pane
   plannotator-tui rex open [file.md | folder] [--block <id>] [--session <id>] [--paste]
                            [--placement split|popup] [--gate] [--result-file <path>]
@@ -337,6 +338,9 @@ fn herdr_launch(args: &[String]) -> Result<()> {
     if sub == Some("terminal") {
         return herdr_terminal(args.get(1..).unwrap_or_default());
     }
+    if sub == Some("review") {
+        return herdr_review(args.get(1..).unwrap_or_default());
+    }
     if !matches!(sub, Some("open" | "last")) {
         anyhow::bail!(USAGE);
     }
@@ -429,6 +433,32 @@ fn herdr_terminal(args: &[String]) -> Result<()> {
     run(&env, &launch)
 }
 
+/// `plannotator-tui herdr review …`: a code review of the focused pane's repository.
+fn herdr_review(args: &[String]) -> Result<()> {
+    #[cfg(unix)]
+    {
+        crate::review::herdr::launch(args)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = args;
+        anyhow::bail!("code review is not available on Windows yet")
+    }
+}
+
+/// The pane side of [`herdr_review`].
+fn review_pane(scope: &str, repo: Option<&Path>) -> Result<()> {
+    #[cfg(unix)]
+    {
+        crate::review::herdr::pane(scope, repo)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (scope, repo);
+        anyhow::bail!("code review is not available on Windows yet")
+    }
+}
+
 /// The pane entrypoint: Herdr runs this in the opened pane; the environment says what to show.
 fn herdr_pane() -> Result<()> {
     let env = HerdrEnv::from_env();
@@ -444,6 +474,8 @@ fn herdr_pane() -> Result<()> {
             newest: env.newest,
             ..crate::last::LastOptions::default()
         })
+    } else if let Some(scope) = &env.review {
+        review_pane(scope, env.repo.as_deref())
     } else {
         let path = env.file.clone().unwrap_or(std::env::current_dir().context("current directory")?);
         if env.gate { gated_pane(&path, env.result_file.as_deref()) } else { interactive(&path) }

@@ -226,6 +226,12 @@ code block. Send goes to the agent in that pane, as it does for a reply; a pane 
 copies instead. `--print` writes the document to stdout instead of opening a pane. Herdr
 Annotate ships it as the `annotate.terminal` action with no default key.
 
+`plannotator-tui herdr review [--staged | --base REF | --commit SHA]` opens a [code
+review](#code-review) of the focused pane's git repository (else the workspace's folder) in a
+pane. Send goes to the agent in that pane. A folder that is not in a repository, or has no
+changes to review, fails before any pane opens. The development manifest has it as the
+`review` action with no default key, on macOS and Linux.
+
 A Claude Code session is looked up in `CLAUDE_CONFIG_DIR`, else `~/.claude`. An agent's own
 `CLAUDE_CONFIG_DIR` doesn't reach a pane Herdr opens, so if you run several profiles, list
 them to have them searched for a session Herdr identifies by id:
