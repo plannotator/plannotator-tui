@@ -63,7 +63,7 @@ impl App {
             // The comment box's new-line key; a path has one line.
             KeyCode::Char('j' | 'J') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
             _ => {
-                if self.compose.handle_key(key) == ComposeAction::Cancel {
+                if self.compose.handle_key(key, self.compose_wrap()) == ComposeAction::Cancel {
                     self.mode = Mode::Browse;
                 }
             }
