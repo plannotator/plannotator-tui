@@ -1,4 +1,4 @@
-//! `plannotator-tui rex last|open|terminal|find`: find the agent in a Rex block and open
+//! `plannotator-tui rex last|open|terminal|find|review`: find the agent in a Rex block and open
 //! plannotator-tui beside it (a split) or over it (a popup), wired to send feedback back to
 //! the block. Either is an ordinary pane, so it keeps Rex's frame and theme. `foreground`,
 //! `reported_host` and `argv` are pure; only `run` touches Rex.
@@ -26,6 +26,10 @@ pub(crate) enum Review {
     /// The newest Markdown file named in the block's last `lines` lines of output. `run`
     /// turns it into an `Open`.
     Find { lines: u32 },
+    /// A code review of the repository at `repo`, already checked to have changes in `scope`
+    /// (as [`crate::review::scope`] writes it).
+    #[cfg_attr(not(unix), allow(dead_code, reason = "code review is unix only"))]
+    Code { scope: String, repo: PathBuf },
 }
 
 /// `rex open --gate`: Approve beside Send, and where the decision is published.
@@ -122,6 +126,9 @@ pub(crate) fn argv(
             args.push(lines.to_string());
         }
         Review::Find { .. } => anyhow::bail!("a find review is resolved to an open before the split"),
+        Review::Code { scope, repo } => {
+            args.extend(["review".to_owned(), scope.clone(), repo.display().to_string()]);
+        }
     }
     Ok(args)
 }
@@ -136,8 +143,18 @@ fn newest_markdown(rex: &Rex, block: &str, fg: &Foreground, lines: u32) -> Resul
         .with_context(|| format!("no Markdown file named in the last {lines} lines of block {block}"))
 }
 
-/// Open the review beside or over `block`. The agent is the one its status report names, else
+/// The program in the foreground of `block`. The agent is the one its status report names, else
 /// the one its process names; a status Rex cannot give leaves the process to decide.
+pub(crate) fn agent(rex: &Rex, block: &str) -> Result<Foreground> {
+    let process = rex.terminal_method(block, "process")?;
+    let mut fg = foreground(&process).with_context(|| format!("block {block} has no foreground process"))?;
+    if let Ok(status) = rex.terminal_method(block, "program_status") {
+        fg.host = reported_host(&status, fg.pid).or(fg.host);
+    }
+    Ok(fg)
+}
+
+/// Open the review beside or over `block`.
 pub(crate) fn run(
     rex: &Rex,
     block: &str,
@@ -145,18 +162,31 @@ pub(crate) fn run(
     handoff: Handoff,
     placement: RexPlacement,
 ) -> Result<()> {
-    let process = rex.terminal_method(block, "process")?;
-    let mut fg = foreground(&process).with_context(|| format!("block {block} has no foreground process"))?;
-    if let Ok(status) = rex.terminal_method(block, "program_status") {
-        fg.host = reported_host(&status, fg.pid).or(fg.host);
-    }
-    let exe = std::env::current_exe().context("finding the plannotator-tui binary")?;
+    let fg = agent(rex, block)?;
     let review = match review {
         Review::Find { lines } => Review::Open(Some(newest_markdown(rex, block, &fg, *lines)?), None),
         other => other.clone(),
     };
-    let args = argv(&exe, block, &fg, &review, handoff)?;
-    super::place::open(rex, block, placement, fg.cwd.as_deref(), &args)
+    open(rex, block, &fg, &review, handoff, placement)
+}
+
+/// Open `review`, resolved, beside or over `block`, where `fg` runs. A code review starts in the
+/// repository's root; anything else in the block's folder.
+pub(crate) fn open(
+    rex: &Rex,
+    block: &str,
+    fg: &Foreground,
+    review: &Review,
+    handoff: Handoff,
+    placement: RexPlacement,
+) -> Result<()> {
+    let exe = std::env::current_exe().context("finding the plannotator-tui binary")?;
+    let args = argv(&exe, block, fg, review, handoff)?;
+    let cwd = match review {
+        Review::Code { repo, .. } => Some(repo.as_path()),
+        _ => fg.cwd.as_deref(),
+    };
+    super::place::open(rex, block, placement, cwd, &args)
 }
 
 #[cfg(test)]
@@ -280,6 +310,34 @@ mod tests {
         let published = gated(Gate { result_file: Some(PathBuf::from("/p/decision.json")) });
         assert_eq!(tail(&published), ["open", "/p/plan.md", "--gate", "--result-file", "/p/decision.json"]);
         assert!(published.contains(&"PLANNOTATOR_TUI_REX_BLOCK=block:b".to_owned()), "the agent hears it");
+    }
+
+    #[test]
+    fn a_code_review_names_its_scope_and_repository_and_sends_to_the_blocks_agent() {
+        let review = Review::Code { scope: "base:origin/main".to_owned(), repo: PathBuf::from("/p/repo") };
+        let args =
+            argv(Path::new("/bin/pt"), "block:b", &parse(CLAUDE), &review, Handoff::Send).expect("argv");
+        assert_eq!(
+            args,
+            [
+                "/usr/bin/env",
+                "PLANNOTATOR_TUI_REX_BLOCK=block:b",
+                "PLANNOTATOR_TUI_DELIVER_AGENT=claude",
+                "PLANNOTATOR_TUI_REX_PID=60223",
+                "/bin/pt",
+                "rex",
+                "pane",
+                "review",
+                "base:origin/main",
+                "/p/repo"
+            ]
+        );
+        let shell =
+            argv(Path::new("/bin/pt"), "block:b", &parse(SHELL), &review, Handoff::Send).expect("argv");
+        assert_eq!(
+            shell,
+            ["/usr/bin/env", "/bin/pt", "rex", "pane", "review", "base:origin/main", "/p/repo"]
+        );
     }
 
     #[test]

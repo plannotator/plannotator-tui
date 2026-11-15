@@ -9,12 +9,12 @@ use anyhow::{Context, Result};
 
 use super::command::Rex;
 use super::launch::{self, Gate, Handoff, Review};
-use crate::cli::{USAGE, gated_pane, interactive, last_command, lines_value, wait_on_error};
+use crate::cli::{USAGE, gated_pane, interactive, last_command, lines_value, review_pane, wait_on_error};
 use crate::config::RexPlacement;
 use crate::gate::{self, GateError};
 
-/// `plannotator-tui rex open|last|terminal|find`: open a review beside a block (a split) or
-/// over it (`--placement popup`, or `[rex] placement`). The block defaults to `REX_BLOCK`, so
+/// `plannotator-tui rex open|last|terminal|find|review`: open a review beside a block (a split)
+/// or over it (`--placement popup`, or `[rex] placement`). The block defaults to `REX_BLOCK`, so
 /// an agent running this from its own block reviews itself. `rex install` writes the Rex
 /// Annotate module.
 /// `--paste` leaves the feedback in the agent's prompt instead of sending it; `open --gate`
@@ -31,6 +31,7 @@ fn launch_review(args: &[String]) -> Result<()> {
         Some("open") => Review::Open(None, None),
         Some("terminal") => Review::Terminal { lines: crate::terminal::DEFAULT_LINES },
         Some("find") => Review::Find { lines: crate::terminal::DEFAULT_LINES },
+        Some("review") => return code_review(args.get(1..).unwrap_or_default()),
         Some("pane") => return pane(args.get(1..).unwrap_or_default()),
         Some("install") => return super::install::run(args.get(1..).unwrap_or_default()),
         _ => anyhow::bail!(USAGE),
@@ -78,19 +79,74 @@ fn launch_review(args: &[String]) -> Result<()> {
     if let (true, Review::Open(_, gate)) = (gated, &mut review) {
         *gate = Some(Gate { result_file });
     }
-    let block = block
-        .or_else(|| std::env::var("REX_BLOCK").ok().filter(|b| !b.is_empty()))
-        .context("no Rex block: pass --block or run inside Rex (REX_BLOCK is not set)")?;
+    let block = target_block(block)?;
     let rex = Rex::from_lookup(|k| std::env::var(k).ok(), session)?;
     if let (true, Review::Terminal { lines }) = (print, &review) {
         print!("{}", crate::terminal::document(&super::terminal::read(&rex, &block, *lines)?));
         return Ok(());
     }
-    let placement = match placement {
-        Some(placement) => placement,
-        None => crate::config::Config::load()?.rex.placement,
-    };
-    launch::run(&rex, &block, &review, handoff, placement)
+    launch::run(&rex, &block, &review, handoff, configured(placement)?)
+}
+
+/// `--block`, else `REX_BLOCK`: the block the launcher was run from.
+fn target_block(block: Option<String>) -> Result<String> {
+    block
+        .or_else(|| std::env::var("REX_BLOCK").ok().filter(|b| !b.is_empty()))
+        .context("no Rex block: pass --block or run inside Rex (REX_BLOCK is not set)")
+}
+
+/// `--placement`, else `[rex] placement`.
+fn configured(placement: Option<RexPlacement>) -> Result<RexPlacement> {
+    match placement {
+        Some(placement) => Ok(placement),
+        None => Ok(crate::config::Config::load()?.rex.placement),
+    }
+}
+
+/// `plannotator-tui rex review [--staged | --base REF | --commit SHA]`: a code review of the
+/// block's repository, beside it. A folder outside a repository, or with nothing to review,
+/// fails before any split opens.
+fn code_review(args: &[String]) -> Result<()> {
+    #[cfg(unix)]
+    {
+        review_block(args)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = args;
+        anyhow::bail!("code review is not available on Windows yet")
+    }
+}
+
+#[cfg(unix)]
+fn review_block(args: &[String]) -> Result<()> {
+    let mut block = None;
+    let mut session = None;
+    let mut handoff = Handoff::Send;
+    let mut placement = None;
+    let mut scope = Vec::new();
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--block" => block = Some(rest.next().context("--block needs a value")?.clone()),
+            "--session" => session = Some(rest.next().context("--session needs a value")?.clone()),
+            "--paste" => handoff = Handoff::Paste,
+            "--placement" => {
+                let value = rest.next().context("--placement needs split or popup")?;
+                placement = Some(value.parse::<RexPlacement>()?);
+            }
+            _ => scope.push(arg.clone()),
+        }
+    }
+    let refusal = "rex review takes no folder: it reviews the block's repository";
+    let request = crate::review::scope::request(&scope, refusal)?;
+    let block = target_block(block)?;
+    let rex = Rex::from_lookup(|k| std::env::var(k).ok(), session)?;
+    let fg = launch::agent(&rex, &block)?;
+    let folder = fg.cwd.clone().with_context(|| format!("block {block} reports no folder"))?;
+    let (repo, scope) = crate::review::scope::changes(&folder, &request)?;
+    let review = Review::Code { scope, repo };
+    launch::open(&rex, &block, &fg, &review, handoff, configured(placement)?)
 }
 
 /// The split's entry point. Rex closes the split when this exits, so an error waits for
@@ -109,6 +165,10 @@ fn pane(args: &[String]) -> Result<()> {
             )),
         },
         Some("terminal") => pane_terminal(args.get(1..).unwrap_or_default()),
+        Some("review") => match args.get(1..).unwrap_or_default() {
+            [scope, repo] => review_pane(scope, Some(std::path::Path::new(repo))),
+            _ => Err(anyhow::anyhow!("rex pane review takes a scope and a repository\n{USAGE}")),
+        },
         _ => Err(anyhow::anyhow!(USAGE)),
     };
     if let Err(err) = &result {
@@ -159,6 +219,29 @@ mod tests {
     fn a_placement_is_split_or_popup_and_named_when_wrong() {
         let err = run(&args(&["open", "--placement", "overlay"])).expect_err("refused").to_string();
         assert!(err.contains("\"overlay\"") && err.contains("split or popup"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_code_review_refuses_a_folder_and_a_mistyped_flag_before_asking_rex() {
+        let err = |list: &[&str]| run(&args(list)).map(drop).err().map(|e| e.to_string()).unwrap_or_default();
+        assert_eq!(
+            err(&["review", "../other"]),
+            "rex review takes no folder: it reviews the block's repository"
+        );
+        assert!(err(&["review", "--gate"]).starts_with("unknown flag --gate"));
+        assert_eq!(
+            err(&["review", "--staged", "--commit", "HEAD"]),
+            "pick one of --staged, --base and --commit"
+        );
+        assert!(err(&["review", "--placement", "overlay"]).contains("split or popup"));
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn a_code_review_says_it_is_not_on_windows_yet() {
+        let err = run(&args(&["review"])).expect_err("refused").to_string();
+        assert_eq!(err, "code review is not available on Windows yet");
     }
 
     #[test]

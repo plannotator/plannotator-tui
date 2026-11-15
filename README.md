@@ -378,9 +378,10 @@ An explicit `--placement` or `PLANNOTATOR_TUI_PLACEMENT` still takes precedence.
 ## Rex Annotate
 
 Rex Annotate gives [Rex](https://www.superlogical.com/rex) the same reviews as Herdr Annotate:
-a key opens the focused pane's agent replies, its folder, or its output in plannotator-tui, and
-**Send** makes the review the agent's next message: `Send 3 new ▸ claude in a1d6db (E)`. Rex has
-no plugin manifest, so Rex Annotate is a Lua module that Rex's config file loads.
+a key opens the focused pane's agent replies, its folder, its git changes, or its output in
+plannotator-tui, and **Send** makes the review the agent's next message:
+`Send 3 new ▸ claude in a1d6db (E)`. Rex has no plugin manifest, so Rex Annotate is a Lua module
+that Rex's config file loads.
 
 ```sh
 brew trust plannotator/tap && brew install plannotator/tap/plannotator-tui
@@ -411,6 +412,7 @@ Run it again after upgrading plannotator-tui. `--dry-run` says what it would wri
 | | `annotate_gate` | the pane's folder, with **Approve** (`A`) |
 | | `annotate_terminal` | the pane's recent output |
 | | `annotate_find` | the newest `.md` file the pane's output names |
+| | `annotate_review` | a [code review](#code-review) of the uncommitted changes in the pane's repository |
 
 Rex for Mac binds none of these keys by default. Change or add keys, or bind none:
 
@@ -442,6 +444,7 @@ plannotator-tui rex last [--newest]         # the agent's replies
 plannotator-tui rex open [file.md | folder] # a document, or the pane's folder
 plannotator-tui rex terminal [--lines N]    # the pane's recent output; --print writes it out
 plannotator-tui rex find [--lines N]        # the newest .md file the pane's output names
+plannotator-tui rex review [--staged | --base REF | --commit SHA] # a code review of the pane's repository
 ```
 
 The pane is `--block <id>`, else `REX_BLOCK`, so an agent that runs a launcher in its own
@@ -449,6 +452,9 @@ shell reviews itself; that is how it hands you a plan. `--placement split|popup`
 config. `--paste` puts the feedback in the agent's prompt without pressing Enter and focuses the
 agent's pane, so you can edit it first; the header says `claude prompt in a1d6db`.
 `rex open --gate [--result-file <path>]` adds Approve for a sign-off, as `herdr open --gate` does.
+`rex review` reviews the git repository of the pane's folder, as `herdr review` does: a folder
+that is not in a repository, or has no changes to review, fails before any split opens. Code
+review is not available on Windows yet.
 
 The agent is the one the pane's program reports to Rex (its program status app, such as `pi`
 or `claude-code`), else the one its process is named after. So pi, which runs under `node`,
@@ -469,6 +475,7 @@ plannotator-tui is started by a command rather than a manifest. Run it in an hc 
 plannotator-tui hc last [--newest] [--session <transcript>]   # the agent's replies
 plannotator-tui hc open [file.md | folder]                    # a document, or the terminal's folder
 plannotator-tui hc open plan.md --gate [--result-file <path>] # adds Approve, as `herdr open --gate`
+plannotator-tui hc review [--staged | --base REF | --commit SHA] # a code review of the terminal's repository
 ```
 
 Each starts plannotator-tui in a terminal of its own, `annotate-<terminal>`, and shows it in
@@ -481,7 +488,8 @@ a moment to learn of a new terminal, so the launcher asks again for up to 3 s wh
 review starts anyway and cannot know your colours: the launcher prints herdr-app's reason and the
 `hc attach` command. Set `[ui] theme` for that case. The terminal is removed when the review
 ends, and hc does not type a note about it into the agent's prompt. One review per terminal at a
-time.
+time. `hc review` reviews the git repository of the terminal's folder, as `herdr review` does: a
+folder that is not in a repository, or has no changes to review, fails before any terminal starts.
 
 The terminal is `--terminal <t>` (an address or a name), else `HC_TERMINAL_ID`, so an agent that
 runs a launcher in its own terminal reviews itself; that is how it hands you a plan. The header

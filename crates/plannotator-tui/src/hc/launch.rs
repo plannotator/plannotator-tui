@@ -1,4 +1,4 @@
-//! `plannotator-tui hc last|open`: find the agent in an hc terminal, start plannotator-tui in a
+//! `plannotator-tui hc last|open|review`: find the agent in an hc terminal, start plannotator-tui in a
 //! terminal of its own, wired to send feedback back to the agent, and show it. `foreground`,
 //! `argv` and `run_args` are pure; only `run` touches `hc` and herdr-app (through `show`).
 
@@ -24,6 +24,10 @@ pub(crate) enum Review {
     /// A file or folder; the terminal's directory when `None`. With a [`Gate`], the review can
     /// be approved, as `herdr open --gate` does.
     Open(Option<PathBuf>, Option<Gate>),
+    /// A code review of the repository at `repo`, already checked to have changes in `scope`
+    /// (as [`crate::review::scope`] writes it).
+    #[cfg_attr(not(unix), allow(dead_code, reason = "code review is unix only"))]
+    Code { scope: String, repo: PathBuf },
 }
 
 /// `hc open --gate`: Approve beside Send, and where the decision is published.
@@ -93,6 +97,9 @@ pub(crate) fn argv(
                 }
             }
         }
+        Review::Code { scope, repo } => {
+            args.extend(["review".to_owned(), scope.clone(), repo.display().to_string()]);
+        }
     }
     Ok(args)
 }
@@ -137,8 +144,7 @@ fn absolute(hc: &Hc) -> PathBuf {
         .unwrap_or_else(|| bin.to_path_buf())
 }
 
-/// Start the review of `target` and show it. Without herdr-app to show it, the review keeps
-/// running and the launcher says how to attach.
+/// Start the review of `target` and show it.
 pub(crate) fn run(
     hc: &Hc,
     target: &str,
@@ -146,17 +152,36 @@ pub(crate) fn run(
     placement: Placement,
     direction: SplitDirection,
 ) -> Result<()> {
+    let fg = agent(hc, target)?;
+    start(hc, target, &fg, review, placement, direction)
+}
+
+/// The program in the foreground of `target`, which must be on this machine.
+pub(crate) fn agent(hc: &Hc, target: &str) -> Result<Foreground> {
     anyhow::ensure!(
         !target.contains('/'),
         "{target} is on another machine; a review reads the transcripts and files on this one"
     );
     let facts = hc.get(target)?;
-    let fg = foreground(&facts).with_context(|| format!("{target} has no foreground program"))?;
+    foreground(&facts).with_context(|| format!("{target} has no foreground program"))
+}
+
+/// Start `review` of `target`, where `fg` runs, and show it. Without herdr-app to show it, the
+/// review keeps running and the launcher says how to attach.
+pub(crate) fn start(
+    hc: &Hc,
+    target: &str,
+    fg: &Foreground,
+    review: &Review,
+    placement: Placement,
+    direction: SplitDirection,
+) -> Result<()> {
     let exe = std::env::current_exe().context("finding the plannotator-tui binary")?;
-    let program = argv(&exe, &absolute(hc), target, &fg, review)?;
+    let program = argv(&exe, &absolute(hc), target, fg, review)?;
     let cwd = match review {
         Review::Open(Some(path), _) if path.is_file() => path.parent().map(Path::to_path_buf),
         Review::Open(Some(path), _) => Some(path.clone()),
+        Review::Code { repo, .. } => Some(repo.clone()),
         _ => fg.cwd.clone(),
     };
     let name = terminal_name(target);
@@ -258,6 +283,18 @@ mod tests {
         let open = Review::Open(Some(PathBuf::from("/plans/a.md")), Some(gate));
         let args = argv(exe, Path::new("hc"), "t7", &pi(), &open).expect("an argv");
         assert!(args.ends_with(&strs(&["/plans/a.md", "--gate", "--result-file", "/tmp/decision.json"])));
+    }
+
+    #[test]
+    fn a_code_review_names_its_scope_and_repository_and_sends_to_the_terminals_agent() {
+        let exe = Path::new("/bin/plannotator-tui");
+        let review = Review::Code { scope: "staged".to_owned(), repo: PathBuf::from("/work/app") };
+        let args = argv(exe, Path::new("/opt/hc"), "t7", &pi(), &review).expect("an argv");
+        assert!(args.contains(&"PLANNOTATOR_TUI_HC_TERMINAL=t7".to_owned()), "{args:?}");
+        assert!(
+            args.ends_with(&strs(&["hc", "pane", "--held", "review", "staged", "/work/app"])),
+            "{args:?}"
+        );
     }
 
     #[test]
