@@ -1,6 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["crates/plannotator-tui-schema", "crates/plannotator-tui-hosts", "crates/plannotator-tui"]
+members = [
+    "crates/plannotator-tui-schema",
+    "crates/plannotator-tui-hosts",
+    "crates/plannotator-tui-review",
+    "crates/plannotator-tui",
+]
 
 [workspace.package]
 version = "0.9.11"
