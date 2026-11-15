@@ -41,6 +41,8 @@ fn main() -> std::process::ExitCode {
             // A strict gate's own failure must not read as the reviewer's rejection.
             if err.is::<gate::GateError>() {
                 std::process::ExitCode::from(gate::GATE_ERROR_EXIT)
+            } else if err.is::<pi::cli::NoPi>() {
+                std::process::ExitCode::from(u8::try_from(delivery::command::EXIT_UNAVAILABLE).unwrap_or(1))
             } else {
                 std::process::ExitCode::FAILURE
             }
