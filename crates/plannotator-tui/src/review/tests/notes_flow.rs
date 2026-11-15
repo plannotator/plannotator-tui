@@ -1,7 +1,7 @@
 //! Making notes on the diff, and what becomes of them when the code changes.
 
 use plannotator_tui_review::{NoteScope, NoteType, Side, Status};
-use ratatui::crossterm::event::KeyCode;
+use ratatui::crossterm::event::{Event, KeyCode};
 
 use super::*;
 use crate::review::{Draft, Mode};
@@ -65,6 +65,36 @@ fn a_file_comment_and_an_empty_note() {
     type_and_save(&mut screen, "split this file");
     let [note] = screen.store.annotations() else { panic!("one note") };
     assert_eq!((note.scope, note.file_path.as_str()), (NoteScope::File, "app.py"));
+}
+
+#[test]
+fn esc_on_a_typed_note_asks_before_discarding_it() {
+    let fixture = Fixture::new("discard");
+    let mut screen = fixture.open();
+    at(&mut screen, 9);
+    keys(&mut screen, "c");
+    press(&mut screen, KeyCode::Esc);
+    assert_eq!(screen.mode, Mode::Browse, "nothing typed, nothing to lose");
+
+    keys(&mut screen, "c");
+    screen.handle_event(Event::Paste("name the total".to_owned())).expect("paste");
+    press(&mut screen, KeyCode::Esc);
+    let rows = frame(&mut screen, 100, 30);
+    assert!(
+        row_with(&rows, "discard comment on app.py:9?").contains("y discard \u{b7} n keep editing"),
+        "{rows:?}"
+    );
+    press(&mut screen, KeyCode::Enter);
+    keys(&mut screen, "x");
+    assert!(matches!(screen.mode, Mode::Compose(_)), "Enter and stray keys are no answer");
+    keys(&mut screen, "n");
+    keys(&mut screen, "!");
+    assert_eq!(screen.compose.value(), "name the total!", "n went back to editing");
+
+    press(&mut screen, KeyCode::Esc);
+    keys(&mut screen, "y");
+    assert_eq!(screen.mode, Mode::Browse);
+    assert_eq!(screen.store.annotations().len(), 0, "discarded, not saved");
 }
 
 #[test]

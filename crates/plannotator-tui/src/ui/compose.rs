@@ -16,6 +16,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr as _};
 
+use crate::keys::{self, Action, Keymap};
 use crate::theme::palette;
 
 /// What a keystroke did to the compose box.
@@ -32,6 +33,8 @@ pub(crate) struct Compose {
     cursor: usize,
     /// The text the box opened with, to tell whether cancelling would lose anything.
     initial: String,
+    /// Esc was pressed with changed text, and the box is asking whether to discard it.
+    asking: bool,
 }
 
 fn width_of(c: char) -> usize {
@@ -42,7 +45,7 @@ impl Compose {
     pub(crate) fn with_text(text: &str) -> Self {
         let chars: Vec<char> = text.chars().collect();
         let cursor = chars.len();
-        Self { chars, cursor, initial: text.to_owned() }
+        Self { chars, cursor, initial: text.to_owned(), asking: false }
     }
 
     pub(crate) fn value(&self) -> String {
@@ -53,6 +56,44 @@ impl Compose {
     /// trims, so whitespace at the edges does not count.
     pub(crate) fn has_changes(&self) -> bool {
         self.value().trim() != self.initial.trim()
+    }
+
+    /// Apply one keystroke as a comment box: like [`Compose::handle_key`], except that Esc
+    /// with changed text asks first. While it asks, only `yes` (which cancels) and `no` or
+    /// `back` (which go back to editing) do anything; Enter is no answer, so a slip
+    /// cannot lose the text.
+    pub(crate) fn key(&mut self, keymap: &Keymap, key: KeyEvent, wrap_width: usize) -> ComposeAction {
+        if self.asking {
+            match keymap.action(&key, keys::CONFIRM_CLEAR) {
+                Some(Action::Yes) => {
+                    self.asking = false;
+                    return ComposeAction::Cancel;
+                }
+                Some(Action::No | Action::Back) => self.asking = false,
+                _ => {}
+            }
+            return ComposeAction::Edited;
+        }
+        match self.handle_key(key, wrap_width) {
+            ComposeAction::Cancel if self.has_changes() => {
+                self.asking = true;
+                ComposeAction::Edited
+            }
+            action => action,
+        }
+    }
+
+    /// The box's title: [`title`], or the discard question while it asks.
+    pub(crate) fn heading(&self, verb: &str, shift_enter: bool, keymap: &Keymap) -> String {
+        if !self.asking {
+            return title(verb, shift_enter);
+        }
+        let answers = [(Action::Yes, "discard"), (Action::No, "keep editing")]
+            .into_iter()
+            .filter_map(|(action, label)| keymap.labelled(action, label))
+            .collect::<Vec<_>>()
+            .join(" \u{b7} ");
+        format!(" discard {verb}? {answers} ")
     }
 
     /// Apply one keystroke. `wrap_width` is the width the box last wrapped to, which Up and
@@ -107,6 +148,8 @@ impl Compose {
 
     /// Insert pasted text as typed characters, newlines included.
     pub(crate) fn insert_text(&mut self, text: &str) {
+        // A paste during the discard question is an answer too: keep editing.
+        self.asking = false;
         for c in text.replace("\r\n", "\n").replace('\r', "\n").chars() {
             self.insert(c);
         }
@@ -293,9 +336,10 @@ pub(crate) fn height(compose: &Compose, wrap_width: usize) -> u16 {
 
 /// Draw the box in `rect` (as tall as [`height`] says) with its text wrapped at
 /// `rect.width - CHROME`, and put the terminal cursor at the insertion point. A title too
-/// long for the top border continues on the bottom one; `title_style` is dim for the usual
-/// title and bold for a question.
-pub(crate) fn draw(frame: &mut Frame, rect: Rect, compose: &Compose, title: &str, title_style: Style) {
+/// long for the top border continues on the bottom one. It is dim, and bold while the box
+/// asks to discard its text.
+pub(crate) fn draw(frame: &mut Frame, rect: Rect, compose: &Compose, title: &str) {
+    let title_style = if compose.asking { Style::new().bold() } else { Style::new().dim() };
     let wrap_width = usize::from(rect.width.saturating_sub(CHROME));
     let (lines, cursor_row, cursor_col) = compose.wrapped(wrap_width);
     let content_rows = content_rows(compose, wrap_width);

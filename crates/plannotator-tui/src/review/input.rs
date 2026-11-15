@@ -56,7 +56,7 @@ impl Screen {
                     0 => usize::from(super::draw::COMPOSE_MAX_WIDTH.saturating_sub(compose::CHROME)),
                     drawn => drawn,
                 };
-                match self.compose.handle_key(key, wrap) {
+                match self.compose.key(&self.keys, key, wrap) {
                     ComposeAction::Save => self.save_draft(&draft)?,
                     ComposeAction::Cancel => self.mode = Mode::Browse,
                     ComposeAction::Edited => {}

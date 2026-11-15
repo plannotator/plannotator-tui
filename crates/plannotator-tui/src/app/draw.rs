@@ -284,18 +284,9 @@ impl App {
         self.geometry.toolbar = Some((rect, spans));
     }
 
-    /// The compose box title; the Shift+Enter hint appears only when the terminal
-    /// actually distinguishes it, so the hint is never a lie.
+    /// The compose box title, or its discard question.
     fn compose_title(&self, verb: &str) -> String {
-        if self.confirm_discard {
-            let answers = [(Action::Yes, "discard"), (Action::No, "keep editing")]
-                .into_iter()
-                .filter_map(|(action, label)| self.keys.labelled(action, label))
-                .collect::<Vec<_>>()
-                .join(" \u{b7} ");
-            return format!(" discard {verb}? {answers} ");
-        }
-        compose::title(verb, self.shift_enter)
+        self.compose.heading(verb, self.shift_enter, &self.keys)
     }
 
     /// `[ui] comment_width`, raised to where the title still fits on the box's two borders.
@@ -329,8 +320,7 @@ impl App {
         let wrap_width = usize::from(width.saturating_sub(compose::CHROME));
         self.geometry.compose_wrap = wrap_width;
         let rect = self.compose_rect(frame.area(), compose::height(&self.compose, wrap_width));
-        let title_style = if self.confirm_discard { Style::new().bold() } else { Style::new().dim() };
-        compose::draw(frame, rect, &self.compose, title, title_style);
+        compose::draw(frame, rect, &self.compose, title);
     }
 
     fn edit_origin(&self, height: u16, width: u16) -> Option<Rect> {

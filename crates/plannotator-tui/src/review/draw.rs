@@ -239,8 +239,8 @@ impl Screen {
             Draft::File(path) => format!("note on {path}"),
             Draft::Edit(_) => "edit".to_owned(),
         };
-        let title = compose::title(&verb, self.shift_enter);
-        compose::draw(frame, rect, &self.compose, &title, Style::new().dim());
+        let title = self.compose.heading(&verb, self.shift_enter, &self.keys);
+        compose::draw(frame, rect, &self.compose, &title);
     }
 }
 
