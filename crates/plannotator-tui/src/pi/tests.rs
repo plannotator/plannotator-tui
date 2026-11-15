@@ -167,12 +167,12 @@ fn live_sessions_keep_answering_ones_with_fresh_state_and_drop_closed_ones() {
 #[test]
 fn the_link_lists_itself_answers_pings_and_hands_notes_to_the_app() {
     let root = temp_root("link");
-    let doc = PathBuf::from("/w/doc.md");
-    let link = link::Link::start(&root, PathBuf::from("/w"), vec![doc.clone()]).expect("link");
+    let doc = root.join("w").join("doc.md");
+    let link = link::Link::start(&root, root.join("w"), vec![doc.clone()]).expect("link");
     let path = root.join("tui").join(format!("{}.json", std::process::id()));
     let listed: Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("entry")).expect("json");
     assert_eq!(listed["host"], "plannotator-tui");
-    assert_eq!(listed["files"], json!(["/w/doc.md"]));
+    assert_eq!(listed["files"], json!([doc]));
     let port = u16::try_from(listed["port"].as_u64().expect("port")).expect("u16");
     let token = listed["token"].as_str().expect("token").to_owned();
     assert_eq!(token.len(), 64);
@@ -198,14 +198,15 @@ fn the_link_lists_itself_answers_pings_and_hands_notes_to_the_app() {
         }
     });
     let request_note = json!({
-        "v": 1, "token": token, "op": "note", "file": "/w/doc.md", "quote": "q", "line": 3,
+        "v": 1, "token": token, "op": "note", "file": doc, "quote": "q", "line": 3,
         "note": " n ", "author": "pi · api",
     });
     assert_eq!(request(port, &request_note, SEND_TIMEOUT).expect("note"), json!({"ok": true}));
     let link = app.join().expect("app");
-    link.set_files(vec![PathBuf::from("/w/other.md")]);
+    let other = root.join("w").join("other.md");
+    link.set_files(vec![other.clone()]);
     let listed: Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("entry")).expect("json");
-    assert_eq!(listed["files"], json!(["/w/other.md"]));
+    assert_eq!(listed["files"], json!([other]));
     drop(link);
     assert!(!path.exists(), "the entry goes with the review");
     std::fs::remove_dir_all(root).expect("cleanup");

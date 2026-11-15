@@ -24,6 +24,10 @@ pub(crate) const VERSION: u64 = 1;
 const MAX_LINE: u64 = 1 << 20;
 /// A ping is a liveness probe; a dead session must not hold up the picker.
 const PING_TIMEOUT: Duration = Duration::from_millis(800);
+/// Connecting to a closed loopback port fails at once on macOS and Linux; Windows retries
+/// for about two seconds before it reports the refusal. A live listener accepts at once,
+/// so only a stale entry ever waits this long, and it is deleted after.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 /// A send waits for Pi to accept the message, which it does before any model call.
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -128,7 +132,7 @@ pub(crate) fn live_pi_sessions(root: &Path) -> Vec<PiEntry> {
 /// One request line to `127.0.0.1:<port>` and its one reply line.
 pub(crate) fn request(port: u16, body: &Value, timeout: Duration) -> std::io::Result<Value> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-    let mut stream = TcpStream::connect_timeout(&addr, timeout)?;
+    let mut stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT.max(timeout))?;
     stream.set_read_timeout(Some(timeout))?;
     stream.set_write_timeout(Some(timeout))?;
     let mut line = serde_json::to_vec(body)?;
