@@ -14,7 +14,11 @@
 //!   and `hc review`, and the pane they open.
 //! - [`input`]: keys and the mouse. [`draw`], [`rail`] and [`overlays`]: the frame.
 //! - [`send`]: send, resend, finish and undo. [`pi`]: the Pi link.
-//! - [`cli`]: `plannotator-tui review [--staged | --base REF | --commit SHA] [DIR]`.
+//! - [`cli`]: `plannotator-tui review [--staged | --base REF | --commit SHA | PR] [DIR]`.
+//!
+//! A pull request review (`PR` is a GitHub link, `N` or `#N`) fetches the PR with the
+//! person's `gh` login into their clone or a cache repository ([`capture`]), and sends to the
+//! agent as any review does. Nothing is posted to GitHub.
 
 pub(crate) mod cli;
 mod diff;
@@ -149,9 +153,8 @@ impl Screen {
         delivery: Box<dyn Delivery>,
         wake: SyncSender<()>,
     ) -> Result<Self> {
-        let project = plannotator_tui_review::project_for(&capture.root);
-        let root = capture.root.display().to_string();
-        let store = ReviewStore::load(data_dir, &project, &root, &capture.scope)?;
+        let (project, owner) = capture.record_owner();
+        let store = ReviewStore::load(data_dir, &project, &owner, &capture.scope)?;
         let light = crate::theme::theme() == crate::theme::Theme::Light;
         let diff = Diff::open(&capture, light, wake)?;
         let mut screen = Self {
@@ -298,13 +301,17 @@ impl Screen {
         self.send_state = if self.store.all_delivered() { SendState::Sent } else { SendState::Ready };
     }
 
-    /// The repository root as Pi and the feedback name it.
+    /// The repository root as Pi and the feedback name it: for a pull request fetched into
+    /// the cache, the folder the review was opened in.
     fn root(&self) -> &Path {
-        &self.capture.root
+        self.repo.workdir()
     }
 
-    /// The repository folder's name, for the footer.
+    /// The repository folder's name, for the footer; a pull request's `owner/repo`.
     fn repo_name(&self) -> String {
+        if let Some(pull) = &self.capture.pull {
+            return pull.view.repo.slug();
+        }
         self.root()
             .file_name()
             .map_or_else(|| self.root().display().to_string(), |n| n.to_string_lossy().into())
@@ -312,11 +319,20 @@ impl Screen {
 }
 
 /// Open a review of `dir` for `request` and fail before any screen opens when there is
-/// nothing to show: `No uncommitted changes in app`.
+/// nothing to show: `No uncommitted changes in app`. A pull request is fetched with `gh`
+/// into `dir`'s clone of its repository, else into a bare cache repository under the data
+/// dir (`clients/plannotator-tui/pulls/<host>/<owner>/<repo>.git`).
 pub(crate) fn capture(dir: &Path, request: &plannotator_tui_review::Request) -> Result<(Repo, Capture)> {
-    use plannotator_tui_review::Scope;
-    let repo = Repo::discover(dir)?;
-    let capture = repo.open(request).with_context(|| format!("reviewing {}", repo.root().display()))?;
+    use plannotator_tui_review::{Gh, Request, Scope};
+    let (repo, capture) = if let Request::PullRequest { pr } = request {
+        let cache = crate::workspace_paths::data_dir().join("clients").join("plannotator-tui").join("pulls");
+        Repo::pull_request(dir, pr, &cache, &Gh::default())
+            .with_context(|| format!("reviewing pull request {pr}"))?
+    } else {
+        let repo = Repo::discover(dir)?;
+        let capture = repo.open(request).with_context(|| format!("reviewing {}", repo.root().display()))?;
+        (repo, capture)
+    };
     if capture.is_empty() {
         let root = repo.root();
         let name =
@@ -326,6 +342,7 @@ pub(crate) fn capture(dir: &Path, request: &plannotator_tui_review::Request) -> 
             Scope::Staged => "staged changes".to_owned(),
             Scope::Branch { base } => format!("changes since {base}"),
             Scope::Commit { sha } => format!("changes in commit {}", sha.get(..7).unwrap_or(sha)),
+            Scope::PullRequest { url, .. } => anyhow::bail!("No changes in {url}"),
         };
         anyhow::bail!("No {what} in {name}");
     }

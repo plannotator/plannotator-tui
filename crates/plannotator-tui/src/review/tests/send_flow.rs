@@ -131,8 +131,8 @@ fn a_send_is_archived_as_a_review_of_this_changeset() {
 
 /// The clipboard a review falls back to, recording what it would have copied.
 #[derive(Debug, Default, Clone)]
-struct FallbackCopy {
-    copied: Rc<RefCell<Vec<String>>>,
+pub(super) struct FallbackCopy {
+    pub(super) copied: Rc<RefCell<Vec<String>>>,
 }
 
 impl Delivery for FallbackCopy {

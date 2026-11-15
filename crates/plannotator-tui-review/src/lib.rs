@@ -4,7 +4,8 @@
 //!
 //! - [`scope`]: what a review compares, and its names (record id, browser diff type, label).
 //! - [`capture`]: running git for a scope (temporary index for untracked files, size guard)
-//!   and reading either side's full files.
+//!   and reading either side's full files; fetching a pull request.
+//! - [`github`]: PR links and numbers, and `gh pr view` (read-only).
 //! - [`patch`]: reading a unified patch: files, the lines each side shows, anchors.
 //! - [`annotation`]: a note, in the browser's `CodeAnnotation` shape.
 //! - [`resolve`]: pure functions that place a note against the current files.
@@ -18,15 +19,22 @@ pub mod capture;
 pub mod error;
 pub mod export;
 mod git;
+pub mod github;
 pub mod patch;
 pub mod resolve;
 pub mod scope;
 pub mod store;
 
 pub use annotation::{AnchorContext, CodeAnnotation, Extras, NoteScope, NoteType, Side, Status};
-pub use capture::{Capture, DEFAULT_BASE, MAX_PATCH_BYTES, Repo, Request, SideSource, patch_key};
+pub use capture::{
+    Capture, DEFAULT_BASE, MAX_PATCH_BYTES, PullRequest, Repo, Request, SideSource, patch_key,
+};
 pub use error::{Error, Result};
-pub use export::{OUTDATED_ANNOTATION_LABEL, REVIEW_SUFFIX, agent_feedback, review_feedback};
+pub use export::{
+    OUTDATED_ANNOTATION_LABEL, REVIEW_SUFFIX, agent_feedback, pull_agent_feedback, pull_feedback,
+    review_feedback,
+};
+pub use github::{Gh, PrRepo, PrSpec, PrView};
 pub use patch::{FilePatch, FileStatus};
 pub use resolve::{Current, Resolution, apply, resolve};
 pub use scope::Scope;

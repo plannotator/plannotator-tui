@@ -23,6 +23,18 @@ pub enum Error {
     Json { path: PathBuf, source: serde_json::Error },
     /// Archiving would overwrite an archived note with the same id.
     ArchiveConflict { id: String },
+    /// A pull request review needs `gh`, and it is not installed.
+    GhMissing,
+    /// `gh` is installed but not logged in. `detail` is gh's message.
+    GhNotLoggedIn { detail: String },
+    /// `gh` found no such pull request. `what` names it (`PR #12 in o/r`).
+    PullNotFound { what: String, detail: String },
+    /// A PR number was given in a folder whose repository has no GitHub remote.
+    NoGitHubRemote { detail: String },
+    /// `gh` failed some other way.
+    Gh { detail: String },
+    /// The text is no PR link or number.
+    NotAPull { text: String },
 }
 
 impl fmt::Display for Error {
@@ -48,6 +60,25 @@ impl fmt::Display for Error {
             Self::ArchiveConflict { id } => {
                 write!(f, "cannot archive note {id}: an archived note has the same id")
             }
+            Self::GhMissing => write!(
+                f,
+                "reviewing a pull request needs the GitHub CLI (gh), and it is not installed; install it \
+                 from https://cli.github.com and run `gh auth login`"
+            ),
+            Self::GhNotLoggedIn { detail } => {
+                write!(f, "gh is not logged in to GitHub; run `gh auth login` ({detail})")
+            }
+            Self::PullNotFound { what, detail } => write!(f, "{what} not found ({detail})"),
+            Self::NoGitHubRemote { detail } => write!(
+                f,
+                "a PR number is looked up in this folder's GitHub repository, and there is none here \
+                 ({detail}); pass the PR's link instead"
+            ),
+            Self::Gh { detail } => write!(f, "gh pr view failed: {detail}"),
+            Self::NotAPull { text } => write!(
+                f,
+                "{text:?} is not a pull request; give a link (https://github.com/OWNER/REPO/pull/N), N or #N"
+            ),
         }
     }
 }

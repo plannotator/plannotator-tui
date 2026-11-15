@@ -36,21 +36,21 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui --annotate <file.md> <quote> <text> [comment|looks_good|delete] [--occurrence N]
   plannotator-tui --annotate-block <file.md> <block> <text>
   plannotator-tui --snapshot <file.md> [cols rows scroll] [select-quote] [menu]
-  plannotator-tui review [--staged | --base REF | --commit SHA] [DIR]
+  plannotator-tui review [--staged | --base REF | --commit SHA | PR] [DIR]
   plannotator-tui config
   plannotator-tui --version
   plannotator-tui herdr open [file.md | folder] [--placement overlay|split|popup] [--deliver-to <pane>]
                              [--gate] [--result-file <path>]
   plannotator-tui herdr last [--placement P] [--deliver-to <pane>] [--newest]
   plannotator-tui herdr terminal [--lines N] [--placement P] [--deliver-to <pane>] [--print]
-  plannotator-tui herdr review [--staged | --base REF | --commit SHA] [--placement P] [--deliver-to <pane>]
+  plannotator-tui herdr review [--staged | --base REF | --commit SHA | PR] [--placement P] [--deliver-to <pane>]
   plannotator-tui herdr pane
   plannotator-tui rex open [file.md | folder] [--block <id>] [--session <id>] [--paste]
                            [--placement split|popup] [--gate] [--result-file <path>]
   plannotator-tui rex last [--block <id>] [--session <id>] [--newest] [--paste] [--placement P]
   plannotator-tui rex terminal [--block <id>] [--session <id>] [--lines N] [--paste] [--placement P] [--print]
   plannotator-tui rex find [--block <id>] [--session <id>] [--lines N] [--paste] [--placement P]
-  plannotator-tui rex review [--staged | --base REF | --commit SHA] [--block <id>] [--session <id>] [--paste]
+  plannotator-tui rex review [--staged | --base REF | --commit SHA | PR] [--block <id>] [--session <id>] [--paste]
                              [--placement P]
   plannotator-tui rex install [--dry-run | --print]
   plannotator-tui rex pane (open <path> [--gate [--result-file <path>]] | last <last args>
@@ -61,7 +61,7 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui hc open [file.md | folder] [--terminal <t>] [--placement overlay|split|popup]
                           [--gate] [--result-file <path>]
   plannotator-tui hc last [--terminal <t>] [--placement P] [--newest] [--session <transcript>]
-  plannotator-tui hc review [--staged | --base REF | --commit SHA] [--terminal <t>] [--placement P]
+  plannotator-tui hc review [--staged | --base REF | --commit SHA | PR] [--terminal <t>] [--placement P]
   plannotator-tui hc pane (open <path> [--gate [--result-file <path>]] | last <last args> | review <scope> <repo>)
   plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes|opencode|cmd|agy] [--pid N] [--session <transcript>]
                        [--session-id <id>] [--stdin] [--print] [--pick N] [--newest]";
@@ -247,7 +247,7 @@ fn tool(args: &[String]) -> Result<()> {
     }
 }
 
-/// `plannotator-tui review [--staged | --base REF | --commit SHA] [DIR]`: a git diff, with notes
+/// `plannotator-tui review [--staged | --base REF | --commit SHA | PR] [DIR]`: a git diff, with notes
 /// for the agent (`src/review/`).
 fn code_review(args: &[String]) -> Result<()> {
     #[cfg(unix)]

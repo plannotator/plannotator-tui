@@ -26,6 +26,9 @@ const RAIL_MIN_TOTAL_WIDTH: u16 = 80;
 /// The comment box's widest; code suggestions want the room.
 pub(super) const COMPOSE_MAX_WIDTH: u16 = 84;
 
+/// The most characters of a PR's title the header shows.
+const PR_TITLE_MAX: usize = 48;
+
 impl Screen {
     pub(crate) fn draw(&mut self, frame: &mut Frame) -> Result<()> {
         let area = frame.area();
@@ -69,6 +72,19 @@ impl Screen {
         Ok(())
     }
 
+    /// The header's name for what is reviewed: `Uncommitted`, `Commit 1a2b3c4`, or for a pull
+    /// request `PR #123 · title · base ← head`, its title cut to [`PR_TITLE_MAX`] characters.
+    pub(super) fn scope_title(&self) -> String {
+        let Some(pull) = &self.capture.pull else { return self.capture.scope.title() };
+        let view = &pull.view;
+        let mut title: String = view.title.chars().take(PR_TITLE_MAX).collect();
+        if view.title.chars().count() > PR_TITLE_MAX {
+            title.push('\u{2026}');
+        }
+        let title = if title.is_empty() { String::new() } else { format!(" \u{b7} {title}") };
+        format!("PR #{}{title} \u{b7} {} \u{2190} {}", view.number, view.base_ref, view.head_ref)
+    }
+
     /// `Uncommitted · 4 files +120 −30` on the left; on the right the Review menu and the
     /// Send button, on the edge.
     fn draw_header(&mut self, frame: &mut Frame, area: Rect) {
@@ -76,7 +92,7 @@ impl Screen {
         let files = self.capture.files.len();
         let title = format!(
             " {} \u{b7} {files} file{} +{added} \u{2212}{removed} ",
-            self.capture.scope.title(),
+            self.scope_title(),
             if files == 1 { "" } else { "s" }
         );
         let send = format!(" {} ", self.send_label());

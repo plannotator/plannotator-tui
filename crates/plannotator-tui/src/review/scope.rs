@@ -12,7 +12,8 @@ use plannotator_tui_review::Request;
 
 use super::cli::{self, ReviewArgs};
 
-/// The scope `args` asks for (`--staged`, `--base REF`, `--commit SHA`, else uncommitted). A
+/// The scope `args` asks for (`--staged`, `--base REF`, `--commit SHA`, a pull request as
+/// `--pr PR` or a bare link, `N` or `#N`, else uncommitted). A
 /// launcher reviews its pane's repository, so a folder is refused, with `refusal` as the reason.
 pub(crate) fn request(args: &[String], refusal: &str) -> Result<Request> {
     let ReviewArgs { request, dir } = ReviewArgs::parse(args)?;
@@ -21,10 +22,16 @@ pub(crate) fn request(args: &[String], refusal: &str) -> Result<Request> {
 }
 
 /// The root of the repository `dir` is in and `request` as the pane is told it, once there is
-/// something to review: a folder outside a repository, or with no changes, fails here.
+/// something to review: a folder outside a repository, or with no changes, fails here. A pull
+/// request is told as its link, so the pane finds it from any folder; its folder is the clone
+/// it was fetched into, else `dir`.
 pub(crate) fn changes(dir: &Path, request: &Request) -> Result<(PathBuf, String)> {
-    let (repo, _) = super::capture(dir, request)?;
-    Ok((repo.root().to_path_buf(), scope_value(request)))
+    let (repo, capture) = super::capture(dir, request)?;
+    let scope = match &capture.pull {
+        Some(pull) => scope_value(&Request::PullRequest { pr: pull.view.url.clone() }),
+        None => scope_value(request),
+    };
+    Ok((repo.workdir().to_path_buf(), scope))
 }
 
 /// The pane: open the code review the launcher named.
@@ -40,6 +47,7 @@ pub(crate) fn scope_value(request: &Request) -> String {
         Request::Branch { base: Some(base) } => format!("base:{base}"),
         Request::Branch { base: None } => "base".to_owned(),
         Request::Commit { rev } => format!("commit:{rev}"),
+        Request::PullRequest { pr } => format!("pr:{pr}"),
     }
 }
 
@@ -51,6 +59,7 @@ pub(crate) fn parse_scope(value: &str) -> Result<Request> {
         None if value == "base" => Request::Branch { base: None },
         Some(("base", base)) if !base.is_empty() => Request::Branch { base: Some(base.to_owned()) },
         Some(("commit", rev)) if !rev.is_empty() => Request::Commit { rev: rev.to_owned() },
+        Some(("pr", pr)) if !pr.is_empty() => Request::PullRequest { pr: pr.to_owned() },
         _ => anyhow::bail!("PLANNOTATOR_TUI_REVIEW: {value:?} is not a scope"),
     })
 }
@@ -68,6 +77,7 @@ mod tests {
             Request::Branch { base: Some("origin/main".into()) },
             Request::Branch { base: None },
             Request::Commit { rev: "HEAD~1".into() },
+            Request::PullRequest { pr: "https://github.com/o/r/pull/12".into() },
         ] {
             assert_eq!(parse_scope(&scope_value(&request)).expect("parses"), request);
         }

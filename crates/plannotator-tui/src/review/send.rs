@@ -5,7 +5,7 @@
 use std::fmt::Write as _;
 
 use anyhow::Result;
-use plannotator_tui_review::{CodeAnnotation, NoteScope, agent_feedback};
+use plannotator_tui_review::{CodeAnnotation, NoteScope, agent_feedback, pull_agent_feedback};
 
 use super::{Mode, Screen};
 use crate::archive::{self, AnnotationRecord, ReviewTarget, Submission, Target};
@@ -27,6 +27,10 @@ pub(crate) struct PickThen {
 impl Screen {
     /// The feedback text for `notes`, as the agent receives it.
     pub(super) fn feedback(&self, notes: &[&CodeAnnotation]) -> String {
+        if let Some(pull) = &self.capture.pull {
+            let clone = pull.clone.as_ref().map(|root| root.display().to_string());
+            return pull_agent_feedback(&pull.view, clone.as_deref(), notes);
+        }
         let diff = self.capture.scope.describe(self.capture.commit_subject.as_deref());
         agent_feedback(&self.root().display().to_string(), &diff, notes)
     }
@@ -113,10 +117,21 @@ impl Screen {
         if !archive::enabled(|key| std::env::var(key).ok(), &self.data_dir) {
             return;
         }
+        let pull = self.capture.pull.as_ref();
         let review = ReviewTarget {
             vcs_type: "git",
             diff_type: self.capture.scope.diff_type(),
-            base: self.capture.scope.base().map(str::to_owned),
+            // A PR's diff is merge-base(base, head)..head: its base commit, and `gitRef` and
+            // `pr` as the browser's PR review names them.
+            base: pull
+                .map(|p| p.view.base_sha.clone())
+                .or_else(|| self.capture.scope.base().map(str::to_owned)),
+            git_ref: pull.map(|p| format!("PR #{}", p.view.number)),
+            pr: pull.map(|p| archive::PrTarget {
+                provider: "github",
+                repo: p.view.repo.slug(),
+                number: p.view.number,
+            }),
             cwd: self.root().display().to_string(),
             changed_files: self.capture.files.len(),
             patch_bytes: self.capture.patch_bytes(),

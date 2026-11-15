@@ -169,6 +169,8 @@ plannotator-tui review --staged        # only what is staged
 plannotator-tui review --base main     # everything since this branch left main
 plannotator-tui review --commit 1a2b3c # one commit
 plannotator-tui review ../other-repo   # another repository
+plannotator-tui review 123             # pull request #123 of this repository (also #123)
+plannotator-tui review https://github.com/owner/repo/pull/123
 ```
 
 `review` opens a git diff. Move with `j`/`k`, `]`/`[` for the next or previous hunk, and
@@ -192,6 +194,27 @@ clipboard, or the agent you choose when nothing named one; see [Choosing the age
 A note whose lines changed goes to the **Outdated** group at the end of the rail; it is
 still sent, marked as outdated. `u` switches between split and unified view, `w` wraps
 long lines, `f` lists the changed files and `?` shows every key.
+
+### Pull requests
+
+`review` with a pull request link, a number or `#123` (also `--pr PR`) reviews what GitHub
+shows for that pull request: its head commit against where it left its base branch. It uses
+your `gh` login (install the [GitHub CLI](https://cli.github.com) and run `gh auth login`). A
+number is looked up in the GitHub repository of the folder you run it in; a link works from
+any folder. A folder whose name is only digits is `./123`.
+
+The pull request's commits are fetched into your clone when you run it inside one (any remote
+naming the PR's repository), as the private ref `refs/plannotator-tui/pull/<n>/head`. Your
+branch, index and working files are not touched. Outside a clone of that repository, they are
+fetched into a cache repository under the data folder
+(`clients/plannotator-tui/pulls/<host>/<owner>/<repo>.git`); the first review of a repository
+there downloads its history once.
+
+The header shows `PR #123 · title · base ← head`. `r` looks the pull request up again and
+fetches new pushes; notes follow their lines as they do for local changes. Notes are saved
+once per pull request, whichever clone you open it from. Send goes to the agent as for any
+review, with the browser's pull request header (`# PR Review: owner/repo#123`, the title,
+the branches and the link). Nothing is posted to GitHub.
 
 A Pi session can leave notes on the diff too (see [Pi](#pi)). Notes are saved with the
 other annotations, one record per repository and scope. Code review is not available on
@@ -227,7 +250,7 @@ code block. Send goes to the agent in that pane, as it does for a reply; a pane 
 copies instead. `--print` writes the document to stdout instead of opening a pane. Herdr
 Annotate ships it as the `annotate.terminal` action with no default key.
 
-`plannotator-tui herdr review [--staged | --base REF | --commit SHA]` opens a [code
+`plannotator-tui herdr review [--staged | --base REF | --commit SHA | PR]` opens a [code
 review](#code-review) of the focused pane's git repository (else the workspace's folder) in a
 pane. Send goes to the agent in that pane. A folder that is not in a repository, or has no
 changes to review, fails before any pane opens. The development manifest has it as the
@@ -445,7 +468,7 @@ plannotator-tui rex last [--newest]         # the agent's replies
 plannotator-tui rex open [file.md | folder] # a document, or the pane's folder
 plannotator-tui rex terminal [--lines N]    # the pane's recent output; --print writes it out
 plannotator-tui rex find [--lines N]        # the newest .md file the pane's output names
-plannotator-tui rex review [--staged | --base REF | --commit SHA] # a code review of the pane's repository
+plannotator-tui rex review [--staged | --base REF | --commit SHA | PR] # a code review of the pane's repository
 ```
 
 The pane is `--block <id>`, else `REX_BLOCK`, so an agent that runs a launcher in its own
@@ -476,7 +499,7 @@ plannotator-tui is started by a command rather than a manifest. Run it in an hc 
 plannotator-tui hc last [--newest] [--session <transcript>]   # the agent's replies
 plannotator-tui hc open [file.md | folder]                    # a document, or the terminal's folder
 plannotator-tui hc open plan.md --gate [--result-file <path>] # adds Approve, as `herdr open --gate`
-plannotator-tui hc review [--staged | --base REF | --commit SHA] # a code review of the terminal's repository
+plannotator-tui hc review [--staged | --base REF | --commit SHA | PR] # a code review of the terminal's repository
 ```
 
 Each starts plannotator-tui in a terminal of its own, `annotate-<terminal>`, and shows it in
