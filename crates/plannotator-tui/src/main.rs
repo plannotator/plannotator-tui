@@ -6,6 +6,7 @@ mod base64;
 mod cjk_emphasis;
 mod cli;
 mod config;
+mod decorate;
 mod delivery;
 mod doc;
 mod editor;

@@ -3,10 +3,11 @@
 //! `tui-markdown` emits one `Line` per logical line and never wraps; the layout needs
 //! exact row counts and the selection needs to know which source byte sits under each
 //! screen column, so both live here. Generic text wrapping — no markdown knowledge.
-//! Where a line may break is `wrap::breaks`. Reflowing a rendered table is the one
+//! Where a line may break is `wrap::breaks`; hanging indents are `wrap::hang`. Reflowing a rendered table is the one
 //! shape-aware job, and it lives in `wrap::table`.
 
 mod breaks;
+mod hang;
 mod table;
 
 use ratatui::style::Style;
@@ -15,6 +16,7 @@ use unicode_width::UnicodeWidthChar;
 
 use breaks::token_len;
 
+pub(crate) use hang::{Hang, wrap_line_hanging};
 pub(crate) use table::wrap_table;
 
 /// One screen row: styled text plus, per column, the source byte it came from.
@@ -152,6 +154,12 @@ pub(crate) fn wrap_line(line: &Line<'_>, offsets: &[Option<usize>], width: usize
         .into_iter()
         .map(|piece| finish_row(piece, line.style))
         .collect()
+}
+
+/// `glyph` across `width` columns, every cell pointing at `offset`.
+pub(crate) fn rule_row(glyph: char, style: Style, offset: Option<usize>, width: usize) -> Row {
+    let line = Line::from(Span::styled(glyph.to_string().repeat(width), style));
+    Row { line, cells: vec![offset; width] }
 }
 
 /// Keep one row; clip anything past `width` (code and tables keep their columns).
