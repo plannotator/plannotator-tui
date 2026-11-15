@@ -168,3 +168,11 @@ fn copy_is_y_on_a_waiting_selection_and_yields_to_an_older_config() {
     assert_eq!(keymap.hint(Approve), "A");
     assert_eq!(parse("copy = [\"Y\"]\n").expect("rebinds").hint(CopySelection), "Y");
 }
+
+#[test]
+fn shift_with_a_lowercase_letter_counts_as_the_capital() {
+    let keymap = Keymap::default();
+    assert_eq!(keymap.action(&press(KeyCode::Char('x'), KeyModifiers::SHIFT), DOCUMENT), Some(ClearAll));
+    assert!(keymap.is(Bottom, &press(KeyCode::Char('g'), KeyModifiers::SHIFT)));
+    assert!(!keymap.is(Bottom, &press(KeyCode::Char('g'), KeyModifiers::NONE)));
+}
