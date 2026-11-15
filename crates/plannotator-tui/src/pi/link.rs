@@ -57,6 +57,19 @@ impl Note {
 
 /// The registry entry and listener, for as long as the review runs. Dropping it removes
 /// the entry; the listener thread ends with the process.
+/// This process's entry while a link is open, so a hang-up, which exits without running
+/// `Drop`, can still remove it.
+static ENTRY: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Remove this process's registry entry now. The hang-up watch calls it before exiting.
+pub(crate) fn remove_entry() {
+    if let Ok(mut entry) = ENTRY.lock()
+        && let Some(path) = entry.take()
+    {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 pub(crate) struct Link {
     entry: PathBuf,
     port: u16,
@@ -86,6 +99,9 @@ impl Link {
             notes,
         };
         link.write()?;
+        if let Ok(mut entry) = ENTRY.lock() {
+            *entry = Some(link.entry.clone());
+        }
         Ok(link)
     }
 
@@ -127,6 +143,11 @@ impl Link {
 impl Drop for Link {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.entry);
+        if let Ok(mut entry) = ENTRY.lock()
+            && entry.as_ref() == Some(&self.entry)
+        {
+            *entry = None;
+        }
     }
 }
 
