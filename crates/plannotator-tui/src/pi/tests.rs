@@ -185,10 +185,11 @@ fn the_link_lists_itself_answers_pings_and_hands_notes_to_the_app() {
     assert_eq!(request(port, &relative, SEND_TIMEOUT).expect("relative")["code"], "bad_request");
 
     // The app's side: answer the note when it arrives, as the event loop would.
+    let expected = doc.clone();
     let app = std::thread::spawn(move || {
         loop {
             if let Some(note) = link.take_notes().pop() {
-                assert_eq!(note.file, doc);
+                assert_eq!(note.file, expected);
                 assert_eq!((note.quote.as_deref(), note.line, note.body.as_str()), (Some("q"), Some(3), "n"));
                 assert_eq!(note.author, "pi · api");
                 note.answer(json!({"ok": true}));
