@@ -50,16 +50,19 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui rex last [--block <id>] [--session <id>] [--newest] [--paste] [--placement P]
   plannotator-tui rex terminal [--block <id>] [--session <id>] [--lines N] [--paste] [--placement P] [--print]
   plannotator-tui rex find [--block <id>] [--session <id>] [--lines N] [--paste] [--placement P]
+  plannotator-tui rex review [--staged | --base REF | --commit SHA] [--block <id>] [--session <id>] [--paste]
+                             [--placement P]
   plannotator-tui rex install [--dry-run | --print]
   plannotator-tui rex pane (open <path> [--gate [--result-file <path>]] | last <last args>
-                            | terminal --block <id> [--lines N])
+                            | terminal --block <id> [--lines N] | review <scope> <repo>)
   plannotator-tui pi list [--json]
   plannotator-tui pi send --session <id or name> < feedback.md
   plannotator-tui pi install [--dry-run | --print]
   plannotator-tui hc open [file.md | folder] [--terminal <t>] [--placement overlay|split|popup]
                           [--gate] [--result-file <path>]
   plannotator-tui hc last [--terminal <t>] [--placement P] [--newest] [--session <transcript>]
-  plannotator-tui hc pane (open <path> [--gate [--result-file <path>]] | last <last args>)
+  plannotator-tui hc review [--staged | --base REF | --commit SHA] [--terminal <t>] [--placement P]
+  plannotator-tui hc pane (open <path> [--gate [--result-file <path>]] | last <last args> | review <scope> <repo>)
   plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes|opencode|cmd|agy] [--pid N] [--session <transcript>]
                        [--session-id <id>] [--stdin] [--print] [--pick N] [--newest]";
 
@@ -446,11 +449,11 @@ fn herdr_review(args: &[String]) -> Result<()> {
     }
 }
 
-/// The pane side of [`herdr_review`].
-fn review_pane(scope: &str, repo: Option<&Path>) -> Result<()> {
+/// The pane side of a code-review launcher (`herdr review`, `rex review`, `hc review`).
+pub(crate) fn review_pane(scope: &str, repo: Option<&Path>) -> Result<()> {
     #[cfg(unix)]
     {
-        crate::review::herdr::pane(scope, repo)
+        crate::review::scope::pane(scope, repo)
     }
     #[cfg(not(unix))]
     {

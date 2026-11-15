@@ -10,7 +10,8 @@
 //! - [`diff`]: the diffs-rs engine, in this app's terms.
 //! - [`notes`]: the rail's order and wording.
 //! - [`drafts`]: making, editing and removing notes.
-//! - [`herdr`]: `plannotator-tui herdr review` and the pane it opens.
+//! - [`herdr`]: `plannotator-tui herdr review`. [`scope`]: what it shares with `rex review`
+//!   and `hc review`, and the pane they open.
 //! - [`input`]: keys and the mouse. [`draw`], [`rail`] and [`overlays`]: the frame.
 //! - [`send`]: send, resend, finish and undo. [`pi`]: the Pi link.
 //! - [`cli`]: `plannotator-tui review [--staged | --base REF | --commit SHA] [DIR]`.
@@ -25,6 +26,7 @@ mod notes;
 mod overlays;
 mod pi;
 mod rail;
+pub(crate) mod scope;
 mod send;
 #[cfg(test)]
 mod tests;

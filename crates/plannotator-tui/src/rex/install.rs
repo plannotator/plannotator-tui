@@ -230,6 +230,19 @@ mod tests {
         assert_eq!(lua_string("a\nb"), "\"a\\10b\"");
     }
 
+    // Unix paths: on Windows `/bin/pt` is not absolute. Rex runs on macOS.
+    #[cfg(unix)]
+    #[test]
+    fn the_code_review_action_runs_rex_review_and_has_no_key_until_you_give_it_one() {
+        let text = module(Path::new("/bin/pt")).expect("module");
+        assert!(text.contains(
+            r#"name = "annotate_review", title = "Annotate: Review Changes", args = { "review" }"#
+        ));
+        let keys =
+            text.split("M.keys = {").nth(1).and_then(|rest| rest.split('}').next()).unwrap_or_default();
+        assert!(keys.contains("annotate_last") && !keys.contains("annotate_review"), "{keys}");
+    }
+
     #[test]
     fn install_creates_then_leaves_alone_then_updates_and_a_dry_run_writes_nothing() {
         let dir = scratch("write");

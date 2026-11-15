@@ -265,10 +265,17 @@ impl Key {
     /// A Ctrl binding needs Ctrl alone. A plain binding allows Shift, as a shifted letter
     /// arrives with Shift set, but not Ctrl; Ctrl with Alt still counts as plain, because
     /// Windows reports `AltGr` that way and `AltGr` types ordinary characters.
+    /// A terminal that reports Shift+e as `e` with Shift (a kitty `CSI 101;2u`) means `E`.
     fn matches(self, key: &KeyEvent) -> bool {
         let ctrl_or_alt = key.modifiers & (KeyModifiers::CONTROL | KeyModifiers::ALT);
         let held_ctrl = ctrl_or_alt == KeyModifiers::CONTROL;
-        self.code == key.code && if self.ctrl { key.modifiers == KeyModifiers::CONTROL } else { !held_ctrl }
+        let code = match key.code {
+            KeyCode::Char(c) if c.is_ascii_lowercase() && key.modifiers.contains(KeyModifiers::SHIFT) => {
+                KeyCode::Char(c.to_ascii_uppercase())
+            }
+            code => code,
+        };
+        self.code == code && if self.ctrl { key.modifiers == KeyModifiers::CONTROL } else { !held_ctrl }
     }
 
     /// How the in-app hints spell the key: `j`, `G`, `enter`, `ctrl+d`.

@@ -7,12 +7,12 @@ use anyhow::{Context, Result};
 
 use super::command::Hc;
 use super::launch::{self, Gate, Review};
-use crate::cli::{USAGE, gated_pane, interactive, last_command, wait_on_error};
+use crate::cli::{USAGE, gated_pane, interactive, last_command, review_pane, wait_on_error};
 use crate::config::{Config, Placement};
 use crate::gate::{self, GateError};
 
-/// `plannotator-tui hc open|last`: start a review of the agent in an hc terminal and show it.
-/// The terminal defaults to `HC_TERMINAL_ID`, so an agent running this from its own terminal
+/// `plannotator-tui hc open|last|review`: start a review of the agent in an hc terminal and show
+/// it. The terminal defaults to `HC_TERMINAL_ID`, so an agent running this from its own terminal
 /// reviews itself; that is how it hands you a plan. `open --gate` adds Approve, as
 /// `herdr open --gate` does. `hc pane` is what the review terminal runs. A gated open with a
 /// result file fails as a [`GateError`], like the direct gate.
@@ -25,6 +25,7 @@ fn launch_review(args: &[String]) -> Result<()> {
     let mut review = match args.first().map(String::as_str) {
         Some("last") => Review::Last { newest: false, session: None },
         Some("open") => Review::Open(None, None),
+        Some("review") => return code_review(args.get(1..).unwrap_or_default()),
         Some("pane") => return pane(args.get(1..).unwrap_or_default()),
         _ => anyhow::bail!(USAGE),
     };
@@ -72,13 +73,61 @@ fn launch_review(args: &[String]) -> Result<()> {
     if let (true, Review::Open(_, gate)) = (gated, &mut review) {
         *gate = Some(Gate { result_file });
     }
-    let target = terminal
-        .or_else(|| std::env::var("HC_TERMINAL_ID").ok().filter(|t| !t.is_empty()))
-        .context("no hc terminal: pass --terminal or run inside hc (HC_TERMINAL_ID is not set)")?;
+    let target = target_terminal(terminal)?;
     let config = Config::load()?;
     let placement = placement.unwrap_or(config.herdr.placement);
     let hc = Hc::from_lookup(|k| std::env::var(k).ok());
     launch::run(&hc, &target, &review, placement, config.herdr.split_direction)
+}
+
+/// `--terminal`, else `HC_TERMINAL_ID`: the terminal the launcher was run from.
+fn target_terminal(terminal: Option<String>) -> Result<String> {
+    terminal
+        .or_else(|| std::env::var("HC_TERMINAL_ID").ok().filter(|t| !t.is_empty()))
+        .context("no hc terminal: pass --terminal or run inside hc (HC_TERMINAL_ID is not set)")
+}
+
+/// `plannotator-tui hc review [--staged | --base REF | --commit SHA]`: a code review of the
+/// terminal's repository. A folder outside a repository, or with nothing to review, fails
+/// before any terminal starts.
+fn code_review(args: &[String]) -> Result<()> {
+    #[cfg(unix)]
+    {
+        review_terminal(args)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = args;
+        anyhow::bail!("code review is not available on Windows yet")
+    }
+}
+
+#[cfg(unix)]
+fn review_terminal(args: &[String]) -> Result<()> {
+    let mut terminal = None;
+    let mut placement = None;
+    let mut scope = Vec::new();
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--terminal" => terminal = Some(rest.next().context("--terminal needs a value")?.clone()),
+            "--placement" => {
+                let value = rest.next().context("--placement needs a value")?;
+                placement = Some(value.parse::<Placement>()?);
+            }
+            _ => scope.push(arg.clone()),
+        }
+    }
+    let refusal = "hc review takes no folder: it reviews the terminal's repository";
+    let request = crate::review::scope::request(&scope, refusal)?;
+    let target = target_terminal(terminal)?;
+    let config = Config::load()?;
+    let hc = Hc::from_lookup(|k| std::env::var(k).ok());
+    let fg = launch::agent(&hc, &target)?;
+    let folder = fg.cwd.clone().with_context(|| format!("{target} reports no folder"))?;
+    let (repo, scope) = crate::review::scope::changes(&folder, &request)?;
+    let placement = placement.unwrap_or(config.herdr.placement);
+    launch::start(&hc, &target, &fg, &Review::Code { scope, repo }, placement, config.herdr.split_direction)
 }
 
 /// The review terminal's entry point. hc removes the terminal when this exits, so an error
@@ -104,6 +153,10 @@ fn pane(args: &[String]) -> Result<()> {
             _ => Err(anyhow::anyhow!(
                 "hc pane open takes one path, then --gate [--result-file <path>]\n{USAGE}"
             )),
+        },
+        Some("review") => match args.get(1..).unwrap_or_default() {
+            [scope, repo] => review_pane(scope, Some(std::path::Path::new(repo))),
+            _ => Err(anyhow::anyhow!("hc pane review takes a scope and a repository\n{USAGE}")),
         },
         _ => Err(anyhow::anyhow!(USAGE)),
     };
@@ -149,6 +202,22 @@ mod tests {
         let message = refusal(&["last", "--session", &folder]);
         assert!(message.starts_with("--session ") && message.ends_with(" is not a file"), "{message}");
         assert!(refusal(&["last", "--session", "/no/such/transcript.jsonl"]).ends_with("is not a file"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_code_review_refuses_a_folder_and_a_mistyped_flag_before_asking_hc() {
+        let folder = "hc review takes no folder: it reviews the terminal's repository";
+        assert_eq!(refusal(&["review", "../other"]), folder);
+        assert!(refusal(&["review", "--newest"]).starts_with("unknown flag --newest"));
+        assert_eq!(refusal(&["review", "--base"]), "--base needs a ref");
+        assert!(refusal(&["review", "--placement", "sideways"]).contains("sideways"));
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn a_code_review_says_it_is_not_on_windows_yet() {
+        assert_eq!(refusal(&["review"]), "code review is not available on Windows yet");
     }
 
     #[test]
