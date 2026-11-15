@@ -136,15 +136,18 @@ fn loads_module(init: &Path) -> bool {
 /// line, so the person's own `init.lua` is neither read nor touched. Without `rex`, say so.
 fn check(module: &str) {
     let rex = super::command::installed_bin();
-    let dir = std::env::temp_dir().join(format!("plannotator-tui-rex-check-{}", std::process::id()));
+    let nanos =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let dir = std::env::temp_dir().join(format!("plannotator-tui-rex-check-{}-{nanos}", std::process::id()));
     let result = scratch_config(&dir, module).and_then(|init| {
-        Command::new(&rex)
+        let output = Command::new(&rex)
             .args(["--autostart=false", "config", "check"])
             .arg(&init)
             .output()
-            .with_context(|| format!("running {}", rex.display()))
+            .with_context(|| format!("running {}", rex.display()));
+        std::fs::remove_dir_all(&dir).ok();
+        output
     });
-    std::fs::remove_dir_all(&dir).ok();
     match result {
         Ok(output) if output.status.success() => println!("rex config check: the module loads cleanly"),
         Ok(output) => {
@@ -155,12 +158,21 @@ fn check(module: &str) {
     }
 }
 
-/// `dir/init.lua` with the `require` line, and the module beside it.
+/// `dir/init.lua` with the `require` line, and the module beside it. `dir` must not exist yet: it
+/// is created private to this user, so nobody else can plant or swap the Lua that Rex then runs.
 fn scratch_config(dir: &Path, module: &str) -> Result<PathBuf> {
+    let builder = &mut std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(builder, 0o700);
+    builder.create(dir).with_context(|| format!("creating {}", dir.display()))?;
     let init = dir.join("init.lua");
-    write(&module_path(&init), module, false)?;
-    std::fs::write(&init, format!("{REQUIRE}\n")).with_context(|| format!("writing {}", init.display()))?;
-    Ok(init)
+    let written = write(&module_path(&init), module, false).and_then(|_| {
+        std::fs::write(&init, format!("{REQUIRE}\n")).with_context(|| format!("writing {}", init.display()))
+    });
+    if written.is_err() {
+        std::fs::remove_dir_all(dir).ok();
+    }
+    written.map(|()| init)
 }
 
 #[cfg(test)]
@@ -240,5 +252,23 @@ mod tests {
         std::fs::write(&init, "rex.bind(\"cmd+d\", \"pane.split\")\n").expect("write");
         assert!(!loads_module(&init));
         assert!(!loads_module(&dir.0.join("missing.lua")));
+    }
+
+    #[test]
+    fn the_scratch_config_never_writes_into_a_directory_it_did_not_create() {
+        let dir = scratch("planted");
+        std::fs::create_dir_all(&dir.0).expect("plant");
+        assert!(scratch_config(&dir.0, "return {}").is_err());
+        assert!(!dir.0.join("init.lua").exists(), "nothing is written into a planted directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_scratch_config_is_private() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = scratch("private");
+        scratch_config(&dir.0, "return {}").expect("scratch config");
+        let mode = std::fs::metadata(&dir.0).expect("metadata").permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
     }
 }
