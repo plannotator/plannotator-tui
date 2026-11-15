@@ -40,8 +40,7 @@ rustix = { version = "1", features = ["event", "stdio", "termios"] }
 # The diff viewer behind `plannotator-tui review` (src/review/). Unix only: its patch reader is.
 # Default features off: `dev-tty` would switch crossterm, for this whole build, to reading
 # /dev/tty, and `clipboard` is its own macOS clipboard; this app owns its input and copies.
-# TODO: switch to the crates.io release (0.2.0) before plannotator-tui is released.
-diffs-rs = { git = "https://github.com/plannotator/diffs-rs", branch = "main", default-features = false }
+diffs-rs = { version = "0.2.0", default-features = false }
 
 [dev-dependencies]
 rusqlite = { version = "0.31.0", features = ["bundled"] }
