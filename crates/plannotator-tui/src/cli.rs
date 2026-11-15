@@ -424,7 +424,7 @@ fn herdr_pane() -> Result<()> {
             pid: env.message_pid,
             session: env.session.clone(),
             session_id: env.session_id.clone(),
-            pick: 25,
+            pick: picker_count(),
             newest: env.newest,
             ..crate::last::LastOptions::default()
         })
@@ -454,11 +454,20 @@ pub(crate) fn wait_on_error(err: &anyhow::Error) {
     let _ = std::io::stdin().read_line(&mut line);
 }
 
+/// `[last] pick`. A config that fails to parse gives the default rather than failing the lookup.
+fn picker_count() -> usize {
+    Config::load().unwrap_or_default().last.pick
+}
+
 /// `plannotator-tui last [--host H] [--pid N] [--session PATH] [--stdin] [--print] [--pick N]
 /// [--newest]`.
 pub(crate) fn last_command(args: &[String]) -> Result<()> {
-    use crate::last::LastOptions;
-    let mut options = LastOptions { pick: 25, ..LastOptions::default() };
+    crate::last::run(&last_options(args, picker_count())?)
+}
+
+/// `last`'s arguments, offering `pick` messages unless `--pick` says otherwise.
+fn last_options(args: &[String], pick: usize) -> Result<crate::last::LastOptions> {
+    let mut options = crate::last::LastOptions { pick, ..crate::last::LastOptions::default() };
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
@@ -477,7 +486,7 @@ pub(crate) fn last_command(args: &[String]) -> Result<()> {
             other => anyhow::bail!("unknown argument {other}\n{USAGE}"),
         }
     }
-    crate::last::run(&options)
+    Ok(options)
 }
 
 /// A gated review in a Herdr, Rex or hc pane: the agent hears the decision through delivery,
@@ -711,4 +720,20 @@ fn snapshot(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "tests assert by panicking")]
+mod tests {
+    use super::last_options;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|&arg| arg.to_owned()).collect()
+    }
+
+    #[test]
+    fn last_offers_the_configured_count_and_pick_overrides_it() {
+        assert_eq!(last_options(&args(&["--newest"]), 60).expect("parses").pick, 60);
+        assert_eq!(last_options(&args(&["--pick", "5"]), 60).expect("parses").pick, 5);
+    }
 }
