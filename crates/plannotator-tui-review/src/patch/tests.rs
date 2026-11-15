@@ -188,6 +188,6 @@ fn lines_walk_one_side_in_order() {
     assert_eq!(added.lines(Side::Old).count(), 0);
     let code = file(&files, "code.rs");
     let old: Vec<u32> = code.lines(Side::Old).map(|(n, _)| n).collect();
-    assert!(old.windows(2).all(|w| w[0] < w[1]), "ascending: {old:?}");
+    assert!(old.is_sorted(), "ascending: {old:?}");
     assert_eq!(code.lines(Side::Old).find(|(_, text)| text.contains("two")), Some((3, "    two();")));
 }

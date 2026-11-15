@@ -3,7 +3,6 @@
 
 mod approve;
 mod archive_view;
-mod compose;
 mod disk;
 mod draw;
 mod editor;
@@ -155,7 +154,7 @@ impl Open {
     }
 }
 
-use self::compose::Compose;
+use crate::ui::compose::Compose;
 
 #[allow(clippy::struct_excessive_bools, reason = "independent toggles, none of them a state machine")]
 pub(crate) struct App {

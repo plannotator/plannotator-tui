@@ -518,6 +518,30 @@ pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
 
 /// `run_ui`, returning how a gated review ended; `None` for an ordinary one.
 fn run_review(build: impl FnOnce(usize) -> Result<App>) -> Result<Option<Decision>> {
+    with_terminal(|terminal, session| {
+        let width = doc_width(terminal.size().map_or(120, |s| s.width));
+        let mut app = build(width)?;
+        app.shift_enter = session.shift_enter;
+        app.keys = session.config.keys;
+        app.ui = session.config.ui;
+        app.editor = crate::editor::from_env(|key| std::env::var(key).ok());
+        event_loop(terminal, app)
+    })
+}
+
+/// What a screen learns while the terminal is being taken over.
+pub(crate) struct Session {
+    pub(crate) config: Config,
+    /// Whether the terminal reports Shift+Enter distinctly (kitty keyboard protocol).
+    pub(crate) shift_enter: bool,
+}
+
+/// Own the terminal for `run`: palette, alternate screen, mouse, paste and keyboard modes
+/// on the way in, all of it undone on the way out, whatever `run` returns. Document and
+/// code reviews both start here.
+pub(crate) fn with_terminal<T>(
+    run: impl FnOnce(&mut ratatui::DefaultTerminal, Session) -> Result<T>,
+) -> Result<T> {
     // Settle the palette before the screen is ours: the background-colour query talks to
     // the terminal directly, and it must not race the alternate screen or the event loop.
     // A config that fails to parse never kept the plain TUI from starting; it still does
@@ -536,14 +560,7 @@ fn run_review(build: impl FnOnce(usize) -> Result<App>) -> Result<Option<Decisio
     // gates the compose box's hint so it never advertises a key that cannot arrive.
     let shift_enter = ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
     claim_input(shift_enter);
-    let width = doc_width(terminal.size().map_or(120, |s| s.width));
-    let result = build(width).and_then(|mut app| {
-        app.shift_enter = shift_enter;
-        app.keys = config.keys;
-        app.ui = config.ui;
-        app.editor = crate::editor::from_env(|key| std::env::var(key).ok());
-        event_loop(&mut terminal, app)
-    });
+    let result = run(&mut terminal, Session { config, shift_enter });
     release_input(shift_enter);
     ratatui::restore();
     result

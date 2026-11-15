@@ -8,7 +8,6 @@ use ratatui::crossterm::event::{
 use ratatui::text::Line;
 use unicode_width::UnicodeWidthChar;
 
-use super::compose::ComposeAction;
 use super::menu::ReviewAction;
 use super::selection::Selection;
 use super::send::SendState;
@@ -16,6 +15,7 @@ use super::{App, Focus, GUTTER, Mode, Pending, TOOLBAR};
 use crate::delivery::Delivery as _;
 use crate::gate::Gate;
 use crate::keys::{self, Action};
+use crate::ui::compose::ComposeAction;
 
 /// A row's characters indexed by screen column, as the cursor is: a wide one fills two.
 fn chars_by_column(line: &Line<'_>) -> Vec<char> {

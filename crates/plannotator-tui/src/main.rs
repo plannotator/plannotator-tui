@@ -27,6 +27,7 @@ mod store;
 mod terminal;
 mod theme;
 mod tree;
+mod ui;
 mod workspace_paths;
 mod wrap;
 
