@@ -17,6 +17,8 @@ path = "src/main.rs"
 plannotator-tui-schema = { path = "../plannotator-tui-schema", version = "0.9.11" }
 plannotator-tui-hosts = { path = "../plannotator-tui-hosts", version = "0.9.11" }
 anyhow.workspace = true
+# The Pi link's per-process token (src/pi.rs). Already in the tree through dev-dependencies.
+getrandom = "0.3"
 serde.workspace = true
 serde_json.workspace = true
 similar.workspace = true

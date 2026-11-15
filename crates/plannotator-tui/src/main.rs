@@ -17,6 +17,7 @@ mod herdr;
 mod keys;
 mod last;
 mod layout;
+mod pi;
 mod rex;
 mod srcmap;
 mod store;

@@ -38,6 +38,10 @@ impl App {
                     Ok(())
                 }
                 Mode::ReviewMenu => self.menu_key(*key),
+                Mode::PickTarget => {
+                    self.pick_target_key(*key);
+                    Ok(())
+                }
                 Mode::Compose | Mode::Edit(_) => self.text_key(*key),
                 Mode::AttachImage(_) => self.image_prompt_key(*key),
             },
@@ -103,6 +107,10 @@ impl App {
                     return Ok(());
                 }
                 return self.send_and_quit();
+            }
+            Some(Action::PickTarget) => {
+                self.open_pi_picker();
+                return Ok(());
             }
             Some(Action::ReviewMenu) if self.is_file_review() => {
                 self.open_review_menu();
@@ -497,7 +505,8 @@ impl App {
                     | Mode::Pick
                     | Mode::FileSearch
                     | Mode::Archive
-                    | Mode::ReviewMenu => {
+                    | Mode::ReviewMenu
+                    | Mode::PickTarget => {
                         if !body.is_empty()
                             && let Some(pending) = self.pending.take()
                         {

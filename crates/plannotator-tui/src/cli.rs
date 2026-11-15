@@ -49,6 +49,9 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui rex install [--dry-run | --print]
   plannotator-tui rex pane (open <path> [--gate [--result-file <path>]] | last <last args>
                             | terminal --block <id> [--lines N])
+  plannotator-tui pi list [--json]
+  plannotator-tui pi send --session <id or name> < feedback.md
+  plannotator-tui pi install [--dry-run | --print]
   plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes|opencode|cmd|agy] [--pid N] [--session <transcript>]
                        [--session-id <id>] [--stdin] [--print] [--pick N] [--newest]";
 
@@ -149,7 +152,8 @@ fn wants_decision(args: &[String]) -> bool {
     match args.first() {
         Some(first) if decision_flag(first) => true,
         Some(first)
-            if first.starts_with('-') || matches!(first.as_str(), "config" | "herdr" | "rex" | "last") =>
+            if first.starts_with('-')
+                || matches!(first.as_str(), "config" | "herdr" | "rex" | "pi" | "last") =>
         {
             false
         }
@@ -205,6 +209,7 @@ fn tool(args: &[String]) -> Result<()> {
         Some("config") => show_config(),
         Some("herdr") => herdr_command(args.get(1..).unwrap_or_default()),
         Some("rex") => crate::rex::cli::run(args.get(1..).unwrap_or_default()),
+        Some("pi") => crate::pi::cli::run(args.get(1..).unwrap_or_default()),
         Some("last") => last_command(args.get(1..).unwrap_or_default()),
         Some(flag) if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{USAGE}"),
         Some(_) => interactive(&path(0)?),
@@ -554,6 +559,7 @@ fn run_editor(
 
 fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<Option<Decision>> {
     app.clipboard = true;
+    app.start_pi_link();
     let mut dirty = true;
     while !app.quit {
         if let Some(request) = app.take_editor_request() {
@@ -563,6 +569,7 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<O
         }
         dirty |= app.poll_file_search();
         dirty |= app.poll_disk();
+        dirty |= app.poll_pi();
         if dirty {
             let started = Instant::now();
             terminal.draw(|frame| app.draw(frame))?;

@@ -33,6 +33,9 @@ pub(crate) fn feedback(name: &str, entries: &[Entry<'_>]) -> String {
             None => String::new(),
         };
         let _ = writeln!(out, "## Annotation {}{line_label}", i + 1);
+        if let Some(name) = &entry.annotation.author_name {
+            let _ = writeln!(out, "From: {name}");
+        }
         let body = entry.annotation.body.trim();
         match entry.annotation.anchor.kind() {
             Kind::Delete => {
