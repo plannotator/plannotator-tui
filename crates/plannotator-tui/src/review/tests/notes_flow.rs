@@ -4,6 +4,7 @@ use plannotator_tui_review::{NoteScope, NoteType, Side, Status};
 use ratatui::crossterm::event::KeyCode;
 
 use super::*;
+use crate::review::{Draft, Mode};
 
 #[test]
 fn a_selection_becomes_a_line_comment_marked_in_the_gutter_and_listed_in_the_rail() {
@@ -48,7 +49,7 @@ fn a_suggestion_starts_from_the_new_lines_and_an_old_side_one_is_refused() {
     // The removed line before it is on the old side only.
     screen.diff.reveal("app.py", Side::Old, 2).expect("old line 2 is shown");
     keys(&mut screen, "s");
-    assert_eq!(screen.mode, super::super::Mode::Browse, "no box for old lines");
+    assert_eq!(screen.mode, Mode::Browse, "no box for old lines");
     assert!(screen.status.as_deref().is_some_and(|s| s.contains("new side")), "{:?}", screen.status);
 }
 
@@ -64,6 +65,18 @@ fn a_file_comment_and_an_empty_note() {
     type_and_save(&mut screen, "split this file");
     let [note] = screen.store.annotations() else { panic!("one note") };
     assert_eq!((note.scope, note.file_path.as_str()), (NoteScope::File, "app.py"));
+}
+
+#[test]
+fn a_file_note_from_the_opening_heading_goes_on_that_file() {
+    let fixture = Fixture::new("heading-note");
+    let mut screen = fixture.open();
+    keys(&mut screen, "C");
+    assert!(
+        matches!(screen.mode, Mode::Compose(Draft::File(ref path)) if path == "app.py"),
+        "{:?}",
+        screen.mode
+    );
 }
 
 #[test]
@@ -162,7 +175,7 @@ fn at_80_columns_the_header_footer_and_rail_all_fit() {
     assert!(rows[0].starts_with(" Uncommitted \u{b7} 1 file +7 \u{2212}3"), "{:?}", rows[0]);
     assert!(rows[0].trim_end().ends_with("Send 1 new \u{25b8} test agent (E)"), "{:?}", rows[0]);
     assert!(row_with(&rows, "9 new").contains("\u{1f4ac}"), "the rail is there");
-    assert!(rows[23].contains("1 notes"), "{:?}", rows[23]);
+    assert!(rows[23].contains("repo \u{b7} 1 note "), "{:?}", rows[23]);
     keys(&mut screen, "?");
     let rows = frame(&mut screen, 80, 24);
     assert!(row_with(&rows, "code review keys").contains('\u{256d}'));

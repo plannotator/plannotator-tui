@@ -11,7 +11,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr as _;
 
-use super::diff::Progress;
+use plannotator_tui_review::Side;
+
+use super::diff::{Lines, Progress};
 use super::{Draft, Focus, Geometry, Mode, Screen};
 use crate::keys::Action;
 use crate::theme::palette;
@@ -151,8 +153,8 @@ impl Screen {
         let outdated = notes.iter().filter(|n| super::notes::is_outdated(n)).count();
         parts.push(self.repo_name());
         parts.push(match outdated {
-            0 => format!("{} notes", notes.len()),
-            n => format!("{} notes ({n} outdated)", notes.len()),
+            0 => count(notes.len()),
+            n => format!("{} ({n} outdated)", count(notes.len())),
         });
         if let Some(lines) = self.diff.selection() {
             let span = if lines.first == lines.last {
@@ -229,10 +231,10 @@ impl Screen {
         };
         let verb = match draft {
             Draft::Comment(lines) => {
-                format!("comment on {}", lines_label(&lines.path, lines.first, lines.last))
+                format!("comment on {}", lines_label(lines))
             }
             Draft::Suggestion(lines) => {
-                format!("suggest code for {}", lines_label(&lines.path, lines.first, lines.last))
+                format!("suggest code for {}", lines_label(lines))
             }
             Draft::File(path) => format!("note on {path}"),
             Draft::Edit(_) => "edit".to_owned(),
@@ -242,7 +244,14 @@ impl Screen {
     }
 }
 
-/// `src/a.rs:12` or `src/a.rs:12-14`.
-fn lines_label(path: &str, first: u32, last: u32) -> String {
-    if first == last { format!("{path}:{first}") } else { format!("{path}:{first}-{last}") }
+/// `src/a.rs:12`, `src/a.rs:12-14`, or `src/a.rs:7 old` for lines of the old file.
+fn lines_label(lines: &Lines) -> String {
+    let Lines { path, side, first, last } = lines;
+    let at = if first == last { format!("{path}:{first}") } else { format!("{path}:{first}-{last}") };
+    if *side == Side::Old { format!("{at} old") } else { at }
+}
+
+/// `1 note`, `3 notes`.
+fn count(notes: usize) -> String {
+    if notes == 1 { "1 note".to_owned() } else { format!("{notes} notes") }
 }
