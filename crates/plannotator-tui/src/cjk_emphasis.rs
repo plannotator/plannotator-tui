@@ -82,7 +82,11 @@ fn repair_for(before: Option<char>, after: Option<char>) -> Option<Repair> {
 
 /// The source with emphasis delimiters made parseable. Borrowed when nothing needs repair.
 pub(crate) fn protect(source: &str) -> Cow<'_, str> {
-    let literal = literal_ranges(source);
+    if !source.contains('*') {
+        return Cow::Borrowed(source);
+    }
+    // Parsed only once a delimiter needs repair: most blocks with `*` are plain emphasis.
+    let mut literal: Option<Vec<Range<usize>>> = None;
     let mut out = String::new();
     let mut copied = 0usize;
     let mut chars = source.char_indices().peekable();
@@ -99,9 +103,6 @@ pub(crate) fn protect(source: &str) -> Cow<'_, str> {
         while chars.next_if(|&(_, next)| next == '*').is_some() {
             end += '*'.len_utf8();
         }
-        if literal.iter().any(|range| range.contains(&start)) {
-            continue;
-        }
         let before = source.get(..start).and_then(|text| text.chars().next_back());
         let after = source.get(end..).and_then(|text| text.chars().next());
         let at = match repair_for(before, after) {
@@ -109,6 +110,9 @@ pub(crate) fn protect(source: &str) -> Cow<'_, str> {
             Some(Repair::MarkAfter) => end,
             None => continue,
         };
+        if literal.get_or_insert_with(|| literal_ranges(source)).iter().any(|range| range.contains(&start)) {
+            continue;
+        }
         out.push_str(source.get(copied..at).unwrap_or_default());
         out.push(MARK);
         copied = at;
