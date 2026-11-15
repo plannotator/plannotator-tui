@@ -88,7 +88,7 @@ fn every_change_is_saved_and_reloads_with_the_five_keys() {
     assert_eq!(reloaded.annotations()[0].text.as_deref(), Some("edited"));
     let mut reloaded = reloaded;
     assert!(reloaded.remove(&id).expect("removes"));
-    assert!(f.load().annotations().is_empty());
+    assert_eq!(f.load().annotations(), []);
     assert!(!store.path().with_extension("json.tmp").exists(), "the temp file is renamed away");
 }
 
@@ -147,7 +147,7 @@ fn finishing_archives_sent_notes_and_restoring_brings_them_back() {
     assert_eq!(store.archived().len(), 1);
     assert_eq!(store.restore_archived(&archived).expect("restores"), 1);
     assert_eq!(store_ids(&store), [unsent, sent.clone()]);
-    assert!(store.archived().is_empty());
+    assert_eq!(store.archived(), []);
     assert!(!store.is_pending(&store.annotations()[1]), "restoring keeps the send history");
 
     // Archiving again would duplicate an id already archived elsewhere: refused, unchanged.

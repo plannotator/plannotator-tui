@@ -177,5 +177,5 @@ fn header_paths_are_read_when_there_are_no_file_lines() {
 
 #[test]
 fn an_empty_patch_has_no_files() {
-    assert!(parse("").is_empty());
+    assert_eq!(parse(""), []);
 }
