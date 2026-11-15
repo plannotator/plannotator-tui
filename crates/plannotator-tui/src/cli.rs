@@ -19,6 +19,7 @@ use ratatui::crossterm::execute;
 
 use crate::app::App;
 use crate::config::Config;
+use crate::delivery::command::DeliverCommand;
 use crate::delivery::{Caller, Clipboard, Delivery, Discard, HerdrAgent};
 use crate::doc::Document;
 use crate::gate::{self, Decision, GateError, ReviewArgs};
@@ -72,12 +73,26 @@ fn open_file(path: &PathBuf) -> Result<DocumentSource> {
 
 /// A file opens on its own; a folder opens in folder mode on its first markdown file.
 /// Interactive runs send to the Rex block, hc terminal or Herdr agent pane named by the
-/// environment, else the clipboard; headless runs send nowhere.
+/// environment, else to the delivery command, else the clipboard; headless runs send nowhere.
 pub(crate) fn delivery(interactive: bool) -> Box<dyn Delivery> {
+    review_delivery(interactive, None)
+}
+
+/// [`delivery`] for a review of `path`, which a delivery command is told about. A launcher
+/// names one agent for one review, so its target comes before a command set for every review.
+fn review_delivery(interactive: bool, path: Option<&Path>) -> Box<dyn Delivery> {
     if !interactive {
         return Box::new(Discard);
     }
-    agent_pane().unwrap_or_else(|| Box::new(Clipboard))
+    agent_pane().or_else(|| deliver_command(path)).unwrap_or_else(|| Box::new(Clipboard))
+}
+
+/// `PLANNOTATOR_TUI_DELIVER_CMD`, else `[deliver] command`. A config that does not parse
+/// is reported by `plannotator-tui config`, as for the theme.
+fn deliver_command(path: Option<&Path>) -> Option<Box<dyn Delivery>> {
+    let configured = Config::load().unwrap_or_default().deliver.command;
+    let command = DeliverCommand::from_lookup(|k| std::env::var(k).ok(), configured.as_deref(), path)?;
+    Some(Box::new(command))
 }
 
 /// A gated review sends to the same agent pane; without one its decision goes to the caller.
@@ -104,7 +119,7 @@ fn agent_pane() -> Option<Box<dyn Delivery>> {
 }
 
 fn open_app(path: &PathBuf, width: usize, interactive: bool) -> Result<App> {
-    open_review(path, width, delivery(interactive))
+    open_review(path, width, review_delivery(interactive, Some(path)))
 }
 
 fn open_review(path: &PathBuf, width: usize, delivery: Box<dyn Delivery>) -> Result<App> {
@@ -233,6 +248,11 @@ fn show_config() -> Result<()> {
     let mut config = Config::load_from(&path)?;
     // `PLANNOTATOR_TUI_THEME` overrides the file, so the file's value is not the effective one.
     config.ui.theme = crate::theme::effective_setting(|key| std::env::var(key).ok(), config.ui.theme)?;
+    // So does `PLANNOTATOR_TUI_DELIVER_CMD`.
+    let env = |k: &str| std::env::var(k).ok();
+    if let Some(command) = DeliverCommand::from_lookup(env, config.deliver.command.as_deref(), None) {
+        config.deliver.command = Some(command.line().to_owned());
+    }
     let state = if path.is_file() { "" } else { " (not present; defaults)" };
     println!("# {}{state}", path.display());
     print!("{}", config.to_toml()?);

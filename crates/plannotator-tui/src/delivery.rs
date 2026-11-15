@@ -4,8 +4,11 @@
 //! varies. Clipboard is the standalone default. Inside Herdr the target is an agent's pane
 //! and the transport is `herdr agent prompt`; inside Rex it is an agent's block and the `rex`
 //! CLI (`crate::rex::agent`); inside herdr-core it is an agent's terminal and `hc send`
-//! (`crate::hc::agent`). Nothing else in the app knows which is in use; it only
-//! distinguishes the three outcomes below.
+//! (`crate::hc::agent`). Anywhere else, a delivery command can take the feedback on stdin
+//! (`command`). Nothing else in the app knows which is in use; it only distinguishes the
+//! three outcomes below.
+
+pub(crate) mod command;
 
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -17,6 +20,7 @@ pub(crate) enum DeliveryError {
     /// The agent is at a dialog and its host (Herdr, Rex or hc) refused the prompt; retry later.
     Blocked(String),
     /// No agent to send to: pane gone, agent not detected yet, herdr, rex or hc binary missing.
+    /// The review copies the feedback instead.
     Unavailable(String),
     /// Anything else, with whatever the transport said.
     Failed(anyhow::Error),
