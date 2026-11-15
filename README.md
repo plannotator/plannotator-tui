@@ -105,6 +105,7 @@ dimmed. The keys also work without opening the menu.
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
+| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `]`/`[` hunk; `n`/`N` file; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `r` read the diff again; `?` keys |
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
 
@@ -158,6 +159,42 @@ part of the review and are sent whether or not its folder is listed.
 `product-requirements.md`). Results show the path within the folder, so files with the same
 name are told apart, and opening one expands the tree down to it. It follows the tree's
 hidden-entries setting and skips the same folders the tree does.
+
+## Code review
+
+```sh
+plannotator-tui review                 # uncommitted changes in this repository
+plannotator-tui review --staged        # only what is staged
+plannotator-tui review --base main     # everything since this branch left main
+plannotator-tui review --commit 1a2b3c # one commit
+plannotator-tui review ../other-repo   # another repository
+```
+
+`review` opens a git diff. Move with `j`/`k`, `]`/`[` for the next or previous hunk, and
+`n`/`N` for the next or previous file. `h` and `l` go to the old and new side of a line.
+`v` starts a selection and a second `v` ends it. Then:
+
+- `c` writes a comment on the lines.
+- `s` writes a suggestion: the box opens with the new lines, so you edit the code you want.
+- `C` writes a note on the whole file.
+
+Notes appear in the rail on the right, grouped by file, and a mark in the diff shows their
+lines. Sent notes get a dimmer mark. `Tab` moves to the rail; `j`/`k` there moves to a
+note and the diff moves with it; `e` edits and `x` removes it.
+
+`E` sends the new notes, `S` sends them and closes, and `P` picks the Pi session to send
+to. Sends go to the same place a document review's do (Herdr pane, Rex, Pi or the
+clipboard), and are kept in the feedback archive. `q` asks first when notes are unsent.
+`m` opens the Review menu: `R` resend all, `F` finish review, `U` undo.
+
+`r` reads the diff again after you or the agent change files. Notes follow their lines.
+A note whose lines changed goes to the **Outdated** group at the end of the rail; it is
+still sent, marked as outdated. `u` switches between split and unified view, `w` wraps
+long lines, `f` lists the changed files and `?` shows every key.
+
+A Pi session can leave notes on the diff too (see [Pi](#pi)). Notes are saved with the
+other annotations, one record per repository and scope. Code review is not available on
+Windows yet.
 
 ## Inside Herdr
 
@@ -322,6 +359,10 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `looks-good` `delete` | `a` `d` | toolbar, with `comment`; also on the selected block, unless another document action has the key |
 | `copy` | `y` | copy the selection waiting in the toolbar |
 | `yes` `no` | `y` `n`, `Y` `N` | the send-before-quitting and clear-all questions |
+| `suggest` `file-comment` | `s` `C` | code review: suggest code for the lines; a note on the whole file |
+| `next-hunk` `previous-hunk` `next-file` `previous-file` | `]` `[` `n` `N` | code review: move by hunk or file |
+| `toggle-layout` `toggle-wrap` `toggle-files` | `u` `w` `f` | code review: split or unified view; wrap; the file list |
+| `help` | `?` | code review: every key |
 
 Actions forwarded by Herdr Mirror default to a split beside the invoking remote
 pane. Mirror does not preserve overlay presentation, and Herdr 0.8.2 opens an

@@ -261,7 +261,8 @@ function lineServer(handle: (req: any) => object): net.Server {
 // The extension
 
 const NOTE_HINTS: Record<string, string> = {
-	not_open: "that file is not the open document in plannotator-tui",
+	not_open: "that file is not the open document in plannotator-tui, nor a changed file in its code review",
+	not_in_diff: "the code review does not show that line; pick a line of the new file inside a hunk, or leave line out for a note on the whole file",
 	quote_not_found: "copy the quote exactly from the file's source text, or leave quote out",
 	empty: "the note is empty",
 	busy: "the person is typing a note in plannotator-tui; try again shortly",
@@ -424,8 +425,10 @@ export default function plannotatorTui(pi: ExtensionAPI) {
 		description:
 			"Leave a note in a running plannotator-tui (a terminal Markdown reviewer) that has the file open, so the person sees it beside the text. " +
 			"`quote` must be copied exactly from the file's source text; the note attaches to its first occurrence, or the one nearest `line` when both are given. " +
-			"With only `line`, the note goes on the block holding that line; with neither, on the first block.",
-		promptSnippet: "Leave a review note in the plannotator-tui window that has a file open",
+			"With only `line`, the note goes on the block holding that line; with neither, on the first block. " +
+			"plannotator-tui can also be reviewing a git diff (`plannotator-tui review`); then `file` is a changed file, `line` is a line of the new version that the diff shows, " +
+			"and with neither `quote` nor `line` the note is on the whole file.",
+		promptSnippet: "Leave a review note in the plannotator-tui window that has a file or a git diff open",
 		parameters: Type.Object({
 			file: Type.String({ description: "Path of the document, absolute or relative to the working directory" }),
 			quote: Type.Optional(Type.String({ description: "Text copied exactly from the file, where the note attaches" })),
