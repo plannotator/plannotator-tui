@@ -19,6 +19,7 @@ use crate::theme::{Colors, ThemeSetting};
 pub(crate) struct Config {
     pub(crate) herdr: HerdrConfig,
     pub(crate) rex: RexConfig,
+    pub(crate) deliver: DeliverConfig,
     pub(crate) ui: UiConfig,
     pub(crate) last: LastConfig,
     pub(crate) keys: Keymap,
@@ -66,6 +67,15 @@ pub(crate) struct LastConfig {
     /// Claude Code config dirs to also search for a known session id, in order, for agents
     /// whose `CLAUDE_CONFIG_DIR` does not reach this process. `~/` means the home directory.
     pub(crate) claude_profile_dirs: Vec<String>,
+}
+
+/// Where feedback goes when no Herdr, Rex or hc launcher named an agent.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct DeliverConfig {
+    /// A command line that takes the feedback on stdin; see `delivery::command`.
+    /// `PLANNOTATOR_TUI_DELIVER_CMD` overrides it.
+    pub(crate) command: Option<String>,
 }
 
 /// How plannotator-tui opens inside Herdr.
@@ -264,6 +274,15 @@ mod tests {
         assert_eq!(config.herdr.placement, Placement::Split);
         assert_eq!(config.herdr.split_direction, SplitDirection::Right);
         assert_eq!(config.herdr.popup_width, "90%");
+    }
+
+    #[test]
+    fn a_delivery_command_is_optional_and_read_from_deliver() {
+        assert_eq!(Config::default().deliver.command, None);
+        let config = Config::parse("[deliver]\ncommand = \"tmux-send %1\"\n").expect("parses");
+        assert_eq!(config.deliver.command.as_deref(), Some("tmux-send %1"));
+        let shown = config.to_toml().expect("toml");
+        assert!(shown.contains("[deliver]\ncommand = \"tmux-send %1\""), "{shown}");
     }
 
     #[cfg(windows)]

@@ -478,6 +478,54 @@ Each side lists itself in `clients/plannotator-tui/sessions/` in the data folder
 [`docs/spec-pi-link.md`](docs/spec-pi-link.md) and the extension in
 [`integrations/pi/`](integrations/pi/).
 
+## Any other agent: a delivery command
+
+Herdr, Rex and herdr-core are built in. For anything else, such as tmux, a script or another
+agent's CLI, name a command that takes the feedback on stdin:
+
+```sh
+export PLANNOTATOR_TUI_DELIVER_CMD='tmux load-buffer - && tmux paste-buffer -p -t agent && tmux send-keys -t agent Enter'
+```
+
+or, for every review:
+
+```toml
+# ~/.config/plannotator-tui/config.toml
+[deliver]
+command = "~/bin/send-to-agent"
+```
+
+The environment variable wins over the config. Send (`E`) then runs the command and the header
+names it by its first word: `Send 3 new ▸ cmd · tmux (E)`.
+
+- **How it runs:** the value is one command line for the shell: `sh -c` on macOS and Linux,
+  `cmd /S /C` on Windows. Pipelines, `&&` and variables work. The feedback is on stdin, the
+  same text `E` would copy. `PLANNOTATOR_TUI_REVIEW_PATH` is the file or folder under review,
+  when the review opened one, and the command inherits the review's environment.
+- **The exit status is the outcome:**
+
+  | Exit | Means | The review |
+  |---|---|---|
+  | `0` | delivered | marks the notes sent; the first line on stdout, if any, joins the status |
+  | `75` | the agent cannot take a message now, e.g. it is at a dialog | copies the feedback; `E` retries |
+  | `69` | there is no agent to send to | copies the feedback; `E` retries |
+  | anything else | the send failed | shows the first line of stderr; `E` retries |
+
+  75 and 69 are `EX_TEMPFAIL` and `EX_UNAVAILABLE` from `sysexits.h`. The first line of stderr
+  (else stdout) says why in the status.
+- **It should be quick.** The review waits for the command and stops it after 30 s. A child it
+  leaves running in the background (`cmd &`) does not hold the review up.
+- **Where it sits:** a target that a Herdr, Rex or herdr-core launcher named for this review
+  comes first, because it names one agent for one review. The command replaces the clipboard
+  everywhere else. A gated review (`--gate`) with no launcher still gives its decision to
+  whoever ran it, and `P` can still switch Send to a Pi session.
+
+For Pi, `plannotator-tui pi send` is already such a command (see [Pi](#pi)):
+
+```sh
+PLANNOTATOR_TUI_DELIVER_CMD='plannotator-tui pi send --session my-session' plannotator-tui plan.md
+```
+
 ## Agent replies
 
 `plannotator-tui last` finds the transcript of the agent that launched your shell and shows a
