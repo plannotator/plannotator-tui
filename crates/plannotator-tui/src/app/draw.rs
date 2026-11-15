@@ -107,6 +107,7 @@ impl App {
             Mode::FileSearch => self.draw_file_search(frame),
             Mode::Archive => self.draw_archive(frame),
             Mode::ReviewMenu => self.draw_review_menu(frame),
+            Mode::PickTarget => self.draw_pi_picker(frame),
             Mode::Browse | Mode::ConfirmQuit | Mode::ConfirmClearAll => {}
         }
     }
@@ -375,8 +376,12 @@ impl App {
                 1 => " · 1 image".to_owned(),
                 n => format!(" · {n} images"),
             };
+            let from = match &placed.annotation.author_name {
+                Some(name) => format!(" · {name}"),
+                None => String::new(),
+            };
             let title = Span::styled(
-                format!(" {} {}{images}{sent} ", glyph(kind), short_id(&placed.annotation.id)),
+                format!(" {} {}{from}{images}{sent} ", glyph(kind), short_id(&placed.annotation.id)),
                 Style::new().fg(accent(kind)),
             );
             let bubble = Block::default()

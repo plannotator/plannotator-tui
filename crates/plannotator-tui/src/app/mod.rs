@@ -13,6 +13,7 @@ mod header;
 mod images;
 mod input;
 mod menu;
+mod pi_target;
 mod pick;
 mod replies;
 mod review;
@@ -75,6 +76,8 @@ enum Mode {
     Archive,
     /// The header's Review menu is open over a file or folder review.
     ReviewMenu,
+    /// Choosing which running Pi session Send goes to.
+    PickTarget,
 }
 
 /// Which pane keyboard input goes to.
@@ -168,6 +171,11 @@ pub(crate) struct App {
     /// `t` toggles; `None` means "automatic by width".
     tree_visible: Option<bool>,
     delivery: Box<dyn Delivery>,
+    /// The target the review started with, while Send goes to a Pi picked instead.
+    start_delivery: Option<Box<dyn Delivery>>,
+    /// This review's registry entry and note listener, in an interactive review.
+    pi_link: Option<crate::pi::link::Link>,
+    pi_picker: pi_target::PiPicker,
     send_state: SendState,
     /// What ending the review means; `Gate::Off` unless `--gate` or `--json` asked for a
     /// decision.
@@ -268,6 +276,9 @@ impl App {
             tree_scroll: 0,
             tree_visible: None,
             delivery,
+            start_delivery: None,
+            pi_link: None,
+            pi_picker: pi_target::PiPicker::default(),
             send_state,
             gate: Gate::Off,
             decision: None,

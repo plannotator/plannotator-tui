@@ -95,7 +95,7 @@ dimmed. The keys also work without opening the menu.
 
 | Where | Keys |
 |---|---|
-| anywhere | `Tab` cycle tree · document · notes; `E` send; `t` tree; `r` reload; `o` open the file in `$EDITOR`; `q` quit |
+| anywhere | `Tab` cycle tree · document · notes; `E` send; `P` choose the Pi to send to; `t` tree; `r` reload; `o` open the file in `$EDITOR`; `q` quit |
 | reply review | `S` send and close |
 | gated review | `A` approve; `E` send and finish; `q` dismiss |
 | document | `j`/`k` block; `c` comment on the block; `a` looks good; `d` delete; `x` clear its annotations; `X` clear every annotation on the document, after a `y`; `v` select with `hjkl` `w` `b` `e` `0` `$`, then `a`, `c` or `d` to act on it, `y` to copy it, or `Enter` for the toolbar; `V` select whole rows; `i` move the cursor with those keys first, then `v` to select from there; `I`/`D` attach or remove an image on the block's note |
@@ -302,6 +302,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `open-in-editor` | `o` | edit the open file in `$VISUAL` or `$EDITOR`, then reload it |
 | `quick-open` | `ctrl+p` | find a file by name in a folder review |
 | `review-menu` | `m` | the Review menu |
+| `pick-target` | `P` | choose the Pi session Send goes to (see [Pi](#pi)) |
 | `resend-all` `finish-review` `undo-finish` `archive` | `R` `F` `U` `H` | file and folder review actions |
 | `toggle-hidden` | `.` | show/hide dot-prefixed entries in the tree |
 | `edit` `remove` | `e` `x`, `Delete` | the selected note |
@@ -401,6 +402,32 @@ needs the agent to report its state to Rex (Claude Code, Codex and pi do): until
 review copies instead, since Enter could answer a dialog Rex cannot see, and `--paste` still
 works. Rex does not report its theme to programs, so with a light Rex theme set
 `[ui] theme = "light"`.
+
+## Pi
+
+plannotator-tui can send a review to any running [Pi](https://github.com/earendil-works/pi)
+session, and Pi can leave notes in the file you have open. Install the extension once:
+
+```sh
+plannotator-tui pi install   # copies it into ~/.pi/agent/extensions/
+```
+
+Restart your Pi sessions, or run `/reload` in each one. Then:
+
+- **Send to a Pi:** press `P` (`pick-target`) to choose a session: its name, folder, and
+  whether it is busy. Sessions in the review's folder are listed first. Send (`E`) then
+  goes to that session, as a user message. A busy Pi reads it once its current work is done. The
+  last row of the picker goes back to the target the review started with.
+- **Notes from Pi:** Pi gets a `plannotator_tui_note` tool. It quotes text from a file you
+  have open, optionally with a line number, and its note shows up beside that text marked
+  `pi · <session name>`. The note is sent with the rest of your review.
+- `plannotator-tui pi list` lists the sessions; `plannotator-tui pi send --session <id or name>`
+  sends stdin to one.
+
+Each side lists itself in `clients/plannotator-tui/sessions/` in the data folder (see below) and listens on
+127.0.0.1 with a secret token; nothing leaves this computer. The protocol is in
+[`docs/spec-pi-link.md`](docs/spec-pi-link.md) and the extension in
+[`integrations/pi/`](integrations/pi/).
 
 ## Agent replies
 

@@ -41,6 +41,8 @@ pub(crate) enum Action {
     OpenInEditor,
     PickMessage,
     QuickOpen,
+    /// Choose which running Pi session Send goes to (`docs/spec-pi-link.md`).
+    PickTarget,
     ReviewMenu,
     ResendAll,
     FinishReview,
@@ -69,9 +71,9 @@ pub(crate) enum Action {
 use Action::{
     Approve, Archive, AttachImage, Back, Bottom, ClearAll, ClearBlock, Comment, Confirm, CopySelection,
     CycleFocus, Delete, Down, Edit, FinishReview, Interrupt, Left, LineEnd, LineStart, LooksGood, MoveCursor,
-    No, OpenInEditor, PageDown, PageUp, PickMessage, QuickOpen, Quit, Reload, Remove, RemoveImage, ResendAll,
-    ReviewMenu, Right, Send, SendAndClose, ToggleHidden, ToggleTree, Top, UndoFinish, Up, Visual, VisualLine,
-    WordBack, WordEnd, WordForward, Yes,
+    No, OpenInEditor, PageDown, PageUp, PickMessage, PickTarget, QuickOpen, Quit, Reload, Remove,
+    RemoveImage, ResendAll, ReviewMenu, Right, Send, SendAndClose, ToggleHidden, ToggleTree, Top, UndoFinish,
+    Up, Visual, VisualLine, WordBack, WordEnd, WordForward, Yes,
 };
 
 /// Browsing, before the focused pane gets the key.
@@ -92,6 +94,7 @@ pub(crate) const GLOBAL: &[Action] = &[
     OpenInEditor,
     QuickOpen,
     PickMessage,
+    PickTarget,
 ];
 pub(crate) const TREE: &[Action] = &[Down, Up, Confirm, Right, ToggleHidden, Back];
 pub(crate) const RAIL: &[Action] = &[Down, Up, Confirm, Edit, Remove, AttachImage, RemoveImage, Back];
@@ -133,6 +136,8 @@ pub(crate) const CONFIRM_CLEAR: &[Action] = &[Yes, No, Back];
 pub(crate) const MENU: &[Action] =
     &[Down, Up, Confirm, Back, ReviewMenu, Interrupt, ResendAll, FinishReview, UndoFinish, Archive];
 pub(crate) const PICK: &[Action] = &[Down, Up, Confirm, Back, Quit];
+/// The Pi picker: the same moves as the message picker; `pick-target` again closes it.
+pub(crate) const PICK_TARGET: &[Action] = &[Down, Up, Confirm, Back, PickTarget, Interrupt];
 pub(crate) const ARCHIVE: &[Action] = &[Down, Up, Confirm, Back, Archive, Quit, Interrupt];
 
 /// Contexts that read the same keypress: the global keys come first while browsing, and
@@ -276,6 +281,7 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (OpenInEditor, &[ch('o')]),
     (PickMessage, &[ch('p')]),
     (QuickOpen, &[ctrl('p')]),
+    (PickTarget, &[ch('P')]),
     (ReviewMenu, &[ch('m')]),
     (ResendAll, &[ch('R')]),
     (FinishReview, &[ch('F')]),
@@ -437,6 +443,7 @@ impl Action {
             Self::OpenInEditor => "open-in-editor",
             Self::PickMessage => "pick-message",
             Self::QuickOpen => "quick-open",
+            Self::PickTarget => "pick-target",
             Self::ReviewMenu => "review-menu",
             Self::ResendAll => "resend-all",
             Self::FinishReview => "finish-review",
