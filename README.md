@@ -526,6 +526,9 @@ For Pi, `plannotator-tui pi send` is already such a command (see [Pi](#pi)):
 PLANNOTATOR_TUI_DELIVER_CMD='plannotator-tui pi send --session my-session' plannotator-tui plan.md
 ```
 
+If that session has closed, or no session matches, `pi send` exits 69, so the review copies the
+feedback instead.
+
 ## Agent replies
 
 `plannotator-tui last` finds the transcript of the agent that launched your shell and shows a

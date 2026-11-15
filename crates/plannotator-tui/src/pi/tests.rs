@@ -221,3 +221,9 @@ fn the_extension_goes_in_the_pi_agent_dir() {
     assert_eq!(path(Some("~/pi")), PathBuf::from("/h/pi/extensions/plannotator-tui.ts"));
     assert_eq!(path(Some("/abs")), PathBuf::from("/abs/extensions/plannotator-tui.ts"));
 }
+
+#[test]
+fn no_matching_session_is_a_no_pi_error_so_the_review_copies_instead() {
+    let err = cli::pick_for_test(&[], "gone").expect_err("no session");
+    assert!(err.is::<cli::NoPi>(), "{err:#}");
+}

@@ -66,10 +66,29 @@ fn send(args: &[String]) -> Result<()> {
         Ok(Disposition::Queued) => {
             println!("queued for pi · {}: it is busy and reads this next", entry.label());
         }
-        Err(SendError::Gone) => anyhow::bail!("pi · {} has closed", entry.label()),
+        Err(SendError::Gone) => return Err(NoPi(format!("pi · {} has closed", entry.label())).into()),
         Err(SendError::Failed(message)) => anyhow::bail!("pi · {}: {message}", entry.label()),
     }
     Ok(())
+}
+
+/// No Pi session can take the feedback: the one named has closed, or none matches. `main`
+/// exits with the delivery command's "unavailable" code for it, so a review that runs
+/// `pi send` as its delivery command copies the feedback instead of reporting a failure.
+#[derive(Debug)]
+pub(crate) struct NoPi(pub(crate) String);
+
+impl std::fmt::Display for NoPi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for NoPi {}
+
+#[cfg(test)]
+pub(crate) fn pick_for_test(sessions: &[PiEntry], wanted: &str) -> Result<PiEntry> {
+    pick(sessions, wanted)
 }
 
 /// The one live session whose id, id prefix or name is `wanted`.
@@ -82,7 +101,9 @@ fn pick(sessions: &[PiEntry], wanted: &str) -> Result<PiEntry> {
     };
     match matches.as_slice() {
         [one] => Ok((*one).clone()),
-        [] => anyhow::bail!("no live Pi session matches {wanted:?}; see `plannotator-tui pi list`"),
+        [] => {
+            Err(NoPi(format!("no live Pi session matches {wanted:?}; see `plannotator-tui pi list`")).into())
+        }
         many => anyhow::bail!(
             "{} live Pi sessions match {wanted:?}; use the full id:\n{}",
             many.len(),
