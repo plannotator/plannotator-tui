@@ -284,6 +284,37 @@ fn newest_opens_the_newest_reply_and_leaves_the_picker_on_p() {
 }
 
 #[test]
+fn the_picker_scrolls_to_keep_the_cursor_in_view() {
+    use plannotator_tui_hosts::{Message, Role};
+    let messages: Vec<Message> = (0..30)
+        .map(|index| Message {
+            id: format!("m{index}"),
+            role: Role::Assistant,
+            text: format!("reply {index}\n"),
+            at: Some("2026-08-28T12:00:00.000Z".to_owned()),
+        })
+        .collect();
+    let mut app =
+        App::open_message("claude", "/tmp/transcript.jsonl", None, messages, 60, Box::new(Discard), false)
+            .expect("opens");
+    app.data_dir = scratch_data_dir();
+    for _ in 0..20 {
+        app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('j')))).expect("j");
+    }
+    let rows = draw_sized(&mut app, 80, 14);
+    let drawn = |app: &App, wanted: usize| {
+        app.geometry.pick_rows.iter().find(|(_, index)| *index == wanted).map(|(rect, _)| *rect)
+    };
+    let cursor = drawn(&app, 20).expect("cursor row drawn");
+    assert!(row(&rows, usize::from(cursor.y)).contains("reply 20"), "{rows:#?}");
+    // A row above the cursor, so a click that opened the cursor's message would fail.
+    let above = drawn(&app, 15).expect("rows above the cursor drawn too");
+    click(&mut app, MouseEventKind::Down(MouseButton::Left), above.x, above.y);
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.doc.source, "reply 15\n");
+}
+
+#[test]
 fn moving_the_picker_cursor_previews_that_message() {
     let mut app = message_app(None, Box::new(Discard));
     assert_eq!(app.open.doc.source, "# Third\n\nnewest message\n", "the newest opens behind the picker");

@@ -166,13 +166,17 @@ impl App {
         let inner = boxed.inner(rect);
         frame.render_widget(boxed, rect);
         let mut pick_rows = Vec::new();
+        let visible = usize::from(inner.height).max(1);
+        let start = self.pick_cursor.saturating_sub(visible - 1);
         let lines: Vec<Line<'static>> = self
             .candidates
             .iter()
             .enumerate()
-            .take(usize::from(inner.height))
+            .skip(start)
+            .take(visible)
             .map(|(index, message)| {
-                let row = Rect { x: inner.x, y: inner.y + index as u16, width: inner.width, height: 1 };
+                let row =
+                    Rect { x: inner.x, y: inner.y + (index - start) as u16, width: inner.width, height: 1 };
                 pick_rows.push((row, index));
                 let text =
                     fit(&pick_label(message, self.clock_offset), usize::from(inner.width).saturating_sub(1));
