@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 plannotator-tui-schema = { path = "../plannotator-tui-schema", version = "0.9.11" }
 plannotator-tui-hosts = { path = "../plannotator-tui-hosts", version = "0.9.11" }
+plannotator-tui-review = { path = "../plannotator-tui-review", version = "0.9.11" }
 anyhow.workspace = true
 # The Pi link's per-process token (src/pi.rs). Already in the tree through dev-dependencies.
 getrandom = "0.3"
@@ -36,6 +37,11 @@ terminal-colorsaurus = "1.0.3"
 [target.'cfg(unix)'.dependencies]
 # Already in the tree through crossterm; polls the terminal for a hang-up (src/hangup.rs).
 rustix = { version = "1", features = ["event", "stdio", "termios"] }
+# The diff viewer behind `plannotator-tui review` (src/review/). Unix only: its patch reader is.
+# Default features off: `dev-tty` would switch crossterm, for this whole build, to reading
+# /dev/tty, and `clipboard` is its own macOS clipboard; this app owns its input and copies.
+# TODO: switch to the crates.io release (0.2.0) before plannotator-tui is released.
+diffs-rs = { git = "https://github.com/plannotator/diffs-rs", branch = "feat/host-api", default-features = false }
 
 [dev-dependencies]
 rusqlite = { version = "0.31.0", features = ["bundled"] }

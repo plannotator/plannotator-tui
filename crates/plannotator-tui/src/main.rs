@@ -21,6 +21,8 @@ mod keys;
 mod last;
 mod layout;
 mod pi;
+#[cfg(unix)]
+mod review;
 mod rex;
 mod srcmap;
 mod store;

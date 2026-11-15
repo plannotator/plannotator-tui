@@ -110,6 +110,7 @@ impl Feedback {
                 ),
                 text: (!a.body.is_empty()).then(|| a.body.clone()),
                 original_text: (!a.anchor.original_text.is_empty()).then(|| a.anchor.original_text.clone()),
+                ..AnnotationRecord::default()
             }
         }));
         self.parts.push(FeedbackPart { path, reply, store, ids });

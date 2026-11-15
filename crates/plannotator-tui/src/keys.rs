@@ -66,6 +66,21 @@ pub(crate) enum Action {
     CopySelection,
     Yes,
     No,
+    // Code review (`plannotator-tui review`).
+    /// Suggest replacement code for the selected new-side lines.
+    Suggest,
+    /// Comment on the whole file under the cursor.
+    FileComment,
+    NextHunk,
+    PreviousHunk,
+    NextFile,
+    PreviousFile,
+    /// Split or unified diff.
+    ToggleLayout,
+    ToggleWrap,
+    /// Show or hide the diff's file list.
+    ToggleFiles,
+    Help,
 }
 
 use Action::{
@@ -74,6 +89,10 @@ use Action::{
     No, OpenInEditor, PageDown, PageUp, PickMessage, PickTarget, QuickOpen, Quit, Reload, Remove,
     RemoveImage, ResendAll, ReviewMenu, Right, Send, SendAndClose, ToggleHidden, ToggleTree, Top, UndoFinish,
     Up, Visual, VisualLine, WordBack, WordEnd, WordForward, Yes,
+};
+use Action::{
+    FileComment, Help, NextFile, NextHunk, PreviousFile, PreviousHunk, Suggest, ToggleFiles, ToggleLayout,
+    ToggleWrap,
 };
 
 /// Browsing, before the focused pane gets the key.
@@ -140,6 +159,52 @@ pub(crate) const PICK: &[Action] = &[Down, Up, PageDown, PageUp, Top, Bottom, Co
 pub(crate) const PICK_TARGET: &[Action] = &[Down, Up, Confirm, Back, PickTarget, Interrupt];
 pub(crate) const ARCHIVE: &[Action] = &[Down, Up, Confirm, Back, Archive, Quit, Interrupt];
 
+/// A code review, before the focused pane gets the key.
+pub(crate) const REVIEW_GLOBAL: &[Action] = &[
+    Quit,
+    Interrupt,
+    CycleFocus,
+    Send,
+    SendAndClose,
+    ReviewMenu,
+    ResendAll,
+    FinishReview,
+    UndoFinish,
+    Reload,
+    PickTarget,
+    Help,
+];
+/// The diff. `left` and `right` pick the old and the new side.
+pub(crate) const DIFF: &[Action] = &[
+    Back,
+    Visual,
+    VisualLine,
+    Comment,
+    Suggest,
+    FileComment,
+    Down,
+    Up,
+    PageDown,
+    PageUp,
+    Top,
+    Bottom,
+    NextHunk,
+    PreviousHunk,
+    NextFile,
+    PreviousFile,
+    Left,
+    Right,
+    ToggleLayout,
+    ToggleWrap,
+    ToggleFiles,
+    Confirm,
+];
+/// The code review's notes rail.
+pub(crate) const NOTES: &[Action] = &[Down, Up, Confirm, Edit, Remove, Back];
+pub(crate) const REVIEW_MENU: &[Action] =
+    &[Down, Up, Confirm, Back, ReviewMenu, Interrupt, ResendAll, FinishReview, UndoFinish];
+pub(crate) const HELP: &[Action] = &[Back, Help, Quit, Interrupt];
+
 /// Contexts that read the same keypress: the global keys come first while browsing, and
 /// roaming tries the motions before the document's own keys.
 const SHARED: &[&[&[Action]]] = &[
@@ -154,6 +219,10 @@ const SHARED: &[&[&[Action]]] = &[
     &[MENU],
     &[PICK],
     &[ARCHIVE],
+    &[REVIEW_GLOBAL, DIFF],
+    &[REVIEW_GLOBAL, NOTES],
+    &[REVIEW_MENU],
+    &[HELP],
 ];
 
 /// Named keys, spelled as the config file writes them.
@@ -306,11 +375,36 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (CopySelection, &[ch('y')]),
     (Yes, &[ch('y'), ch('Y')]),
     (No, &[ch('n'), ch('N')]),
+    (Suggest, &[ch('s')]),
+    (FileComment, &[ch('C')]),
+    (NextHunk, &[ch(']')]),
+    (PreviousHunk, &[ch('[')]),
+    (NextFile, &[ch('n')]),
+    (PreviousFile, &[ch('N')]),
+    (ToggleLayout, &[ch('u')]),
+    (ToggleWrap, &[ch('w')]),
+    (ToggleFiles, &[ch('f')]),
+    (Help, &[ch('?')]),
 ];
 
 /// Actions added after configs were written: `approve` (live only in a gated review), `copy`
-/// (on a waiting selection), `word-end` and `visual-line`.
-const LATE: &[Action] = &[Approve, CopySelection, WordEnd, VisualLine];
+/// (on a waiting selection), `word-end`, `visual-line`, and the code review's own.
+const LATE: &[Action] = &[
+    Approve,
+    CopySelection,
+    WordEnd,
+    VisualLine,
+    Suggest,
+    FileComment,
+    NextHunk,
+    PreviousHunk,
+    NextFile,
+    PreviousFile,
+    ToggleLayout,
+    ToggleWrap,
+    ToggleFiles,
+    Help,
+];
 
 /// The keys bound to each action. A `[keys]` entry replaces that action's keys and leaves the
 /// others at their defaults; an empty list unbinds the action.
@@ -452,6 +546,16 @@ impl Action {
             Self::CopySelection => "copy",
             Self::Yes => "yes",
             Self::No => "no",
+            Self::Suggest => "suggest",
+            Self::FileComment => "file-comment",
+            Self::NextHunk => "next-hunk",
+            Self::PreviousHunk => "previous-hunk",
+            Self::NextFile => "next-file",
+            Self::PreviousFile => "previous-file",
+            Self::ToggleLayout => "toggle-layout",
+            Self::ToggleWrap => "toggle-wrap",
+            Self::ToggleFiles => "toggle-files",
+            Self::Help => "help",
         }
     }
 }
