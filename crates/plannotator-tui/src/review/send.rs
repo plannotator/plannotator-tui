@@ -16,6 +16,14 @@ use crate::ui::send_button::SendState;
 /// reviews stay far below this; a larger one is refused rather than cut.
 pub(super) const MAX_SEND_BYTES: usize = 256 * 1024;
 
+/// A send waiting on the agent picker that Send opened: every note or the new ones, and
+/// whether to close after.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PickThen {
+    all: bool,
+    close: bool,
+}
+
 impl Screen {
     /// The feedback text for `notes`, as the agent receives it.
     pub(super) fn feedback(&self, notes: &[&CodeAnnotation]) -> String {
@@ -23,8 +31,37 @@ impl Screen {
         agent_feedback(&self.root().display().to_string(), &diff, notes)
     }
 
-    /// Send new and edited notes, or with `all` every note.
+    /// Send new and edited notes, or with `all` every note. When nothing named a target and
+    /// an agent is within reach, ask which one first.
     pub(super) fn send(&mut self, all: bool) {
+        self.send_asking(PickThen { all, close: false });
+    }
+
+    /// Send what the picker that Send opened was waiting for, to the target now chosen.
+    pub(super) fn send_picked(&mut self, then: PickThen) {
+        self.deliver_notes(then.all);
+        if then.close {
+            self.quit = !self.has_unsent();
+        }
+    }
+
+    /// Open the agent picker when Send should ask first and there is something to send;
+    /// else send at once. True when the picker opened.
+    fn send_asking(&mut self, then: PickThen) -> bool {
+        let empty =
+            if then.all { self.store.annotations().is_empty() } else { self.store.pending().is_empty() };
+        if !empty && let Some(picker) = self.reach.picker_for_send(self.delivery.as_ref(), &self.real_root())
+        {
+            self.picker = picker;
+            self.pick_then = Some(then);
+            self.mode = Mode::PickTarget;
+            return true;
+        }
+        self.deliver_notes(then.all);
+        false
+    }
+
+    fn deliver_notes(&mut self, all: bool) {
         let notes: Vec<&CodeAnnotation> =
             if all { self.store.annotations().iter().collect() } else { self.store.pending() };
         if notes.is_empty() {
@@ -115,9 +152,10 @@ impl Screen {
 
     /// Send, then quit unless something is still unsent. A refused send keeps the review
     /// open so the footer can say why.
+    /// When Send asks which agent first, the quit waits for that choice.
     pub(super) fn send_and_quit(&mut self) {
-        if !self.store.pending().is_empty() {
-            self.send(false);
+        if !self.store.pending().is_empty() && self.send_asking(PickThen { all: false, close: true }) {
+            return;
         }
         self.quit = !self.has_unsent();
     }
@@ -157,9 +195,13 @@ impl Screen {
     /// The Send button's words.
     pub(super) fn send_label(&self) -> String {
         let count = self.store.pending().len();
-        let verb = if self.delivery.is_agent() { "Send" } else { "Copy" };
+        // Nothing named a target, but Send asks which agent first.
+        let asks = self.reach.asks(self.delivery.as_ref());
+        let verb = if self.delivery.is_agent() || asks { "Send" } else { "Copy" };
         let to = if self.delivery.is_agent() {
             format!(" ▸ {}", self.delivery.describe())
+        } else if asks {
+            " ▸ choose agent".to_owned()
         } else {
             String::new()
         };

@@ -18,13 +18,15 @@ use crate::pi::link::{self, Link, Note};
 const AUTHOR: &str = "pi";
 
 impl Screen {
-    /// List this review in the registry and listen for notes. Without a writable data
-    /// folder the review works as before, without the link.
+    /// List this review in the registry and listen for notes, and start looking for the
+    /// agents Send can reach. Without a writable data folder the review works as before,
+    /// without the link.
     pub(crate) fn start_pi_link(&mut self) {
         self.pi_link = Link::start(&crate::pi::root(), self.real_root(), self.pi_files()).ok();
+        self.reach = crate::ui::agent_picker::Reach::start(self.real_root());
     }
 
-    fn real_root(&self) -> PathBuf {
+    pub(super) fn real_root(&self) -> PathBuf {
         std::fs::canonicalize(self.root()).unwrap_or_else(|_| self.root().to_path_buf())
     }
 

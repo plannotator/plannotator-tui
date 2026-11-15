@@ -81,7 +81,7 @@ impl Screen {
                     (key(&[Action::Send]), "send new and edited notes"),
                     (key(&[Action::SendAndClose]), "send and close"),
                     (key(&[Action::ReviewMenu]), "review menu: resend all, finish, undo"),
-                    (key(&[Action::PickTarget]), "send to a Pi session"),
+                    (key(&[Action::PickTarget]), "choose the agent Send goes to"),
                     (key(&[Action::Reload]), "reload the diff; notes follow their lines"),
                     (key(&[Action::Quit]), "quit"),
                 ],

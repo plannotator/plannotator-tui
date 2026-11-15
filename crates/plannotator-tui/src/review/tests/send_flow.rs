@@ -128,3 +128,82 @@ fn a_send_is_archived_as_a_review_of_this_changeset() {
         (Some("app.py"), Some(9), Some("new"))
     );
 }
+
+/// The clipboard a review falls back to, recording what it would have copied.
+#[derive(Debug, Default, Clone)]
+struct FallbackCopy {
+    copied: Rc<RefCell<Vec<String>>>,
+}
+
+impl Delivery for FallbackCopy {
+    fn describe(&self) -> String {
+        "clipboard".into()
+    }
+    fn is_fallback(&self) -> bool {
+        true
+    }
+    fn deliver(&self, text: &str) -> Result<(), DeliveryError> {
+        self.copied.borrow_mut().push(text.to_owned());
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_code_review_with_no_target_asks_which_agent_like_a_document_review() {
+    use crate::herdr::agents::{HerdrAgents, fake_herdr};
+    use crate::ui::agent_picker::{AgentFinder, Reach};
+    let fixture = Fixture::new("ask-agent");
+    let mut screen = fixture.open();
+    let copy = FallbackCopy::default();
+    screen.delivery = Box::new(copy.clone());
+    let root = screen.real_root();
+    let fake = fixture.dir.join("fake herdr");
+    let bin = fake_herdr(
+        &fake,
+        &serde_json::json!({"result": {"type": "agent_list", "agents": [
+            {"agent": "codex", "agent_status": "working", "workspace_id": "w1", "tab_id": "w1:t2", "pane_id": "w1:p4", "cwd": root},
+            {"agent": "claude", "agent_status": "idle", "workspace_id": "w2", "tab_id": "w2:t1", "pane_id": "w2:p1", "cwd": "/elsewhere"},
+        ]}}),
+    );
+    let finder = AgentFinder {
+        pi_root: Some(fixture.dir.join("registry")),
+        herdr: Some(HerdrAgents { bin, own_pane: Some("w1:p9".into()) }),
+        ask_on_send: true,
+    };
+    screen.reach = Reach::start_with(finder, root.clone());
+    screen.reach.find(&root);
+    note(&mut screen, 9, "name the total");
+    assert_eq!(screen.send_label(), "Send 1 new ▸ choose agent (E)");
+    let header = frame(&mut screen, 120, 40);
+    assert!(row_with(&header, "Send 1 new").contains("choose agent"));
+
+    keys(&mut screen, "E");
+    assert_eq!(screen.mode, Mode::PickTarget);
+    let rows = frame(&mut screen, 120, 40);
+    if let Some(dir) = std::env::var_os("AGENT_PICKER_PROOF_DIR") {
+        std::fs::create_dir_all(&dir).expect("proof dir");
+        std::fs::write(PathBuf::from(dir).join("code-review-send-opens-picker.txt"), rows.join("\n"))
+            .expect("proof");
+    }
+    assert!(row_with(&rows, "Copy to clipboard").contains('│'));
+    // The Codex in the repository comes first and has the cursor.
+    press(&mut screen, KeyCode::Enter);
+    let prompts = read(&fake.join("prompts"));
+    assert!(prompts.starts_with("w1:p4\n") && prompts.contains("name the total"), "{prompts}");
+    assert_eq!(screen.status.as_deref(), Some("sent 1 note(s) → codex in w1:p4"));
+    assert_eq!(copy.copied.borrow().len(), 0);
+
+    // Back to the clipboard through `P`; then the copy row copies.
+    keys(&mut screen, "P");
+    keys(&mut screen, "jj");
+    press(&mut screen, KeyCode::Enter);
+    assert_eq!(screen.delivery.describe(), "clipboard");
+    note(&mut screen, 14, "argv may be empty");
+    keys(&mut screen, "E");
+    assert_eq!(screen.mode, Mode::PickTarget);
+    keys(&mut screen, "k");
+    press(&mut screen, KeyCode::Enter);
+    assert_eq!(copy.copied.borrow().len(), 1);
+    assert_eq!(screen.status.as_deref(), Some("copied 1 note(s) → clipboard"));
+}

@@ -42,8 +42,8 @@ use ratatui::style::Style;
 use crate::delivery::Delivery;
 use crate::keys::Keymap;
 use crate::theme::palette;
+use crate::ui::agent_picker::{AgentPicker, Reach};
 use crate::ui::compose::Compose;
-use crate::ui::pi_picker::PiPicker;
 use crate::ui::send_button::SendState;
 use diff::{Diff, Lines};
 
@@ -102,9 +102,13 @@ pub(crate) struct Screen {
     data_dir: PathBuf,
     project: String,
     delivery: Box<dyn Delivery>,
-    /// The target the review started with, while Send goes to a Pi picked instead.
+    /// The target the review started with, while Send goes to an agent picked instead.
     start_delivery: Option<Box<dyn Delivery>>,
-    picker: PiPicker,
+    picker: AgentPicker,
+    /// Where the picker looks for agents, and whether Send asks which one first.
+    reach: Reach,
+    /// What to send once the picker that Send opened has a choice.
+    pick_then: Option<send::PickThen>,
     pi_link: Option<crate::pi::link::Link>,
     keys: Keymap,
     /// Whether the terminal reports Shift+Enter distinctly; the comment box's hint says so.
@@ -159,7 +163,9 @@ impl Screen {
             project,
             delivery,
             start_delivery: None,
-            picker: PiPicker::default(),
+            picker: AgentPicker::default(),
+            reach: Reach::default(),
+            pick_then: None,
             pi_link: None,
             keys: Keymap::default(),
             shift_enter: false,

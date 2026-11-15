@@ -127,9 +127,25 @@ Reply: `{"ok":true,"busy":false,"name":"…","id":"…"}`.
 ## plannotator-tui
 
 - Registers itself on start in an interactive review and removes the entry on exit.
-- `P` (`pick-target`) opens the Pi picker: live Pi sessions, the ones in the document's folder first. The
-  pick becomes the Send target until changed; the picker also offers going back to the
-  target the review started with.
+- `P` (`pick-target`) opens the agent picker: live Pi sessions and, inside Herdr
+  (`HERDR_ENV=1`), every Herdr pane with an agent (`herdr agent list`, labelled with
+  `herdr workspace list` and `herdr tab list`). A row shows the agent, its folder, its state,
+  and where it runs (`pid N` for a Pi, `workspace › tab · pane` for a Herdr pane). The
+  review's own pane (`HERDR_PANE_ID`) is never listed, and a Pi that Herdr also lists (same
+  transcript or session id) is shown once, as the Pi session. Agents in the review's folder
+  come first, then by name, then by pid or pane id; the list is read once on open and does
+  not move while the picker is open. The pick becomes the Send target until changed (a
+  Herdr pick sends with `herdr agent prompt`); the picker also offers going back to the
+  target the review started with. Document and code reviews share the picker.
+- When nothing names a target (no launcher, `--deliver-to` or delivery command, so Send
+  would copy), Send opens the same picker if an agent is within reach, with
+  `Copy to clipboard` as the first row and the cursor on the first agent below it. Enter
+  sends there and makes it the Send target; the copy row copies this once, and the next
+  Send asks again; Esc sends nothing. With no agent within reach, Send copies as before.
+  The Send button says `Send N new ▸ choose agent (E)` while Send would ask. The first look
+  for agents runs in the background at start; Send looks again each time it is pressed.
+  Rex and herdr-core agents are not listed: their targets are tied to the agent process a
+  launcher named.
 - A note from Pi is added to the open document, or to the diff in a code review, with the
   author shown, and the footer says so. Notes from Pi are sent with the rest of the review like any other note.
 - `plannotator-tui pi list` prints live Pi sessions. `plannotator-tui pi send --session <id>`
