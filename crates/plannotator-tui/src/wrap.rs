@@ -3,13 +3,17 @@
 //! `tui-markdown` emits one `Line` per logical line and never wraps; the layout needs
 //! exact row counts and the selection needs to know which source byte sits under each
 //! screen column, so both live here. Generic text wrapping — no markdown knowledge.
-//! Reflowing a rendered table is the one shape-aware job, and it lives in `wrap::table`.
+//! Where a line may break is `wrap::breaks`. Reflowing a rendered table is the one
+//! shape-aware job, and it lives in `wrap::table`.
 
+mod breaks;
 mod table;
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthChar;
+
+use breaks::token_len;
 
 pub(crate) use table::wrap_table;
 
@@ -97,12 +101,10 @@ fn wrap_cells(cells: &[Cell], width: usize) -> Vec<Vec<Cell>> {
     let mut current: Vec<Cell> = Vec::new();
     let mut current_width = 0usize;
 
-    // Tokens are unbreakable runs: a word, or a run of whitespace.
     let mut rest = cells;
     while let Some(first) = rest.first() {
         let is_space = first.ch.is_whitespace();
-        let len = rest.iter().take_while(|c| c.ch.is_whitespace() == is_space).count();
-        let (token, tail) = rest.split_at(len);
+        let (token, tail) = rest.split_at(token_len(rest));
         rest = tail;
         let token_width = cells_width(token);
 
@@ -163,11 +165,11 @@ mod tests {
     use super::*;
     use ratatui::style::{Modifier, Stylize};
 
-    fn plain(rows: &[Row]) -> Vec<String> {
+    pub(super) fn plain(rows: &[Row]) -> Vec<String> {
         rows.iter().map(|r| r.line.to_string()).collect()
     }
 
-    fn identity(n: usize) -> Vec<Option<usize>> {
+    pub(super) fn identity(n: usize) -> Vec<Option<usize>> {
         (0..n).map(Some).collect()
     }
 

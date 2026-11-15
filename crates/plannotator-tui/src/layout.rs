@@ -4,12 +4,14 @@
 //! aligned back to its source bytes, and wrapped to the current column width. Every screen
 //! cell therefore knows its block and, where it shows real text, its source byte.
 
+use std::borrow::Cow;
 use std::ops::Range;
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Text};
 use tui_markdown::{Options, StyleSheet};
 
+use crate::cjk_emphasis::{protect, strip_marks};
 use crate::doc::{BlockKind, Document};
 use crate::srcmap::{LineOffsets, align};
 use crate::theme::palette;
@@ -67,14 +69,16 @@ pub(crate) struct DocLayout {
 
 fn render_block(doc: &Document, index: usize) -> (Text<'static>, Vec<LineOffsets>) {
     let source = doc.block_text(index);
-    let text = own(tui_markdown::from_str_with_options(source, &Options::new(Styles)));
+    let protected = protect(source);
+    let text = own(tui_markdown::from_str_with_options(&protected, &Options::new(Styles)));
+    let text = if matches!(protected, Cow::Owned(_)) { strip_marks(text) } else { text };
     let plain: Vec<String> = text.lines.iter().map(ToString::to_string).collect();
     let base = doc.blocks.get(index).map_or(0, |b| b.range.start);
     let offsets = align(&plain, source, base);
     (text, offsets)
 }
 
-fn own(text: Text<'_>) -> Text<'static> {
+pub(crate) fn own(text: Text<'_>) -> Text<'static> {
     let lines = text
         .lines
         .into_iter()
