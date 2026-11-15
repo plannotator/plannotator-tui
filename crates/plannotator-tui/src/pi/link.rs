@@ -61,7 +61,9 @@ impl Note {
 /// `Drop`, can still remove it.
 static ENTRY: Mutex<Option<PathBuf>> = Mutex::new(None);
 
-/// Remove this process's registry entry now. The hang-up watch calls it before exiting.
+/// Remove this process's registry entry now. The hang-up watch, unix only, calls it before
+/// exiting.
+#[cfg(unix)]
 pub(crate) fn remove_entry() {
     if let Ok(mut entry) = ENTRY.lock()
         && let Some(path) = entry.take()
