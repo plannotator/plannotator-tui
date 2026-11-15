@@ -524,7 +524,7 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 [[package]]
 name = "diffs-fancy-regex"
 version = "0.1.0"
-source = "git+https://github.com/plannotator/diffs-rs?branch=feat%2Fhost-api#6d6568d1491d731763df2b9f4281fa95edcbe005"
+source = "git+https://github.com/plannotator/diffs-rs?branch=main#f3c5d5f4d510435c83d8f26c771b455271d60c78"
 dependencies = [
  "bit-set 0.8.0",
  "regex-automata",
@@ -534,7 +534,7 @@ dependencies = [
 [[package]]
 name = "diffs-rs"
 version = "0.1.1"
-source = "git+https://github.com/plannotator/diffs-rs?branch=feat%2Fhost-api#6d6568d1491d731763df2b9f4281fa95edcbe005"
+source = "git+https://github.com/plannotator/diffs-rs?branch=main#f3c5d5f4d510435c83d8f26c771b455271d60c78"
 dependencies = [
  "anyhow",
  "clap",
@@ -560,7 +560,7 @@ dependencies = [
 [[package]]
 name = "diffs-syntect"
 version = "0.1.0"
-source = "git+https://github.com/plannotator/diffs-rs?branch=feat%2Fhost-api#6d6568d1491d731763df2b9f4281fa95edcbe005"
+source = "git+https://github.com/plannotator/diffs-rs?branch=main#f3c5d5f4d510435c83d8f26c771b455271d60c78"
 dependencies = [
  "bincode",
  "diffs-fancy-regex",
@@ -580,7 +580,7 @@ dependencies = [
 [[package]]
 name = "diffs-two-face"
 version = "0.1.0"
-source = "git+https://github.com/plannotator/diffs-rs?branch=feat%2Fhost-api#6d6568d1491d731763df2b9f4281fa95edcbe005"
+source = "git+https://github.com/plannotator/diffs-rs?branch=main#f3c5d5f4d510435c83d8f26c771b455271d60c78"
 dependencies = [
  "diffs-syntect",
  "serde",
@@ -2292,7 +2292,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys",
