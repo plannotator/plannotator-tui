@@ -35,15 +35,22 @@ pub(crate) enum PickerKey {
     Chose(usize),
 }
 
+/// The sessions in `folder` first, then by name and pid, so the order holds while Pis work.
+fn order(sessions: &mut [PiEntry], folder: &Path) {
+    // Pi records its cwd as it was given (on macOS `/var/…` for `/private/var/…`).
+    sessions.sort_by_key(|s| {
+        let cwd = std::fs::canonicalize(&s.cwd).unwrap_or_else(|_| s.cwd.clone());
+        (!cwd.starts_with(folder) && !folder.starts_with(&cwd), s.label(), s.pid)
+    });
+}
+
 impl PiPicker {
-    /// The live sessions, the ones in `folder` (a real path) first, then the newest.
+    /// The live sessions, the ones in `folder` (a real path) first, then by name. Not by
+    /// activity: that changes each time a Pi goes busy or idle, and rows would swap under
+    /// the cursor.
     pub(crate) fn open(folder: &Path) -> Self {
         let mut sessions = pi::live_pi_sessions(&pi::root());
-        // Pi records its cwd as it was given (on macOS `/var/…` for `/private/var/…`).
-        sessions.sort_by_key(|s| {
-            let cwd = std::fs::canonicalize(&s.cwd).unwrap_or_else(|_| s.cwd.clone());
-            (!cwd.starts_with(folder) && !folder.starts_with(&cwd), std::cmp::Reverse(s.updated))
-        });
+        order(&mut sessions, folder);
         Self { sessions, cursor: 0 }
     }
 
@@ -176,4 +183,38 @@ fn short_path(path: &Path, folder: &Path) -> String {
 /// `folder` as a real path, for comparing with the folders Pi sessions report.
 pub(crate) fn real(folder: &Path) -> PathBuf {
     std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, reason = "tests assert by panicking")]
+
+    use super::*;
+
+    fn session(name: &str, cwd: &str, updated: u64) -> PiEntry {
+        serde_json::from_value(serde_json::json!({
+            "v": 1, "host": "pi", "id": name, "pid": 7, "cwd": cwd, "name": name,
+            "port": 1, "token": "t", "busy": false, "updated": updated,
+        }))
+        .expect("entry")
+    }
+
+    #[test]
+    fn sessions_in_the_folder_come_first_then_by_name_whatever_their_activity() {
+        let folder = Path::new("/nowhere/repo");
+        let mut sessions = vec![
+            session("web", "/nowhere/repo", 9),
+            session("other", "/elsewhere", 10),
+            session("api", "/nowhere/repo", 1),
+        ];
+        order(&mut sessions, folder);
+        let names: Vec<String> = sessions.iter().map(PiEntry::label).collect();
+        assert_eq!(names, ["api", "web", "other"]);
+        // A Pi going busy rewrites its `updated`; the rows stay put.
+        if let Some(web) = sessions.get_mut(1) {
+            web.updated = 99;
+        }
+        order(&mut sessions, folder);
+        assert_eq!(sessions.iter().map(PiEntry::label).collect::<Vec<_>>(), names);
+    }
 }

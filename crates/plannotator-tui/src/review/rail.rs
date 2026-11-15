@@ -13,6 +13,7 @@ use super::notes::{self, Row};
 use super::{Focus, Screen};
 use crate::theme::palette;
 use crate::wrap::wrap_line;
+use unicode_width::UnicodeWidthStr as _;
 
 /// Lines of a note's text a bubble shows; the rest is elided.
 const BODY_LINES: usize = 4;
@@ -173,7 +174,8 @@ impl Screen {
 
     fn bubble(&self, index: usize, note: &CodeAnnotation, width: usize) -> Piece {
         let mut tags = vec![notes::place(note)];
-        if let Some(name) = note.author_name.as_deref().filter(|n| !n.is_empty()) {
+        let author = note.author_name.as_deref().filter(|n| !n.is_empty());
+        if let Some(name) = author {
             tags.push(name.to_owned());
         }
         let off_diff = !notes::is_outdated(note) && note.scope == NoteScope::Line && !notes::in_diff(note);
@@ -184,8 +186,17 @@ impl Screen {
         if sent {
             tags.push("sent".to_owned());
         }
-        let title = format!(" {} {} ", notes::glyph(note), tags.join(" \u{b7} "));
-        let text = notes::body(note);
+        let mut title = format!(" {} {} ", notes::glyph(note), tags.join(" \u{b7} "));
+        let mut text = notes::body(note);
+        // A title wider than the bubble's top border would cut the credit off; it moves into
+        // the body instead. The border spans `width` plus the padding and two corners.
+        if let Some(name) = author
+            && title.width() > width + 2
+        {
+            tags.retain(|tag| tag != name);
+            title = format!(" {} {} ", notes::glyph(note), tags.join(" \u{b7} "));
+            text = format!("From: {name}\n{text}");
+        }
         let mut body: Vec<Line<'static>> = text
             .split('\n')
             .flat_map(|line| {

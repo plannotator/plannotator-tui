@@ -60,3 +60,24 @@ fn the_registry_lists_the_changed_files() {
     let root = std::fs::canonicalize(fixture.repo()).expect("real root");
     assert_eq!(screen.pi_files(), [root.join("app.py")]);
 }
+
+#[test]
+fn a_credit_too_long_for_the_bubble_title_moves_into_the_note_instead_of_being_cut() {
+    let fixture = Fixture::new("pi-credit");
+    let mut screen = fixture.open();
+    let file = fixture.repo().join("app.py");
+    assert_eq!(pi(&mut screen, &file, None, Some(14)), json!({"ok": true}));
+    let id = screen.store.annotations()[0].id.clone();
+    let long = "pi \u{b7} billing-service-refactor";
+    screen
+        .store
+        .edit(&id, |note| {
+            note.author_name = Some(long.to_owned());
+            true
+        })
+        .expect("edit");
+    let rows = frame(&mut screen, 80, 30);
+    // The credit may wrap, but none of it is cut.
+    assert!(rows.iter().any(|row| row.contains("From: pi \u{b7}")), "{rows:#?}");
+    assert!(rows.iter().any(|row| row.contains("billing-service-refactor")), "{rows:#?}");
+}
