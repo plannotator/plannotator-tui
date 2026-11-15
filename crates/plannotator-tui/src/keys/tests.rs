@@ -85,19 +85,26 @@ fn an_empty_list_unbinds_the_action() {
 }
 
 #[test]
-fn an_exact_ctrl_binding_wins_over_a_plain_one_earlier_in_the_context() {
-    // `up` comes before `page-up` in the document, and its plain `k` also matches ctrl+k.
+fn a_ctrl_binding_and_a_plain_one_on_the_same_letter_stay_apart() {
     let keymap = parse("page-up = [\"ctrl+k\"]\n").expect("parses");
     assert_eq!(keymap.action(&press(KeyCode::Char('k'), KeyModifiers::CONTROL), DOCUMENT), Some(PageUp));
     assert_eq!(keymap.action(&press(KeyCode::Char('k'), KeyModifiers::NONE), DOCUMENT), Some(Up));
 }
 
 #[test]
-fn a_plain_binding_still_answers_ctrl_when_no_ctrl_binding_claims_it() {
-    // The defaults keep their behaviour: no action binds ctrl+j, so it still moves down.
+fn a_plain_binding_does_not_answer_ctrl() {
     let keymap = Keymap::default();
-    assert_eq!(keymap.action(&press(KeyCode::Char('j'), KeyModifiers::CONTROL), DOCUMENT), Some(Down));
+    assert_eq!(keymap.action(&press(KeyCode::Char('j'), KeyModifiers::CONTROL), DOCUMENT), None);
+    assert_eq!(keymap.action(&press(KeyCode::Down, KeyModifiers::CONTROL), DOCUMENT), None);
+    assert!(!keymap.is(LooksGood, &press(KeyCode::Char('a'), KeyModifiers::CONTROL)));
     assert_eq!(keymap.action(&press(KeyCode::Char('d'), KeyModifiers::CONTROL), DOCUMENT), Some(PageDown));
+}
+
+#[test]
+fn a_plain_binding_answers_altgr_which_windows_reports_as_ctrl_and_alt() {
+    let keymap = Keymap::default();
+    let altgr = KeyModifiers::CONTROL | KeyModifiers::ALT;
+    assert!(keymap.is(LineEnd, &press(KeyCode::Char('$'), altgr)));
 }
 
 #[test]
