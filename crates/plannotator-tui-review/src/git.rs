@@ -161,14 +161,14 @@ impl Drop for TempIndex {
     }
 }
 
-#[cfg(test)]
+// Unix only: the test reads the directory's mode bits.
+#[cfg(all(test, unix))]
 mod tests {
     #![allow(clippy::expect_used, reason = "tests assert by panicking")]
     #![allow(clippy::print_stderr, reason = "a skipped test says why")]
 
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn the_index_copy_sits_in_a_private_directory_of_its_own_that_drop_removes() {
         use std::os::unix::fs::PermissionsExt as _;
