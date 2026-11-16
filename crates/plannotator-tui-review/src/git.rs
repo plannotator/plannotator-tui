@@ -93,7 +93,8 @@ impl TempIndex {
         let real = PathBuf::from(run_text(cmd, "rev-parse --git-path index")?);
         let real = if real.is_absolute() { real } else { root.join(real) };
         match std::fs::copy(&real, &index.path) {
-            Ok(_) => {}
+            // Best effort: a read-only copy keeps a fresh mtime and only misses that rare edit.
+            Ok(_) => drop(keep_mtime(&real, &index.path)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // a repo with nothing staged yet
             Err(source) => return Err(Error::Io { action: "copying the git index", path: real, source }),
         }
@@ -138,6 +139,14 @@ impl TempIndex {
         cmd.env("GIT_INDEX_FILE", &self.path);
         cmd
     }
+}
+
+/// Give `copy` the mtime of `original`. Git checks an entry's content, not just its cached
+/// stat, only when the entry is no older than the index file; a fresh mtime on the copy would
+/// make an edit in the second the index was written, of the same size, look unchanged.
+fn keep_mtime(original: &Path, copy: &Path) -> std::io::Result<()> {
+    let modified = std::fs::metadata(original)?.modified()?;
+    std::fs::File::options().write(true).open(copy)?.set_modified(modified)
 }
 
 impl Drop for TempIndex {
