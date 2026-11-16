@@ -70,10 +70,15 @@ fn failure(what: &str, stderr: &[u8]) -> Error {
     Error::Git { command: what.to_owned(), detail }
 }
 
-/// A copy of the repository's index in the system temp dir, removed on drop. Commands given
-/// `GIT_INDEX_FILE` of this path never touch the real `.git/index`.
+/// A copy of the repository's index in a directory of its own under the system temp dir,
+/// removed with it on drop. Commands given `GIT_INDEX_FILE` of this path never touch the real
+/// `.git/index`.
+///
+/// The directory is created fresh, private to this user and never reused, so nobody else can
+/// plant a file there or swap the index git reads.
 #[derive(Debug)]
 pub(crate) struct TempIndex {
+    dir: PathBuf,
     path: PathBuf,
 }
 
@@ -82,12 +87,22 @@ impl TempIndex {
     /// intent-to-add in the copy, so `git diff` against the working tree shows them as new.
     pub(crate) fn with_untracked(root: &Path) -> Result<Self> {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
-        let name = format!(
-            "plannotator-tui-index-{}-{}",
+        let nanos =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        let dir = std::env::temp_dir().join(format!(
+            "plannotator-tui-index-{}-{}-{nanos}",
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
-        );
-        let index = Self { path: std::env::temp_dir().join(name) };
+        ));
+        let builder = &mut std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(builder, 0o700);
+        builder.create(&dir).map_err(|source| Error::Io {
+            action: "creating a directory for the index copy",
+            path: dir.clone(),
+            source,
+        })?;
+        let index = Self { path: dir.join("index"), dir };
         let mut cmd = command(root);
         cmd.args(["rev-parse", "--git-path", "index"]);
         let real = PathBuf::from(run_text(cmd, "rev-parse --git-path index")?);
@@ -142,9 +157,41 @@ impl TempIndex {
 
 impl Drop for TempIndex {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-        let mut lock = self.path.clone().into_os_string();
-        lock.push(".lock");
-        let _ = std::fs::remove_file(lock);
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, reason = "tests assert by panicking")]
+    #![allow(clippy::print_stderr, reason = "a skipped test says why")]
+
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_index_copy_sits_in_a_private_directory_of_its_own_that_drop_removes() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if Command::new("git").arg("--version").output().is_err() {
+            eprintln!("git is not installed; skipping");
+            return;
+        }
+        let repo = std::env::temp_dir().join(format!("pt-review-git-private-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&repo);
+        std::fs::create_dir_all(&repo).expect("repo dir");
+        let mut init = command(&repo);
+        init.args(["init", "-q"]);
+        assert!(succeeds(init).expect("git"), "git init");
+        std::fs::write(repo.join("new.txt"), "new\n").expect("write");
+
+        let index = TempIndex::with_untracked(&repo).expect("index copy");
+        let dir = index.path.parent().expect("a parent").to_path_buf();
+        assert_ne!(dir, std::env::temp_dir(), "not loose in the shared temp dir");
+        let mode = std::fs::metadata(&dir).expect("metadata").permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+        assert!(index.path.is_file(), "git wrote the copy there");
+        drop(index);
+        assert!(!dir.exists(), "dropping the copy removes its directory");
+        std::fs::remove_dir_all(&repo).expect("cleanup");
     }
 }
