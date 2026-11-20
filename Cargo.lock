@@ -1654,6 +1654,7 @@ name = "plannotator-tui-review"
 version = "0.10.0"
 dependencies = [
  "plannotator-tui-schema",
+ "regex",
  "serde",
  "serde_json",
  "sha2 0.11.0",
