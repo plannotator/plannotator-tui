@@ -441,6 +441,16 @@ fn names_inside_template_substitutions_are_offered_and_the_text_around_them_is_n
 }
 
 #[test]
+fn templates_nested_past_any_real_depth_are_text_not_a_stack_overflow() {
+    let nested = |depth| format!("{}deep{}", "`${".repeat(depth), "}`".repeat(depth));
+    assert_eq!(idents(&nested(MAX_TEMPLATE_NESTING), TS), ["deep"]);
+    assert_eq!(idents(&nested(MAX_TEMPLATE_NESTING + 1), TS), Vec::<&str>::new());
+    // A line in a diff from anyone: deep enough, it would overflow the stack if recursed into.
+    let hostile = nested(100_000);
+    assert!(!idents(&hostile, TS).contains(&"deep"));
+}
+
+#[test]
 fn python_identifiers() {
     assert_eq!(idents("def load(self, path: str) -> None:  # read(path)", PY), ["load", "path", "str"]);
     assert_eq!(idents(r#"msg = f"{name}" + r'\d' + """doc""" + other"#, PY), ["msg", "other"]);

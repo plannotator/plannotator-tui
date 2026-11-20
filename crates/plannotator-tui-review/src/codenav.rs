@@ -61,6 +61,9 @@ pub const TIMEOUT: Duration = Duration::from_secs(5);
 pub const HOVER_TIMEOUT: Duration = Duration::from_secs(3);
 /// A candidate's text is cut to this many characters, then `…` (`parseRgJsonOutput`).
 pub const SNIPPET_CHARS: usize = 200;
+/// Past this many template literals inside one another, the rest of the line is read as
+/// text: each level is a recursion, and a line can come from anyone's diff.
+const MAX_TEMPLATE_NESTING: usize = 32;
 
 /// Directory names that can only be tool output: excluded at any depth
 /// (`CODE_NAV_ALWAYS_IGNORED_DIRS`).
@@ -693,7 +696,8 @@ pub fn identifier_at(line: &str, column: usize, language: Option<Language>) -> O
 /// or comments, as far as a single-line lexer can tell. A line inside a multi-line string or
 /// block comment cannot be told apart from code, except a `*` continuation line in a C-style
 /// block comment. A JavaScript template literal's text is skipped, but the code in its
-/// `${…}` substitutions is read like any other, nested templates included.
+/// `${…}` substitutions is read like any other, nested templates included up to
+/// [`MAX_TEMPLATE_NESTING`] deep; past that, the rest of the line is text.
 pub fn identifiers_on_line(line: &str, language: Option<Language>) -> Vec<Ident<'_>> {
     let lex = Lexer::new(line, language);
     lex.run()
@@ -761,20 +765,19 @@ impl<'a> Lexer<'a> {
         if matches!(self.language, Some(Language::C | Language::Cpp)) && trimmed.starts_with("#include") {
             return out;
         }
-        self.scan(0, false, &mut out);
+        self.scan(0, None, &mut out);
         out
     }
 
     /// Read code from char `i`, adding its identifiers to `out`, to the end of the line; or,
-    /// inside a template substitution (`substitution`), to the `}` that closes it. Returns
-    /// the char index where it stopped (past that `}`).
-    fn scan(&self, mut i: usize, substitution: bool, out: &mut Vec<Ident<'a>>) -> usize {
+    /// inside a substitution (`within` is its template's depth), to the `}` that closes it. Returns the char index where it stopped (past that `}`).
+    fn scan(&self, mut i: usize, within: Option<usize>, out: &mut Vec<Ident<'a>>) -> usize {
         let mut depth = 0usize;
         while let Some(c) = self.at(i) {
-            if substitution && c == '{' {
+            if within.is_some() && c == '{' {
                 depth += 1;
             }
-            if substitution && c == '}' {
+            if within.is_some() && c == '}' {
                 if depth == 0 {
                     return i + 1;
                 }
@@ -791,7 +794,7 @@ impl<'a> Lexer<'a> {
                 continue;
             }
             if c == '`' && self.is_js() {
-                i = self.skip_template(i, out);
+                i = self.skip_template(i, within.map_or(1, |n| n + 1), out);
                 continue;
             }
             if c == '"' || c == '`' || (c == '\'' && self.language != Some(Language::Rust)) {
@@ -843,8 +846,13 @@ impl<'a> Lexer<'a> {
     }
 
     /// Past a JavaScript template literal starting at `i` (its backtick): its text is
-    /// skipped, the code in each `${…}` is read for identifiers. Unclosed runs to the end.
-    fn skip_template(&self, i: usize, out: &mut Vec<Ident<'a>>) -> usize {
+    /// skipped, the code in each `${…}` is read for identifiers. `nesting` is its depth among
+    /// enclosing templates (1 at top level). Unclosed, or nested deeper than
+    /// [`MAX_TEMPLATE_NESTING`], it runs to the end of the line.
+    fn skip_template(&self, i: usize, nesting: usize, out: &mut Vec<Ident<'a>>) -> usize {
+        if nesting > MAX_TEMPLATE_NESTING {
+            return self.chars.len();
+        }
         let mut j = i + 1;
         while let Some(c) = self.at(j) {
             if c == '\\' {
@@ -855,7 +863,7 @@ impl<'a> Lexer<'a> {
                 return j + 1;
             }
             if self.starts(j, "${") {
-                j = self.scan(j + 2, true, out);
+                j = self.scan(j + 2, Some(nesting), out);
                 continue;
             }
             j += 1;
