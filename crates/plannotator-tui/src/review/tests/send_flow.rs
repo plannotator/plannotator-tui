@@ -172,7 +172,7 @@ fn a_code_review_with_no_target_asks_which_agent_like_a_document_review() {
         rex: None,
         ask_on_send: true,
     };
-    screen.reach = Reach::start_with(finder, root.clone());
+    screen.reach = Reach::start_with(finder, root.clone(), None);
     screen.reach.find(&root);
     note(&mut screen, 9, "name the total");
     assert_eq!(screen.send_label(), "Send 1 new ▸ choose agent (E)");

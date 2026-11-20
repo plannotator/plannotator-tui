@@ -632,14 +632,33 @@ impl App {
         }
     }
 
-    /// Add the background layout once it is ready, without waiting for it.
-    pub(crate) fn poll_layout(&mut self) {
-        self.open.layout.poll();
+    /// Add the background layout once it is ready, without waiting for it. True when it
+    /// was added.
+    pub(crate) fn poll_layout(&mut self) -> bool {
+        self.open.layout.poll()
     }
 
     /// Whether part of the open document is still being laid out in the background.
     pub(crate) fn layout_pending(&self) -> bool {
         !self.open.layout.is_complete()
+    }
+
+    /// Take what the background work has ready, on every wake of the event loop: the rest
+    /// of the layout (a panic there ends the app here), file search results, a change on
+    /// disk, Pi notes, and the agent finder's answer. True when the screen changed.
+    pub(crate) fn poll_background(&mut self) -> bool {
+        let mut changed = self.poll_layout();
+        changed |= self.poll_file_search();
+        changed |= self.poll_disk();
+        changed |= self.poll_pi();
+        changed |= self.reach.poll();
+        changed
+    }
+
+    /// Whether background work the screen will show is still running. The event loop
+    /// cannot be woken by it, so it checks more often until it lands.
+    pub(crate) fn background_pending(&self) -> bool {
+        self.file_search_scanning() || self.layout_pending() || self.reach.looking()
     }
 
     /// The footer took rows from a document `old_height` tall: scroll just enough to keep what

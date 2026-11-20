@@ -277,11 +277,13 @@ impl DocLayout {
         self.place();
     }
 
-    /// Add the background blocks if they are ready, without waiting.
-    pub(crate) fn poll(&mut self) {
-        if self.rest.as_ref().is_some_and(Rest::is_finished) {
+    /// Add the background blocks if they are ready, without waiting. True when they were added.
+    pub(crate) fn poll(&mut self) -> bool {
+        let ready = self.rest.as_ref().is_some_and(Rest::is_finished);
+        if ready {
             self.finish();
         }
+        ready
     }
 
     /// [`DocLayout::finish`] when document row `end` lies past the rows laid out so far.

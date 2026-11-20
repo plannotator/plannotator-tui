@@ -23,7 +23,7 @@ impl Screen {
     /// without the link.
     pub(crate) fn start_pi_link(&mut self) {
         self.pi_link = Link::start(&crate::pi::root(), self.real_root(), self.pi_files()).ok();
-        self.reach = crate::ui::agent_picker::Reach::start(self.real_root());
+        self.reach = crate::ui::agent_picker::Reach::start(self.real_root(), Some(self.wake.clone()));
     }
 
     pub(super) fn real_root(&self) -> PathBuf {

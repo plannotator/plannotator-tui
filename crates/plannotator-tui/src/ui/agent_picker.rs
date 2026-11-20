@@ -7,7 +7,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::mpsc::SyncSender;
 
 use ratatui::Frame;
 use ratatui::crossterm::event::KeyEvent;
@@ -189,24 +190,55 @@ pub(crate) struct Reach {
     /// Whether the last look found an agent. The first look runs on a thread at start, so
     /// a slow Pi or Herdr never holds up the first frame; until it answers, Send copies.
     found: Arc<AtomicBool>,
+    /// Where the first look is: [`SHOWN`] (or never started), [`LOOKING`], or [`ANSWERED`]
+    /// until [`Reach::poll`] hands the answer to the screen.
+    first_look: Arc<AtomicU8>,
 }
 
+/// The first look is not running, or the screen has its answer.
+const SHOWN: u8 = 0;
+/// The first look is running.
+const LOOKING: u8 = 1;
+/// The first look answered; the screen has not redrawn for it yet.
+const ANSWERED: u8 = 2;
+
 impl Reach {
-    /// An interactive review of `folder`: look for agents once, in the background.
-    pub(crate) fn start(folder: PathBuf) -> Self {
-        Self::start_with(AgentFinder::from_env(), folder)
+    /// An interactive review of `folder`: look for agents once, in the background. `wake`
+    /// is the event loop's, when it has one: the look pokes it on answering.
+    pub(crate) fn start(folder: PathBuf, wake: Option<SyncSender<()>>) -> Self {
+        Self::start_with(AgentFinder::from_env(), folder, wake)
     }
 
-    pub(crate) fn start_with(finder: AgentFinder, folder: PathBuf) -> Self {
+    pub(crate) fn start_with(finder: AgentFinder, folder: PathBuf, wake: Option<SyncSender<()>>) -> Self {
         let found = Arc::new(AtomicBool::new(false));
+        let first_look = Arc::new(AtomicU8::new(if finder.ask_on_send { LOOKING } else { SHOWN }));
         if finder.ask_on_send {
-            let (finder, found) = (finder.clone(), Arc::clone(&found));
-            let _ = std::thread::Builder::new().name("agent-finder".into()).spawn(move || {
+            let (finder, found, answered) = (finder.clone(), Arc::clone(&found), Arc::clone(&first_look));
+            let spawned = std::thread::Builder::new().name("agent-finder".into()).spawn(move || {
                 let any = !finder.find(&folder).is_empty();
                 found.store(any, Ordering::Relaxed);
+                answered.store(ANSWERED, Ordering::Release);
+                if let Some(wake) = wake {
+                    let _ = wake.try_send(());
+                }
             });
+            if spawned.is_err() {
+                first_look.store(SHOWN, Ordering::Release);
+            }
         }
-        Self { finder, found }
+        Self { finder, found, first_look }
+    }
+
+    /// True once, when the first look has answered since the last call: the Send button may
+    /// read differently now, so the screen redraws.
+    pub(crate) fn poll(&self) -> bool {
+        self.first_look.compare_exchange(ANSWERED, SHOWN, Ordering::AcqRel, Ordering::Acquire).is_ok()
+    }
+
+    /// Whether the first look is still running. A loop that cannot be woken checks often
+    /// until it answers.
+    pub(crate) fn looking(&self) -> bool {
+        self.first_look.load(Ordering::Acquire) == LOOKING
     }
 
     /// The agents within reach now, remembering whether there were any.
@@ -526,6 +558,25 @@ fn short_path(path: &Path, folder: &Path) -> String {
 /// `folder` as a real path, for comparing with the folders agents report.
 pub(crate) fn real(folder: &Path) -> PathBuf {
     std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf())
+}
+
+/// A fake `rex` or `herdr` that answers nothing while the file `gate` exists, then runs
+/// `bin`: a test holds the first look open until it lets it answer.
+#[cfg(all(test, unix))]
+#[allow(clippy::expect_used, reason = "test fixtures assert by panicking")]
+pub(crate) fn gated(bin: &Path, gate: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::write(gate, "").expect("gate");
+    let name = bin.file_name().expect("name").to_string_lossy();
+    let wrapper = bin.with_file_name(format!("gated {name}"));
+    let script = format!(
+        "#!/bin/sh\nwhile [ -e '{gate}' ]; do sleep 0.01; done\nexec '{bin}' \"$@\"\n",
+        gate = gate.display(),
+        bin = bin.display()
+    );
+    std::fs::write(&wrapper, script).expect("script");
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    wrapper
 }
 
 #[cfg(test)]

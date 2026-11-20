@@ -153,7 +153,7 @@ pub(crate) struct Screen {
     last_key: Option<Instant>,
     /// The whole-file view, while it is open over the diff.
     whole: Option<whole::Whole>,
-    /// The event loop's wake channel, for the whole-file view's engine.
+    /// The event loop's wake channel, for the whole-file view's engine and the agent finder.
     wake: SyncSender<()>,
     quit: bool,
 }
@@ -268,7 +268,8 @@ impl Screen {
         self.quit
     }
 
-    /// Take what the viewer and the Pi link have ready. True when the screen changed.
+    /// Take what the viewers, the Pi link, the disk watch and the agent finder have ready.
+    /// True when the screen changed.
     pub(crate) fn tick(&mut self) -> Result<bool> {
         let mut changed = false;
         if self.diff.poll(&self.capture)? {
@@ -285,6 +286,7 @@ impl Screen {
             self.sync_whole_markers();
             changed = true;
         }
+        changed |= self.reach.poll();
         let whole_draw = self.whole.as_ref().is_some_and(whole::Whole::needs_draw);
         Ok(changed || self.diff.needs_draw() || whole_draw)
     }

@@ -31,7 +31,7 @@ fn a_code_review_from_one_rex_agent_can_send_to_another() {
         }),
         ask_on_send: true,
     };
-    screen.reach = Reach::start_with(finder, root.clone());
+    screen.reach = Reach::start_with(finder, root.clone(), None);
     screen.reach.find(&root);
     assert!(screen.send_label().contains("▸ claude in 9ba798"), "{}", screen.send_label());
 

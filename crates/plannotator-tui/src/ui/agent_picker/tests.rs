@@ -139,7 +139,7 @@ fn only_a_fallback_clipboard_in_an_interactive_review_asks() {
         rex: None,
         ask_on_send: true,
     };
-    let reach = Reach { finder: none, found: Arc::new(AtomicBool::new(true)) };
+    let reach = Reach { finder: none, found: Arc::new(AtomicBool::new(true)), ..Reach::default() };
     assert!(reach.asks(&Clipboard));
     assert!(!reach.asks(&crate::delivery::Caller));
     assert!(!reach.asks(&crate::delivery::Discard));

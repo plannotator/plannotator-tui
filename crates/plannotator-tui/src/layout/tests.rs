@@ -226,6 +226,22 @@ Term\n: Its definition.\n\n---\n\n";
     assert!(all_rows(&lazy) == all_rows(&full), "rows differ from a full build");
 }
 
+/// Polling says when it added the background blocks, once, so the event loop redraws for
+/// them without a key.
+#[test]
+fn polling_reports_the_background_blocks_once() {
+    let doc = Document::parse("## Step\n\nSome words.\n\n".repeat(2000));
+    let mut lazy = DocLayout::start(&doc, 70);
+    let started = std::time::Instant::now();
+    while !lazy.poll() {
+        assert!(started.elapsed() < std::time::Duration::from_secs(20), "the layout never finished");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(lazy.is_complete());
+    assert_eq!(lazy.blocks.len(), doc.blocks.len());
+    assert!(!lazy.poll());
+}
+
 /// Code laid out on a background thread is coloured when drawn, like code on the first screen.
 #[test]
 fn code_laid_out_in_the_background_is_coloured_when_drawn() {
