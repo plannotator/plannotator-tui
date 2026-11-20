@@ -170,6 +170,11 @@ impl Repo {
         &self.root
     }
 
+    /// The `gh` a pull request review was opened with; `None` for any other review.
+    pub fn gh(&self) -> Option<&Gh> {
+        self.pull.as_ref().map(|p| &p.gh)
+    }
+
     /// The folder the review belongs to, for the agent and Pi: the work tree, or for a pull
     /// request fetched into the cache, the folder the review was opened in.
     pub fn workdir(&self) -> &Path {

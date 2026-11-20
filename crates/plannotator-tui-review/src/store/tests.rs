@@ -119,6 +119,36 @@ fn sends_cover_notes_until_they_are_edited_across_reloads() {
 }
 
 #[test]
+fn posts_are_their_own_state_beside_sends_and_survive_a_restart() {
+    let f = Fixture::new("posted");
+    let mut store = f.load();
+    let a = add(&mut store, "a");
+    let b = add(&mut store, "b");
+    let url = "https://github.com/o/app/pull/7#pullrequestreview-1";
+    store.record_post(url, "1a2b3c", &[a.clone(), b.clone()]).expect("records");
+    let mut store = f.load();
+    let (first, second) = (&store.annotations()[0], &store.annotations()[1]);
+    assert!(store.is_posted(first) && store.is_posted(second), "the post survives a restart");
+    assert!(store.is_pending(first), "posting is not sending");
+    assert_eq!(store.posts()[0].url, url);
+    assert_eq!(store.posts()[0].commit_id, "1a2b3c");
+    // An edit in the same millisecond as the post still counts: posted before, not now.
+    store
+        .edit(&b, |n| {
+            n.text = Some("b2".into());
+            true
+        })
+        .expect("edits");
+    let store = f.load();
+    let (first, second) = (&store.annotations()[0], &store.annotations()[1]);
+    assert!(store.is_posted(first));
+    assert!(!store.is_posted(second) && store.was_posted(second));
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(store.path()).expect("written")).expect("JSON");
+    assert_eq!(json["posted"][0]["annotationIds"], serde_json::json!([a, b]));
+}
+
+#[test]
 fn a_send_is_never_dated_before_the_edits_it_covers() {
     let f = Fixture::new("future");
     let mut store = f.load();

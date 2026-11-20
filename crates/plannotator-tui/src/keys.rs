@@ -107,6 +107,8 @@ pub(crate) enum Action {
     /// Back to the place before a jump, and forward again.
     JumpBack,
     JumpForward,
+    /// Post the notes to the pull request on GitHub as one review, after a summary.
+    PostToGithub,
 }
 
 use Action::{
@@ -121,7 +123,7 @@ use Action::{
     PreviousHunk, PreviousMatch, PreviousUnviewed, Search, Suggest, ToggleFiles, ToggleLayout, ToggleViewed,
     ToggleWrap, WholeBase, WholeFile,
 };
-use Action::{GoToDefinition, JumpBack, JumpForward};
+use Action::{GoToDefinition, JumpBack, JumpForward, PostToGithub};
 use Action::{NarrowColumn, ToggleNotes, WidenColumn};
 
 /// Browsing, before the focused pane gets the key.
@@ -206,6 +208,7 @@ pub(crate) const REVIEW_GLOBAL: &[Action] = &[
     FinishReview,
     UndoFinish,
     ChangeComment,
+    PostToGithub,
     Reload,
     PickTarget,
     Help,
@@ -246,8 +249,22 @@ pub(crate) const DIFF: &[Action] = &[
 ];
 /// The code review's notes rail.
 pub(crate) const NOTES: &[Action] = &[Down, Up, Confirm, Edit, Remove, Back];
-pub(crate) const REVIEW_MENU: &[Action] =
-    &[Down, Up, Confirm, Back, ReviewMenu, Interrupt, ChangeComment, ResendAll, FinishReview, UndoFinish];
+pub(crate) const REVIEW_MENU: &[Action] = &[
+    Down,
+    Up,
+    Confirm,
+    Back,
+    ReviewMenu,
+    Interrupt,
+    ChangeComment,
+    PostToGithub,
+    ResendAll,
+    FinishReview,
+    UndoFinish,
+];
+/// The summary before a post to GitHub: `left`/`right` choose the verdict, `confirm` posts,
+/// `back` cancels.
+pub(crate) const POST_REVIEW: &[Action] = &[Left, Right, Confirm, Back, Interrupt];
 /// The code review's key help: the motions scroll it when it does not fit; the rest close it.
 pub(crate) const HELP: &[Action] = &[Back, Help, Quit, Interrupt, Down, Up, PageDown, PageUp];
 
@@ -268,6 +285,7 @@ const SHARED: &[&[&[Action]]] = &[
     &[REVIEW_GLOBAL, DIFF],
     &[REVIEW_GLOBAL, NOTES],
     &[REVIEW_MENU],
+    &[POST_REVIEW],
     &[HELP],
 ];
 
@@ -456,6 +474,8 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (JumpBack, &[ctrl('o')]),
     // Ctrl+I is Tab in terminals that do not tell them apart; there `cycle-focus` gets it.
     (JumpForward, &[ctrl('i')]),
+    // G for GitHub; free in every code review context.
+    (PostToGithub, &[ctrl('g')]),
 ];
 
 /// Actions added after configs were written: `approve` (live only in a gated review), `copy`
@@ -491,6 +511,7 @@ const LATE: &[Action] = &[
     GoToDefinition,
     JumpBack,
     JumpForward,
+    PostToGithub,
 ];
 
 /// The keys bound to each action. A `[keys]` entry replaces that action's keys and leaves the
@@ -658,6 +679,7 @@ impl Action {
             Self::GoToDefinition => "go-to-definition",
             Self::JumpBack => "jump-back",
             Self::JumpForward => "jump-forward",
+            Self::PostToGithub => "post-to-github",
         }
     }
 }
