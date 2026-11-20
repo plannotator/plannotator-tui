@@ -237,3 +237,30 @@ fn a_folder_too_long_for_the_pane_keeps_its_end() {
     assert_eq!(keep_start("claude · Fix login redirect", 12), "claude · Fi…");
     assert_eq!(keep_start("claude", 12), "claude");
 }
+
+#[test]
+fn a_pi_in_a_rex_block_is_one_row_sent_over_the_pi_link_and_placed_where_rex_has_it() {
+    use crate::rex::agents::{FIXTURE_OWN_BLOCK, fixture_agents};
+    // The fixtures' pi runs as pid 94920 in work › web.
+    let pi = session("notes", "/Users/me/work/notes", 94920);
+    let rows = with_rex(
+        vec![pi, session("web", "/nowhere/repo", 9)],
+        fixture_agents(Some(FIXTURE_OWN_BLOCK)),
+        Path::new("rex"),
+    );
+    let shown: Vec<String> = rows.iter().map(|r| format!("{} | {}", r.label(), r.place())).collect();
+    assert_eq!(
+        shown,
+        [
+            "pi · notes | work › web · eda7cc",
+            "pi · web | pid 9",
+            "claude · Fix login redirect | work › api · 9ba798",
+            "codex | work › api · 31496a",
+            "claude · Migrate styles | work › web · 63239c",
+            "claude · release | side › Window 122adf3e · fd82e9",
+        ]
+    );
+    assert!(matches!(rows[0], Reachable::PiInRex(..)));
+    assert!(!rows[0].in_this_window(), "work › web is not the review's window");
+    assert_eq!(rows[0].delivery().describe(), "pi · notes", "sent over the Pi link");
+}

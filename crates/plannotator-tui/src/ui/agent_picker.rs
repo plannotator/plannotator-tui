@@ -38,13 +38,15 @@ pub(crate) enum Reachable {
     Herdr(PaneAgent, PathBuf),
     /// An agent in a Rex block, pasted into with this `rex`.
     Rex(BlockAgent, PathBuf),
+    /// A Pi session that runs in a Rex block: sent to over the Pi link, shown where Rex has it.
+    PiInRex(PiEntry, BlockAgent),
 }
 
 impl Reachable {
     /// `pi · api`, `claude`, `claude · reviewer`.
     fn label(&self) -> String {
         match self {
-            Self::Pi(entry) => format!("pi · {}", entry.label()),
+            Self::Pi(entry) | Self::PiInRex(entry, _) => format!("pi · {}", entry.label()),
             Self::Herdr(agent, _) => agent.label(),
             Self::Rex(agent, _) => agent.label(),
         }
@@ -52,7 +54,7 @@ impl Reachable {
 
     fn cwd(&self) -> Option<&Path> {
         match self {
-            Self::Pi(entry) => Some(&entry.cwd),
+            Self::Pi(entry) | Self::PiInRex(entry, _) => Some(&entry.cwd),
             Self::Herdr(agent, _) => agent.cwd.as_deref(),
             Self::Rex(agent, _) => agent.cwd.as_deref(),
         }
@@ -61,26 +63,26 @@ impl Reachable {
     /// `idle`, `busy`, `working`, `blocked`, ...
     fn state(&self) -> &str {
         match self {
-            Self::Pi(entry) if entry.busy => "busy",
-            Self::Pi(_) => "idle",
+            Self::Pi(entry) | Self::PiInRex(entry, _) if entry.busy => "busy",
+            Self::Pi(_) | Self::PiInRex(..) => "idle",
             Self::Herdr(agent, _) => &agent.status,
             Self::Rex(agent, _) => &agent.status,
         }
     }
 
     /// Where it runs: `pid 7` for a Pi, `workspace › tab · w1:p3` for a Herdr pane,
-    /// `session › window · a1d6db` for a Rex block.
+    /// `session › window · a1d6db` for a Rex block, and for a Pi in one.
     fn place(&self) -> String {
         match self {
             Self::Pi(entry) => format!("pid {}", entry.pid),
             Self::Herdr(agent, _) => format!("{} · {}", agent.place(), agent.pane),
-            Self::Rex(agent, _) => agent.place(),
+            Self::Rex(agent, _) | Self::PiInRex(_, agent) => agent.place(),
         }
     }
 
     fn delivery(&self) -> Box<dyn Delivery> {
         match self {
-            Self::Pi(entry) => Box::new(PiSession::new(entry.clone())),
+            Self::Pi(entry) | Self::PiInRex(entry, _) => Box::new(PiSession::new(entry.clone())),
             Self::Herdr(agent, bin) => {
                 Box::new(HerdrAgent::new(bin.clone(), agent.pane.clone(), Some(agent.agent.clone())))
             }
@@ -97,7 +99,7 @@ impl Reachable {
     /// Rex block's place in Rex's order.
     fn tiebreak(&self) -> (u8, String, u32) {
         match self {
-            Self::Pi(entry) => (0, String::new(), entry.pid),
+            Self::Pi(entry) | Self::PiInRex(entry, _) => (0, String::new(), entry.pid),
             Self::Herdr(agent, _) => (1, agent.pane.clone(), 0),
             Self::Rex(agent, _) => {
                 let (session, window, block) = agent.rank;
@@ -106,13 +108,11 @@ impl Reachable {
         }
     }
 
-    /// Whether it runs in the Rex window (tab) the review runs in: a Rex block there, or a
-    /// Pi whose process one of `here` (the pids of those blocks' agents) is.
-    fn in_this_window(&self, here: &[u32]) -> bool {
+    /// Whether it runs in the Rex window (tab) the review runs in.
+    fn in_this_window(&self) -> bool {
         match self {
-            Self::Rex(agent, _) => agent.here,
-            Self::Pi(entry) => here.contains(&entry.pid),
-            Self::Herdr(..) => false,
+            Self::Rex(agent, _) | Self::PiInRex(_, agent) => agent.here,
+            Self::Pi(_) | Self::Herdr(..) => false,
         }
     }
 }
@@ -159,20 +159,26 @@ impl AgentFinder {
             .map(|pane| Reachable::Herdr(pane, bin.clone()))
             .collect::<Vec<_>>();
         let blocks = self.rex.as_ref().map(RexAgents::list).unwrap_or_default();
-        let here: Vec<u32> = blocks.iter().filter(|block| block.here).map(|block| block.pid).collect();
         let rex = self.rex.as_ref().map(|r| r.bin.clone()).unwrap_or_default();
-        let blocks = blocks
-            .into_iter()
-            .filter(|block| !pis.iter().any(|pi| pi.pid == block.pid))
-            .map(|block| Reachable::Rex(block, rex.clone()))
-            .collect::<Vec<_>>();
-        let mut found: Vec<Reachable> =
-            pis.into_iter().map(Reachable::Pi).chain(panes).chain(blocks).collect();
+        let mut found = with_rex(pis, blocks, &rex);
+        found.extend(panes);
         order(&mut found, folder);
         // Stable: within each group the order above holds.
-        found.sort_by_key(|agent| !agent.in_this_window(&here));
+        found.sort_by_key(|agent| !agent.in_this_window());
         found
     }
+}
+
+/// The Pi sessions and the Rex blocks with agents, as rows: a Pi that runs in a Rex block
+/// (the same process) is one row, sent to over the Pi link and placed where Rex has it.
+fn with_rex(pis: Vec<PiEntry>, blocks: Vec<BlockAgent>, rex: &Path) -> Vec<Reachable> {
+    let (pi_blocks, blocks): (Vec<BlockAgent>, Vec<BlockAgent>) =
+        blocks.into_iter().partition(|block| pis.iter().any(|pi| pi.pid == block.pid));
+    let pis = pis.into_iter().map(|pi| match pi_blocks.iter().find(|block| block.pid == pi.pid) {
+        Some(block) => Reachable::PiInRex(pi, block.clone()),
+        None => Reachable::Pi(pi),
+    });
+    pis.chain(blocks.into_iter().map(|block| Reachable::Rex(block, rex.to_path_buf()))).collect()
 }
 
 /// Whether Send asks which agent first, and whether there is any to ask about. Shared by

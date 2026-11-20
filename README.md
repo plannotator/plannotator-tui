@@ -489,7 +489,8 @@ no launcher, asks which agent on the first Send.
 The agent is the one the pane's program reports to Rex (its program status app, such as `pi`
 or `claude-code`), else the one its process is named after. So pi, which runs under `node`,
 gets Send like any other agent. A pane with no agent copies instead. A send waits while Rex
-reports the agent blocked on a permission prompt or a question, as it does in Herdr. It also
+reports the agent blocked on a permission prompt or a question, as it does in Herdr: nothing is
+sent or copied, the notes stay pending, and `E` retries. It also
 needs the agent to report its state to Rex (Claude Code, Codex and pi do): until it has, the
 review copies instead, since Enter could answer a dialog Rex cannot see, and `--paste` still
 works. Rex does not report its theme to programs, so with a light Rex theme set
@@ -528,7 +529,7 @@ A terminal with no agent copies instead.
 
 A send needs the agent to still be the terminal's foreground program and to have reported its state
 to hc (OSC 7501), because Enter could answer a dialog hc cannot see. `hc send` also refuses an agent
-that reports it is blocked, and the review says so and copies; `E` retries.
+that reports it is blocked, and the review says so; nothing is copied and `E` retries.
 
 hc has no exact session for an agent, so `hc last` reads the newest transcript in the agent's folder.
 Another agent in that folder may have written one more recently; `--session` names the right
@@ -549,7 +550,10 @@ reviews alike:
 - inside Rex, every pane with an agent in every Rex session and window (tab), named by
   agent, folder, state, and `session › window · pane`. A pane you gave a label shows it
   (`claude · reviewer`); otherwise the row shows the title the agent set, such as the task
-  Claude Code is on (`claude · Fix login redirect`). The review's own pane is never listed.
+  Claude Code is on (`claude · Fix login redirect`). An agent that has not reported its state
+  to Rex reads `no state`; Send refuses it, as it does for a launcher (see
+  [Rex Annotate](#rex-annotate)). A Pi session in a Rex pane is one row, sent to over the
+  Pi link and placed where Rex has it. The review's own pane is never listed.
 
 ```
 ╭ send to which agent? ─────────────────────────────────────────────────────────────────╮
@@ -629,7 +633,7 @@ names it by its first word: `Send 3 new ▸ cmd · tmux (E)`.
   | Exit | Means | The review |
   |---|---|---|
   | `0` | delivered | marks the notes sent; the first line on stdout, if any, joins the status |
-  | `75` | the agent cannot take a message now, e.g. it is at a dialog | copies the feedback; `E` retries |
+  | `75` | the agent cannot take a message now, e.g. it is at a dialog | keeps the notes pending and copies nothing; `E` retries |
   | `69` | there is no agent to send to | copies the feedback; `E` retries |
   | anything else | the send failed | shows the first line of stderr; `E` retries |
 

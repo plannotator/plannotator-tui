@@ -16,6 +16,8 @@ pub(super) use crate::ui::agent_picker::AgentPicker;
 use crate::ui::agent_picker::{self, Picked, PickerKey, Reach};
 
 #[cfg(all(test, unix))]
+mod blocked_tests;
+#[cfg(all(test, unix))]
 mod rex_tests;
 #[cfg(test)]
 mod tests;

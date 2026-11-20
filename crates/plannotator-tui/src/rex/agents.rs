@@ -24,6 +24,10 @@ const PARALLEL: usize = 16;
 /// The longest title a row shows, in characters, so the place column stays on screen.
 const NAME_CHARS: usize = 28;
 
+/// The state of an agent that has not reported one to Rex. Send refuses it, since Enter
+/// could answer a dialog Rex cannot see, so the row says so before you pick it.
+pub(crate) const NO_STATE: &str = "no state";
+
 /// An agent in a Rex block, as the picker shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BlockAgent {
@@ -41,7 +45,7 @@ pub(crate) struct BlockAgent {
     pub(crate) pid: u32,
     /// The block's label when someone gave it one, else the title the agent set.
     pub(crate) name: Option<String>,
-    /// `idle`, `working`, `blocked`, `error`, `done`, or `unknown` when the agent has not
+    /// `idle`, `working`, `blocked`, `error`, `done`, or [`NO_STATE`] when the agent has not
     /// reported a state to Rex.
     pub(crate) status: String,
     /// The agent's folder.
@@ -252,7 +256,7 @@ fn agent(
 }
 
 /// The agent's state from `program_status`: of the records process `pid` owns, the one that
-/// most needs you. `unknown` when it owns none: it has not reported, or another program did.
+/// most needs you. [`NO_STATE`] when it owns none: it has not reported, or another program did.
 pub(crate) fn state(status: Option<&Value>, pid: u32) -> String {
     const URGENCY: [&str; 5] = ["blocked", "error", "working", "idle", "done"];
     let records = status.and_then(|s| s.get("records")).and_then(Value::as_array).into_iter().flatten();
@@ -261,7 +265,7 @@ pub(crate) fn state(status: Option<&Value>, pid: u32) -> String {
         // Rex: treat a state you don't know as idle.
         .map(|r| r.get("state").and_then(Value::as_str).filter(|s| URGENCY.contains(s)).unwrap_or("idle"))
         .min_by_key(|s| URGENCY.iter().position(|u| u == s))
-        .unwrap_or("unknown")
+        .unwrap_or(NO_STATE)
         .to_owned()
 }
 
@@ -311,6 +315,33 @@ pub(crate) const FIXTURE_OWN_BLOCK: &str = "block:01a1f658-7c0b-702a-a296-443d91
 #[cfg(test)]
 pub(crate) const FIXTURE_SESSION: &str = "session:01a1f658-7c0a-71ad-8ff6-a1bcbc31504f";
 
+/// One recorded reply from the fixtures.
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "test fixtures assert by panicking")]
+fn fixture(name: &str) -> Value {
+    let text = std::fs::read_to_string(fixture_dir().join(name)).expect("fixture");
+    serde_json::from_str(&text).expect("fixture JSON")
+}
+
+/// The agents in the fixtures, read the way [`RexAgents::list`] reads them, without a `rex`.
+#[cfg(test)]
+pub(crate) fn fixture_agents(own_block: Option<&str>) -> Vec<BlockAgent> {
+    let mut listed = sessions(&fixture("ls.json"));
+    listed.sort_by_key(|(id, _)| id != FIXTURE_SESSION);
+    listed
+        .iter()
+        .enumerate()
+        .flat_map(|(at, (_, label))| {
+            blocks(&fixture(&format!("window-ls-{label}.json")), at, label, own_block)
+        })
+        .filter_map(|c| {
+            let short = short_id(&c.block).to_owned();
+            let read = |m: &str| fixture(&format!("{short}.{m}.json"));
+            agent(&c, &read("process"), Some(&read("program_status")), Some(&read("title")))
+        })
+        .collect()
+}
+
 /// A fake `rex` in `dir` for tests that answers the reads from the fixtures and records a
 /// send. Every call's arguments go to `dir/calls`; `api call` writes its stdin to
 /// `dir/pastes`, one line per paste.
@@ -357,26 +388,11 @@ mod tests {
     use super::*;
 
     fn fixture(name: &str) -> Value {
-        let text = std::fs::read_to_string(fixture_dir().join(name)).expect("fixture");
-        serde_json::from_str(&text).expect("fixture JSON")
+        super::fixture(name)
     }
 
-    /// The agents in the fixtures, read the way `list` reads them, without a `rex`.
     fn recorded(own_block: Option<&str>) -> Vec<BlockAgent> {
-        let mut listed = sessions(&fixture("ls.json"));
-        listed.sort_by_key(|(id, _)| id != FIXTURE_SESSION);
-        listed
-            .iter()
-            .enumerate()
-            .flat_map(|(at, (_, label))| {
-                blocks(&fixture(&format!("window-ls-{label}.json")), at, label, own_block)
-            })
-            .filter_map(|c| {
-                let short = short_id(&c.block).to_owned();
-                let read = |m: &str| fixture(&format!("{short}.{m}.json"));
-                agent(&c, &read("process"), Some(&read("program_status")), Some(&read("title")))
-            })
-            .collect()
+        fixture_agents(own_block)
     }
 
     #[test]
@@ -434,10 +450,10 @@ mod tests {
     fn the_state_is_the_agents_own_most_urgent_record() {
         let pid = 7;
         let status = |records: Value| json!({ "records": records });
-        assert_eq!(state(None, pid), "unknown");
-        assert_eq!(state(Some(&status(json!([]))), pid), "unknown");
+        assert_eq!(state(None, pid), "no state");
+        assert_eq!(state(Some(&status(json!([]))), pid), "no state");
         let other = status(json!([{"state": "working", "owner": {"pid": 8}}]));
-        assert_eq!(state(Some(&other), pid), "unknown", "another program's record says nothing");
+        assert_eq!(state(Some(&other), pid), "no state", "another program's record says nothing");
         let mixed = status(json!([
             {"state": "idle", "owner": {"pid": 7}},
             {"id": "build", "state": "blocked", "kind": "question", "owner": {"pid": 7}},

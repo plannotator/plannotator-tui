@@ -18,6 +18,7 @@ use std::process::{Command, Stdio};
 #[derive(Debug)]
 pub(crate) enum DeliveryError {
     /// The agent is at a dialog and its host (Herdr, Rex or hc) refused the prompt; retry later.
+    /// Nothing is copied: the notes stay pending for the retry.
     Blocked(String),
     /// No agent to send to: pane gone, agent not detected yet, herdr, rex or hc binary missing.
     /// The review copies the feedback instead.
@@ -36,10 +37,11 @@ impl std::fmt::Display for DeliveryError {
 }
 
 impl DeliveryError {
-    /// Whether the feedback should go to the clipboard instead: the agent is at a dialog or
-    /// gone, so the person can paste it themselves. A failed transport copies nothing.
+    /// Whether the feedback should go to the clipboard instead: the agent is gone, so the
+    /// person can paste it themselves. An agent at a dialog is still the target, so a blocked
+    /// send copies nothing and waits for the retry; neither does a failed transport.
     pub(crate) fn wants_copy(&self) -> bool {
-        matches!(self, Self::Blocked(_) | Self::Unavailable(_))
+        matches!(self, Self::Unavailable(_))
     }
 
     /// What the footer says about a send that did not land: `copied` when the text went to
@@ -108,11 +110,32 @@ impl Delivery for Clipboard {
     }
 
     fn deliver(&self, feedback: &str) -> Result<(), DeliveryError> {
+        // Tests never write to a terminal's clipboard; they read what would have gone there.
+        #[cfg(test)]
+        {
+            test_clipboard::COPIED.with_borrow_mut(|copied| copied.push(feedback.to_owned()));
+            return Ok(());
+        }
+        #[cfg_attr(test, allow(unreachable_code))]
         let mut out = std::io::stdout().lock();
         // Callers write between frames, so the sequence never lands inside one.
         out.write_all(osc52_sequence(feedback).as_bytes())?;
         out.flush()?;
         Ok(())
+    }
+}
+
+/// What [`Clipboard`] would have copied on this test thread.
+#[cfg(test)]
+pub(crate) mod test_clipboard {
+    thread_local! {
+        pub(crate) static COPIED: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// The copies so far on this thread.
+    #[cfg_attr(not(unix), allow(dead_code, reason = "the tests that read it are Unix-only"))]
+    pub(crate) fn copied() -> Vec<String> {
+        COPIED.with_borrow(Clone::clone)
     }
 }
 

@@ -188,3 +188,26 @@ fn opened_on_its_own_in_rex_send_asks_which_rex_agent() {
     assert_eq!(copy.copied.borrow().len(), 0);
     std::fs::remove_dir_all(root).expect("cleanup");
 }
+
+#[test]
+fn an_agent_that_reports_no_state_says_so_on_its_row_and_send_refuses_it() {
+    let (root, mut app, fake) = in_rex("rex-no-state");
+    // The Claude in work › api, as before it has reported a state to Rex.
+    std::fs::write(fake.join("9ba798.program_status.json"), r#"{"records":[]}"#).expect("status");
+    app.open_pi_picker();
+    let screen = draw(&mut app, 110, 24);
+    proof("doc-review-p-no-state.txt", &screen);
+    let rows = picker_rows(&screen);
+    assert!(rows.iter().any(|r| r.contains("no state") && r.ends_with("work › api · 9ba798")), "{screen}");
+    enter(&mut app);
+    assert_eq!(app.delivery.describe(), "claude in 9ba798");
+    app.add_quote_annotation("two", Kind::Comment, "tighten this".into()).expect("note");
+    press(&mut app, 'E');
+    assert!(!fake.join("pastes").exists(), "nothing pasted");
+    let status = app.status.clone().unwrap_or_default();
+    assert!(
+        status.starts_with("no agent to send to (claude in 9ba798 has not reported its state to Rex)"),
+        "{status}"
+    );
+    std::fs::remove_dir_all(root).expect("cleanup");
+}

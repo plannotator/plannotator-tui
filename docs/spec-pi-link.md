@@ -145,9 +145,11 @@ Reply: `{"ok":true,"busy":false,"name":"…","id":"…"}`.
   the flavor's default (`shell`), else the terminal title the agent set (leading spinner
   removed, cut to 28 characters, left out when it only names the agent); the folder (the
   foreground process's cwd); the state; and `session › window · block` (labels, else the
-  short session id or the window's position; the block's short id). The review's own block
-  (`REX_BLOCK`) is never listed. A Pi the Pi link lists with the same pid is shown once, as
-  the Pi session. A Rex pick sends as a Rex launcher's target does: it checks the agent's
+  short session id or the window's position; the block's short id). An agent that owns no
+  record shows `no state`: Send refuses it as a Rex launcher's target does (Enter could answer
+  a dialog Rex cannot see). The review's own block (`REX_BLOCK`) is never listed. A Pi the Pi
+  link lists with the same pid is shown once, as the Pi session, with the Rex block's place
+  instead of `pid N`. A Rex pick sends as a Rex launcher's target does: it checks the agent's
   process still runs in the block and is not blocked, pastes with `block.event`, and presses
   Enter.
 - Order: inside Rex, the agents in the window that holds `REX_BLOCK` first (a Pi there
