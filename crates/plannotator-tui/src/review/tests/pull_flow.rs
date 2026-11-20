@@ -2,8 +2,6 @@
 //! with `refs/pull/7/head`, a clone whose `origin` is the GitHub URL (rewritten to the bare
 //! repository by `insteadOf`), and a shell script standing in for `gh`. No network.
 
-use std::os::unix::fs::PermissionsExt as _;
-
 use plannotator_tui_review::{Gh, Repo, Status};
 
 use super::*;
@@ -52,8 +50,7 @@ impl Pull {
         git_in(&clone, &["config", &rewrite, &format!("{URL}.git")]);
         let script = pull.dir.join("gh");
         let body = format!("#!/bin/sh\ncat '{}'\n", pull.dir.join("view.json").display());
-        std::fs::write(&script, body).expect("gh");
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        crate::test_support::write_script(&script, &body);
         pull
     }
 
