@@ -130,7 +130,7 @@ impl App {
                 return self.run_review_action(ReviewAction::Archive);
             }
             Some(Action::ToggleTree) => {
-                self.toggle_tree(self.geometry.doc.width + self.geometry.tree.width + GUTTER);
+                self.toggle_tree(self.geometry.width);
                 return Ok(());
             }
             Some(Action::Reload) => return self.reload(),
@@ -316,6 +316,8 @@ impl App {
                 self.status = Some(format!("removed {removed} annotation(s) on block"));
             }
             Some(Action::ClearAll) => self.request_clear_all(),
+            Some(Action::NarrowColumn) => self.resize_column(false),
+            Some(Action::WidenColumn) => self.resize_column(true),
             Some(Action::AttachImage) => self.begin_attach_image(),
             Some(Action::RemoveImage) => self.remove_image()?,
             _ => {}

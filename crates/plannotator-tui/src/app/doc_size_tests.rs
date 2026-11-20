@@ -94,3 +94,40 @@ fn an_empty_document_says_so_instead_of_counting_blocks() {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
+
+/// Every block, those laid out before the first frame and those that came from the
+/// background, wrapped to the layout's width.
+fn every_row_fits(app: &super::App) -> bool {
+    let width = app.open.layout.width;
+    app.open.layout.blocks.iter().flat_map(|b| &b.rows).all(|row| row.cells.len() <= width)
+}
+
+/// The reading column changes width while the rest of a long document is still being laid
+/// out: by a resize, then by `<` and `>`. The blocks that arrive late take the new width.
+#[test]
+fn the_reading_column_resizes_while_a_long_document_is_still_being_laid_out() {
+    let (root, mut app) = long_app("long-column");
+    assert!(!app.open.layout.is_complete());
+    draw(&mut app, 200, 40);
+    assert_eq!(app.open.layout.width, usize::from(crate::config::DOC_WIDTH));
+    draw(&mut app, 90, 40);
+    let narrow = app.open.layout.width;
+    assert!(narrow < usize::from(crate::config::DOC_WIDTH), "the pane binds at 90 columns: {narrow}");
+    app.open.layout.finish();
+    assert!(every_row_fits(&app), "a late block kept the width it was started at");
+
+    reopen(&mut app);
+    assert!(!app.open.layout.is_complete());
+    draw(&mut app, 200, 40);
+    press(&mut app, '<');
+    draw(&mut app, 200, 40);
+    assert_eq!(app.open.layout.width, usize::from(crate::config::DOC_WIDTH) - 8);
+    assert!(app.open.layout.is_complete());
+    assert!(every_row_fits(&app));
+    press(&mut app, '>');
+    press(&mut app, '>');
+    draw(&mut app, 200, 40);
+    assert_eq!(app.open.layout.width, usize::from(crate::config::DOC_WIDTH) + 8);
+    assert!(every_row_fits(&app));
+    let _ = std::fs::remove_dir_all(&root);
+}

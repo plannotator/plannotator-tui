@@ -30,7 +30,8 @@ fn scratch_data_dir() -> PathBuf {
 }
 
 /// A transient source: the app runs exactly as it does on a file, but nothing is written
-/// to the Plannotator data directory.
+/// to the Plannotator data directory. "Plan" draws on row 1 and its title rule on row 2,
+/// so "first thing" is on row 4.
 fn app(delivery: Box<dyn Delivery>) -> App {
     let source =
         DocumentSource::new("# Plan\n\nfirst thing\n".to_owned(), "plan.md", true, Provenance::Stdin);
@@ -416,8 +417,9 @@ fn a_centered_app_leaves_both_margins_blank_and_its_buttons_still_click() {
 #[test]
 fn margins_yield_before_the_app_drops_below_80_columns_and_default_to_none() {
     let mut app = app(Box::new(Discard));
+    app.ui.doc_width = 0;
     draw_sized(&mut app, 180, 20);
-    assert_eq!(app.geometry.doc.x, 2, "full width by default");
+    assert_eq!(app.geometry.doc.x, 2, "full width without a reading column");
     app.ui.horizontal_margin = 4;
     app.ui.max_width = 120;
     for (width, left, viewport_width) in [(180, 30, 120), (100, 4, 92), (84, 2, 80), (60, 0, 60)] {
@@ -430,19 +432,48 @@ fn margins_yield_before_the_app_drops_below_80_columns_and_default_to_none() {
 }
 
 #[test]
-fn doc_width_caps_the_text_and_spare_columns_sit_before_the_rail() {
+fn doc_width_is_a_reading_column_centred_in_what_the_rail_leaves() {
     let mut app = app(Box::new(Discard));
     app.ui.doc_width = 100;
-    // (terminal, document): the cap holds when wide; when narrow the rail keeps its width
-    // and the document absorbs the shortfall.
-    for (width, doc_width) in [(250, 100), (140, 100), (120, 81), (90, 59)] {
+    // (terminal, column, left margin): the cap holds when wide, centred between the gutter
+    // and the rail; when narrow the rail keeps its width and the column absorbs the shortfall.
+    for (width, column, margin) in [(250, 100, 55), (140, 100, 0), (120, 81, 0), (90, 59, 0)] {
         draw_sized(&mut app, width, 20);
-        assert_eq!(app.geometry.doc.width, doc_width, "terminal {width}");
-        assert_eq!(app.open.layout.width, usize::from(doc_width));
+        let doc = app.geometry.doc;
+        assert_eq!((doc.x, doc.width), (margin + 2, column), "terminal {width}");
+        assert_eq!(app.open.layout.width, usize::from(column));
+        let rail = width - if width < 100 { 28 } else { 36 };
+        let spare = rail - 1 - doc.right();
+        assert!(spare.abs_diff(margin) <= 1, "terminal {width}: {margin} left, {spare} right");
     }
     app.ui.doc_width = 0;
     draw_sized(&mut app, 250, 20);
     assert_eq!(app.geometry.doc.width, 250 - 2 - 1 - 36, "zero takes every column the rail leaves");
+}
+
+#[test]
+fn the_reading_column_widens_and_narrows_by_eight_from_what_is_on_screen() {
+    let mut app = app(Box::new(Discard));
+    draw_sized(&mut app, 250, 20);
+    assert_eq!(app.open.layout.width, usize::from(crate::config::DOC_WIDTH));
+    press_char(&mut app, '>');
+    draw_sized(&mut app, 250, 20);
+    assert_eq!(app.open.layout.width, 88);
+    press_char(&mut app, '<');
+    press_char(&mut app, '<');
+    draw_sized(&mut app, 250, 20);
+    assert_eq!(app.open.layout.width, 72);
+    // At 120 columns the rail leaves 81: narrowing starts from those, not from a wider cap.
+    app.ui.doc_width = 200;
+    draw_sized(&mut app, 120, 20);
+    press_char(&mut app, '<');
+    draw_sized(&mut app, 120, 20);
+    assert_eq!(app.open.layout.width, 73);
+    for _ in 0..20 {
+        press_char(&mut app, '<');
+    }
+    draw_sized(&mut app, 120, 20);
+    assert_eq!(app.open.layout.width, 20, "the column stops at twenty");
 }
 
 #[test]
@@ -563,8 +594,8 @@ fn click_at(column: u16, row: u16) -> Event {
 fn double_clicking_a_block_offers_the_toolbar_for_the_whole_block() {
     let mut app = app(Box::new(Discard));
     draw(&mut app);
-    // "first thing" is the second block; single click starts a selection, not a toolbar.
-    let (col, row) = (5, 3);
+    // "first thing" is the second block, on row 4; single click starts a selection, not a toolbar.
+    let (col, row) = (5, 4);
     app.handle_event(&click_at(col, row)).expect("first click");
     let rows = draw(&mut app);
     assert!(!rows.iter().any(|r| r.contains("looks good")), "no toolbar after one click");
@@ -583,7 +614,7 @@ fn double_clicking_a_block_offers_the_toolbar_for_the_whole_block() {
 fn a_comment_can_span_lines_and_enter_saves_it() {
     let mut app = app(Box::new(Discard));
     draw(&mut app);
-    let (col, row) = (5, 3);
+    let (col, row) = (5, 4);
     app.handle_event(&click_at(col, row)).expect("click");
     app.handle_event(&click_at(col, row)).expect("double click");
     app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("open compose");
@@ -612,8 +643,8 @@ fn a_comment_can_span_lines_and_enter_saves_it() {
 fn pasting_into_the_comment_box_keeps_newlines() {
     let mut app = app(Box::new(Discard));
     draw(&mut app);
-    app.handle_event(&click_at(5, 3)).expect("click");
-    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
     app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
     app.handle_event(&Event::Paste("pasted one\r\npasted two".to_owned())).expect("paste");
     app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("save");
@@ -625,8 +656,8 @@ fn pasting_into_the_comment_box_keeps_newlines() {
 fn a_title_too_long_for_the_box_continues_on_its_bottom_border() {
     let mut app = app(Box::new(Discard));
     draw(&mut app);
-    app.handle_event(&click_at(5, 3)).expect("click");
-    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
     app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
     app.handle_event(&Event::Paste("draft".to_owned())).expect("paste");
     let rows = draw(&mut app);
@@ -640,8 +671,8 @@ fn a_title_too_long_for_the_box_continues_on_its_bottom_border() {
 fn up_and_down_move_by_row_for_keys_queued_before_the_box_is_first_drawn() {
     let mut app = app(Box::new(Discard));
     draw(&mut app);
-    app.handle_event(&click_at(5, 3)).expect("click");
-    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
     app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
     app.handle_event(&Event::Paste("word ".repeat(12))).expect("paste");
     app.handle_event(&key(KeyCode::Up, KeyModifiers::NONE)).expect("up");
@@ -652,8 +683,8 @@ fn up_and_down_move_by_row_for_keys_queued_before_the_box_is_first_drawn() {
 fn the_cursor_shows_past_the_last_character_of_a_full_row() {
     let mut app = app(Box::new(Discard));
     draw(&mut app);
-    app.handle_event(&click_at(5, 3)).expect("click");
-    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
     app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
     draw(&mut app);
     let full = "a".repeat(app.geometry.compose_wrap);
@@ -678,8 +709,8 @@ fn a_wide_comment_box_keeps_its_title_on_one_row_and_wraps_to_its_width() {
     app.ui.comment_width = 60;
     let wide = |app: &mut App| crate::app::review_test_support::draw(app, 200, 30);
     wide(&mut app);
-    app.handle_event(&click_at(5, 3)).expect("click");
-    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
     app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
     let screen = wide(&mut app);
     assert_eq!(app.geometry.compose_wrap, 56);
@@ -691,8 +722,8 @@ fn a_narrow_pane_narrows_the_comment_box_and_its_wrapping_with_it() {
     let mut app = app(Box::new(Discard));
     app.ui.comment_width = 500;
     draw(&mut app);
-    app.handle_event(&click_at(5, 3)).expect("click");
-    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
     app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
     draw(&mut app);
     assert_eq!(app.geometry.compose_wrap, usize::from(app.geometry.doc.width) - 4);
@@ -702,8 +733,8 @@ fn a_narrow_pane_narrows_the_comment_box_and_its_wrapping_with_it() {
 fn esc_on_a_typed_comment_asks_before_discarding_it() {
     let mut app = app(Box::new(Discard));
     draw(&mut app);
-    app.handle_event(&click_at(5, 3)).expect("click");
-    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
     app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
     app.handle_event(&Event::Paste("draft".to_owned())).expect("paste");
 
@@ -739,8 +770,8 @@ fn esc_on_a_typed_comment_asks_before_discarding_it() {
 fn esc_closes_at_once_when_there_is_nothing_to_lose() {
     let mut app = app(Box::new(Discard));
     draw(&mut app);
-    app.handle_event(&click_at(5, 3)).expect("click");
-    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
     app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
     app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
     assert_eq!(app.mode, Mode::Browse);
@@ -770,8 +801,8 @@ fn esc_on_an_edit_asks_only_once_the_body_changed() {
 fn a_paste_during_the_discard_question_returns_to_editing() {
     let mut app = app(Box::new(Discard));
     draw(&mut app);
-    app.handle_event(&click_at(5, 3)).expect("click");
-    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
     app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
     app.handle_event(&Event::Paste("draft".to_owned())).expect("paste");
     app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");

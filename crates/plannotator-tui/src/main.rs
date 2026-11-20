@@ -17,6 +17,7 @@ mod gate;
 mod hangup;
 mod hc;
 mod herdr;
+mod highlight;
 mod keys;
 mod last;
 mod layout;
