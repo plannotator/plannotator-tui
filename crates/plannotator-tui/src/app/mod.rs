@@ -142,7 +142,7 @@ struct Open {
 impl Open {
     fn new(source: DocumentSource, width: usize, data_dir: &Path, project: &str) -> Result<Self> {
         let disk = disk::DiskStamp::of_source(&source.provenance);
-        let doc = Document::parse(source.content.clone());
+        let doc = Document::of(&source);
         let layout = DocLayout::build(&doc, width);
         let store = match (&source.provenance, source.transient) {
             (Provenance::File { path }, false) => {
