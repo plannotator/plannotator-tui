@@ -140,7 +140,7 @@ no annotations yet        →  button shown dimmed, does nothing
 ```
 
 After a click the button reads `Sent ▸ claude` for a few seconds, then returns. On
-`agent_blocked` it reads `claude is at a dialog — copied instead` and stays clickable so
+`agent_blocked` it reads `claude at a dialog · retry` and stays clickable so
 a second click retries. The button, `E` and `S` call the same `App::send`; there is no second
 path. In a reply review, `S` then quits unless something is still unsent. Dropped: #2
 (selection), it was a worse #4 and a worse #5.
@@ -153,8 +153,8 @@ mode and sends Enter 300 ms later, so multi-line feedback is safe. Outcomes the 
 
 - `ok` → `sent 3 annotations → claude in w1:p2`.
 - `agent_blocked` (the agent is at a dialog) → not sent; status says so; `E` or `S` again retries,
-  and `S` leaves the window open;
-  feedback is also copied to the clipboard so nothing is lost.
+  and `S` leaves the window open. Nothing is copied: the notes stay pending for the retry
+  (decision 13, amended 2026-11-19).
 - `agent_not_found` / pane closed → clipboard, status names it.
 
 `q` with unsent annotations asks once: `send to claude in w1:p2? (y/n/esc)`. In a reply

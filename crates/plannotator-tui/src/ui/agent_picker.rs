@@ -1,5 +1,5 @@
 //! The agent picker (`docs/spec-pi-link.md`): choose which agent Send goes to, from the
-//! running Pi sessions and, inside Herdr, every pane with an agent. Document and code reviews
+//! running Pi sessions and, inside Herdr or Rex, every pane with an agent. Document and code reviews
 //! open the same picker; each keeps its own Send target and hands it here to be swapped.
 //!
 //! `P` opens it at any time. Send opens it too when nothing names a target and an agent is
@@ -23,6 +23,9 @@ use crate::herdr::context::HerdrEnv;
 use crate::keys::{self, Action, Keymap};
 use crate::pi::target::PiSession;
 use crate::pi::{self, PiEntry};
+use crate::rex::agent::RexAgent;
+use crate::rex::agents::{BlockAgent, RexAgents};
+use crate::rex::command::Rex;
 use crate::theme::palette;
 use crate::ui::hints;
 
@@ -33,55 +36,83 @@ pub(crate) enum Reachable {
     Pi(PiEntry),
     /// An agent in a Herdr pane, through `herdr agent prompt` with this binary.
     Herdr(PaneAgent, PathBuf),
+    /// An agent in a Rex block, pasted into with this `rex`.
+    Rex(BlockAgent, PathBuf),
+    /// A Pi session that runs in a Rex block: sent to over the Pi link, shown where Rex has it.
+    PiInRex(PiEntry, BlockAgent),
 }
 
 impl Reachable {
     /// `pi · api`, `claude`, `claude · reviewer`.
     fn label(&self) -> String {
         match self {
-            Self::Pi(entry) => format!("pi · {}", entry.label()),
+            Self::Pi(entry) | Self::PiInRex(entry, _) => format!("pi · {}", entry.label()),
             Self::Herdr(agent, _) => agent.label(),
+            Self::Rex(agent, _) => agent.label(),
         }
     }
 
     fn cwd(&self) -> Option<&Path> {
         match self {
-            Self::Pi(entry) => Some(&entry.cwd),
+            Self::Pi(entry) | Self::PiInRex(entry, _) => Some(&entry.cwd),
             Self::Herdr(agent, _) => agent.cwd.as_deref(),
+            Self::Rex(agent, _) => agent.cwd.as_deref(),
         }
     }
 
     /// `idle`, `busy`, `working`, `blocked`, ...
     fn state(&self) -> &str {
         match self {
-            Self::Pi(entry) if entry.busy => "busy",
-            Self::Pi(_) => "idle",
+            Self::Pi(entry) | Self::PiInRex(entry, _) if entry.busy => "busy",
+            Self::Pi(_) | Self::PiInRex(..) => "idle",
             Self::Herdr(agent, _) => &agent.status,
+            Self::Rex(agent, _) => &agent.status,
         }
     }
 
-    /// Where it runs: `pid 7` for a Pi, `workspace › tab · w1:p3` for a Herdr pane.
+    /// Where it runs: `pid 7` for a Pi, `workspace › tab · w1:p3` for a Herdr pane,
+    /// `session › window · a1d6db` for a Rex block, and for a Pi in one.
     fn place(&self) -> String {
         match self {
             Self::Pi(entry) => format!("pid {}", entry.pid),
             Self::Herdr(agent, _) => format!("{} · {}", agent.place(), agent.pane),
+            Self::Rex(agent, _) | Self::PiInRex(_, agent) => agent.place(),
         }
     }
 
     fn delivery(&self) -> Box<dyn Delivery> {
         match self {
-            Self::Pi(entry) => Box::new(PiSession::new(entry.clone())),
+            Self::Pi(entry) | Self::PiInRex(entry, _) => Box::new(PiSession::new(entry.clone())),
             Self::Herdr(agent, bin) => {
                 Box::new(HerdrAgent::new(bin.clone(), agent.pane.clone(), Some(agent.agent.clone())))
+            }
+            Self::Rex(agent, bin) => Box::new(RexAgent::picked(
+                Rex::new(bin.clone(), agent.session_id.clone()),
+                agent.block.clone(),
+                agent.agent.clone(),
+                agent.pid,
+            )),
+        }
+    }
+
+    /// What breaks a tie between two rows with the same label: a Pi's pid, a pane's id, a
+    /// Rex block's place in Rex's order.
+    fn tiebreak(&self) -> (u8, String, u32) {
+        match self {
+            Self::Pi(entry) | Self::PiInRex(entry, _) => (0, String::new(), entry.pid),
+            Self::Herdr(agent, _) => (1, agent.pane.clone(), 0),
+            Self::Rex(agent, _) => {
+                let (session, window, block) = agent.rank;
+                (2, format!("{session:05}.{window:05}.{block:05}"), 0)
             }
         }
     }
 
-    /// What breaks a tie between two rows with the same label: a Pi's pid, a pane's id.
-    fn tiebreak(&self) -> (u8, String, u32) {
+    /// Whether it runs in the Rex window (tab) the review runs in.
+    fn in_this_window(&self) -> bool {
         match self {
-            Self::Pi(entry) => (0, String::new(), entry.pid),
-            Self::Herdr(agent, _) => (1, agent.pane.clone(), 0),
+            Self::Rex(agent, _) | Self::PiInRex(_, agent) => agent.here,
+            Self::Pi(_) | Self::Herdr(..) => false,
         }
     }
 }
@@ -93,23 +124,28 @@ pub(crate) struct AgentFinder {
     pub(crate) pi_root: Option<PathBuf>,
     /// Herdr's agents, when the review runs inside Herdr.
     pub(crate) herdr: Option<HerdrAgents>,
+    /// Rex's agents, when the review runs inside Rex.
+    pub(crate) rex: Option<RexAgents>,
     /// Send with no target asks which agent first. Only interactive reviews ask.
     pub(crate) ask_on_send: bool,
 }
 
 impl AgentFinder {
-    /// An interactive review: Pi sessions, Herdr's agents when inside Herdr, and Send asks.
+    /// An interactive review: Pi sessions, Herdr's or Rex's agents when inside one, and
+    /// Send asks.
     pub(crate) fn from_env() -> Self {
         let env = HerdrEnv::from_env();
         Self {
             pi_root: None,
             herdr: env.in_herdr.then_some(HerdrAgents { bin: env.bin, own_pane: env.pane_id }),
+            rex: RexAgents::from_lookup(|k| std::env::var(k).ok()),
             ask_on_send: true,
         }
     }
 
     /// Every agent within reach, in the picker's order for a review of `folder` (a real path).
-    /// A Pi that Herdr also lists is shown once, as the Pi session.
+    /// A Pi that Herdr or Rex also lists is shown once, as the Pi session. Inside Rex, the
+    /// agents in the review's own window come first.
     pub(crate) fn find(&self, folder: &Path) -> Vec<Reachable> {
         let root = self.pi_root.clone().unwrap_or_else(pi::root);
         let pis = pi::live_pi_sessions(&root);
@@ -122,10 +158,27 @@ impl AgentFinder {
             })
             .map(|pane| Reachable::Herdr(pane, bin.clone()))
             .collect::<Vec<_>>();
-        let mut found: Vec<Reachable> = pis.into_iter().map(Reachable::Pi).chain(panes).collect();
+        let blocks = self.rex.as_ref().map(RexAgents::list).unwrap_or_default();
+        let rex = self.rex.as_ref().map(|r| r.bin.clone()).unwrap_or_default();
+        let mut found = with_rex(pis, blocks, &rex);
+        found.extend(panes);
         order(&mut found, folder);
+        // Stable: within each group the order above holds.
+        found.sort_by_key(|agent| !agent.in_this_window());
         found
     }
+}
+
+/// The Pi sessions and the Rex blocks with agents, as rows: a Pi that runs in a Rex block
+/// (the same process) is one row, sent to over the Pi link and placed where Rex has it.
+fn with_rex(pis: Vec<PiEntry>, blocks: Vec<BlockAgent>, rex: &Path) -> Vec<Reachable> {
+    let (pi_blocks, blocks): (Vec<BlockAgent>, Vec<BlockAgent>) =
+        blocks.into_iter().partition(|block| pis.iter().any(|pi| pi.pid == block.pid));
+    let pis = pis.into_iter().map(|pi| match pi_blocks.iter().find(|block| block.pid == pi.pid) {
+        Some(block) => Reachable::PiInRex(pi, block.clone()),
+        None => Reachable::Pi(pi),
+    });
+    pis.chain(blocks.into_iter().map(|block| Reachable::Rex(block, rex.to_path_buf()))).collect()
 }
 
 /// Whether Send asks which agent first, and whether there is any to ask about. Shared by
@@ -307,9 +360,11 @@ impl AgentPicker {
         Picked::Moved(format!("Send now goes to {}", delivery.describe()))
     }
 
-    /// The rows as text, columns aligned: agent, folder, state, where.
-    fn lines(&self, folder: &Path, start: Option<&dyn Delivery>) -> Vec<String> {
-        let cells: Vec<[String; 4]> = self
+    /// The rows as text, columns aligned: agent, folder, state, where. Rows wider than
+    /// `room` shorten the folders from the left, then the names from the right, so the state
+    /// and where an agent runs, which tell two agents apart, stay on screen in a narrow pane.
+    fn lines(&self, folder: &Path, start: Option<&dyn Delivery>, room: usize) -> Vec<String> {
+        let mut cells: Vec<[String; 4]> = self
             .agents
             .iter()
             .map(|agent| {
@@ -317,10 +372,23 @@ impl AgentPicker {
                 [agent.label(), cwd, agent.state().to_owned(), agent.place()]
             })
             .collect();
-        let width = |column: usize| {
+        let width = |cells: &[[String; 4]], column: usize| {
             cells.iter().filter_map(|row| row.get(column)).map(|cell| cell.width()).max().unwrap_or(0)
         };
-        let widths = [width(0), width(1), width(2)];
+        let wide = |cells: &[[String; 4]]| (0..4).map(|column| width(cells, column)).sum::<usize>() + 8;
+        if wide(&cells) > room {
+            let fit = width(&cells, 1).saturating_sub(wide(&cells) - room).max(FOLDER_MIN);
+            for [_, cwd, _, _] in &mut cells {
+                *cwd = keep_end(cwd, fit);
+            }
+        }
+        if wide(&cells) > room {
+            let fit = width(&cells, 0).saturating_sub(wide(&cells) - room).max(LABEL_MIN);
+            for [label, _, _, _] in &mut cells {
+                *label = keep_start(label, fit);
+            }
+        }
+        let widths = [width(&cells, 0), width(&cells, 1), width(&cells, 2)];
         let mut rows: Vec<String> = Vec::new();
         if self.copy_row {
             rows.push(" Copy to clipboard ".to_owned());
@@ -344,7 +412,7 @@ impl AgentPicker {
         folder: &Path,
         start: Option<&dyn Delivery>,
     ) {
-        let mut rows = self.lines(folder, start);
+        let mut rows = self.lines(folder, start, usize::from(area.width.saturating_sub(2)));
         let empty = rows.is_empty();
         if empty {
             rows.push(
@@ -394,6 +462,47 @@ impl AgentPicker {
             .collect();
         frame.render_widget(Paragraph::new(lines), inner);
     }
+}
+
+/// The narrowest a folder gets when rows do not fit: `…` and a few characters.
+const FOLDER_MIN: usize = 8;
+
+/// The narrowest a name gets when rows still do not fit: the agent and a little more.
+const LABEL_MIN: usize = 12;
+
+/// `text`, or as much of its start as fits in `width` columns and `…`.
+fn keep_start(text: &str, width: usize) -> String {
+    if text.width() <= width {
+        return text.to_owned();
+    }
+    let mut used = 1;
+    let mut head: String = text
+        .chars()
+        .take_while(|c| {
+            used += unicode_width::UnicodeWidthChar::width(*c).unwrap_or(0);
+            used <= width
+        })
+        .collect();
+    head.push('…');
+    head
+}
+
+/// `text`, or `…` and as much of its end as fits in `width` columns.
+fn keep_end(text: &str, width: usize) -> String {
+    if text.width() <= width {
+        return text.to_owned();
+    }
+    let mut tail: Vec<char> = Vec::new();
+    let mut used = 1;
+    for c in text.chars().rev() {
+        let w = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+        if used + w > width {
+            break;
+        }
+        used += w;
+        tail.push(c);
+    }
+    std::iter::once('…').chain(tail.into_iter().rev()).collect()
 }
 
 /// `path` relative to `folder` when it is inside it, else under `~`, else as is.

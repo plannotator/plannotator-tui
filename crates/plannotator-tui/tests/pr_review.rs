@@ -212,3 +212,80 @@ fn herdr_review_pr_opens_the_pane_on_the_prs_link() {
     );
     std::fs::remove_dir_all(root).expect("cleanup");
 }
+
+/// A fake `rex` in `root/fake rex/`: the agent in the block is claude, pid 4242, in the clone.
+/// It logs its arguments to `rex.log` there, and a `session.new_split` call's stdin after them.
+fn fake_rex(root: &Path, clone: &Path) -> PathBuf {
+    let dir = root.join("fake rex");
+    std::fs::create_dir_all(&dir).expect("fake dir");
+    let log = dir.join("rex.log");
+    let script = format!(
+        r#"#!/bin/sh
+printf '%s\n' "$*" >> '{log}'
+case "$1 $2" in
+  "do com.superlogical.terminal.process") printf '{{"foreground":{{"pid":4242,"name":"claude","argv0":"claude","cwd":"{cwd}"}}}}' ;;
+  "do com.superlogical.terminal.program_status") printf '{{"records":[{{"state":"idle","app":"claude-code","owner":{{"pid":4242}}}}]}}' ;;
+  "api call") cat >> '{log}'; printf '\n' >> '{log}'; printf '{{}}' ;;
+  *) exit 1 ;;
+esac
+"#,
+        log = log.display(),
+        cwd = clone.display()
+    );
+    std::fs::write(dir.join("rex"), script).expect("rex");
+    std::fs::set_permissions(dir.join("rex"), std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    dir
+}
+
+#[test]
+fn rex_review_pr_opens_beside_the_agent_and_sends_back_to_it() {
+    let root = temp_root("rex");
+    let clone = world(&root);
+    let fake = fake_rex(&root, &clone);
+    let out = Command::new(env!("CARGO_BIN_EXE_plannotator-tui"))
+        .args(["rex", "review", "7", "--block", "block:b"])
+        .current_dir(&root)
+        .stdin(Stdio::null())
+        .env(
+            "PATH",
+            format!("{}:{}", root.join("fake gh").display(), std::env::var("PATH").unwrap_or_default()),
+        )
+        .env("REX_BIN_DIR", &fake)
+        .env("REX_SESSION", "session:s")
+        .env("HOME", &root)
+        .env("PLANNOTATOR_DATA_DIR", root.join("data"))
+        .env("PLANNOTATOR_TUI_CONFIG", root.join("absent.toml"))
+        .env("GIT_CONFIG_GLOBAL", root.join("gitconfig"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("REX_BLOCK")
+        .env_remove("PLANNOTATOR_TUI_PLACEMENT")
+        .env_remove("PLANNOTATOR_TUI_REVIEW")
+        .output()
+        .expect("runs");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let log = std::fs::read_to_string(fake.join("rex.log")).expect("rex ran");
+    let lines: Vec<&str> = log.lines().collect();
+    let at = lines.iter().position(|l| *l == "api call session.new_split - -s session:s").expect("a split");
+    let split: Value = serde_json::from_str(lines[at + 1]).expect("JSON arguments");
+    let command: Vec<&str> = split
+        .pointer("/layout/block/options/command")
+        .and_then(Value::as_array)
+        .expect("command")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    // The agent that opened it is the Send target; the picker (`P`) offers the rest.
+    assert_eq!(
+        command[1..4],
+        [
+            "PLANNOTATOR_TUI_REX_BLOCK=block:b",
+            "PLANNOTATOR_TUI_DELIVER_AGENT=claude",
+            "PLANNOTATOR_TUI_REX_PID=4242"
+        ]
+    );
+    let tail = &command[command.len() - 3..];
+    assert_eq!(tail[0], "review");
+    assert!(tail[1].contains(&format!("{URL}/pull/7")), "{tail:?}");
+    assert_eq!(tail[2], clone.display().to_string());
+    std::fs::remove_dir_all(root).expect("cleanup");
+}

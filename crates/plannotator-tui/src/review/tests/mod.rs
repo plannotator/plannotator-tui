@@ -2,10 +2,12 @@
 //! diff viewer, a `TestBackend` frame, and a stand-in for the agent (the one external seam).
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic, reason = "tests assert by panicking")]
 
+mod blocked_send;
 mod notes_flow;
 mod pi_notes;
 #[cfg(unix)]
 mod pull_flow;
+mod rex_picker;
 mod send_flow;
 
 use std::cell::{Cell, RefCell};

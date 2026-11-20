@@ -1,6 +1,6 @@
 //! The app's half of the Pi link (`docs/spec-pi-link.md`): the agent picker that makes a
-//! running Pi session or Herdr agent the Send target, and notes a Pi session leaves on the
-//! open document.
+//! running Pi session, Herdr agent or Rex agent the Send target, and notes a Pi session
+//! leaves on the open document.
 
 use std::path::{Path, PathBuf};
 
@@ -15,6 +15,10 @@ use crate::pi::link::{self, Link, Note};
 pub(super) use crate::ui::agent_picker::AgentPicker;
 use crate::ui::agent_picker::{self, Picked, PickerKey, Reach};
 
+#[cfg(all(test, unix))]
+mod blocked_tests;
+#[cfg(all(test, unix))]
+mod rex_tests;
 #[cfg(test)]
 mod tests;
 

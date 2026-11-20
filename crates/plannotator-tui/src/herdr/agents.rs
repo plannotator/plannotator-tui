@@ -168,7 +168,8 @@ pub(crate) fn is_pi_session(agent: &PaneAgent, id: &str, transcript: Option<&Pat
 
 /// A fake `herdr` in `dir` for tests: `agent list` answers `agents`, `workspace list` and
 /// `tab list` answer fixed labels, and `agent prompt <pane> <text>` appends the pane and the
-/// text to `dir/prompts`. Every call's arguments go to `dir/calls`.
+/// text to `dir/prompts`, or, while `dir/blocked` exists, refuses as Herdr does for an agent
+/// at a dialog (`agent_blocked`). Every call's arguments go to `dir/calls`.
 #[cfg(all(test, unix))]
 #[allow(clippy::expect_used, reason = "test fixtures assert by panicking")]
 pub(crate) fn fake_herdr(dir: &Path, agents: &Value) -> PathBuf {
@@ -187,7 +188,7 @@ pub(crate) fn fake_herdr(dir: &Path, agents: &Value) -> PathBuf {
     std::fs::write(dir.join("workspaces.json"), workspaces.to_string()).expect("workspaces");
     std::fs::write(dir.join("tabs.json"), tabs.to_string()).expect("tabs");
     let script = format!(
-        "#!/bin/sh\nd='{d}'\ncase \"$1 $2\" in\n  'agent prompt') printf '%s\\n' \"$1 $2 $3\" >> \"$d/calls\"; printf '%s\\n%s\\n---\\n' \"$3\" \"$4\" >> \"$d/prompts\" ;;\n  'agent list') echo \"$*\" >> \"$d/calls\"; cat \"$d/agents.json\" ;;\n  'workspace list') echo \"$*\" >> \"$d/calls\"; cat \"$d/workspaces.json\" ;;\n  'tab list') echo \"$*\" >> \"$d/calls\"; cat \"$d/tabs.json\" ;;\n  *) echo \"$*\" >> \"$d/calls\"; exit 2 ;;\nesac\n",
+        "#!/bin/sh\nd='{d}'\ncase \"$1 $2\" in\n  'agent prompt') printf '%s\\n' \"$1 $2 $3\" >> \"$d/calls\"; if [ -f \"$d/blocked\" ]; then echo '{{\"error\":{{\"code\":\"agent_blocked\",\"message\":\"agent is waiting for permission\"}}}}' >&2; exit 1; fi; printf '%s\\n%s\\n---\\n' \"$3\" \"$4\" >> \"$d/prompts\" ;;\n  'agent list') echo \"$*\" >> \"$d/calls\"; cat \"$d/agents.json\" ;;\n  'workspace list') echo \"$*\" >> \"$d/calls\"; cat \"$d/workspaces.json\" ;;\n  'tab list') echo \"$*\" >> \"$d/calls\"; cat \"$d/tabs.json\" ;;\n  *) echo \"$*\" >> \"$d/calls\"; exit 2 ;;\nesac\n",
         d = dir.display()
     );
     let bin = dir.join("herdr");
