@@ -202,7 +202,7 @@ fn tool(args: &[String]) -> Result<()> {
             Ok(())
         }
         Some("--blocks") => {
-            let app = open_app(&path(1)?, 100, false)?;
+            let mut app = open_app(&path(1)?, 100, false)?;
             for line in app.describe_blocks() {
                 println!("{line}");
             }
@@ -603,6 +603,7 @@ pub(crate) fn with_terminal<T>(
         &config.colors,
     );
     let mut terminal = ratatui::init();
+    crate::layout::keep_hook_off_layout_threads();
     #[cfg(unix)]
     crate::hangup::watch();
     execute!(stdout(), EnableMouseCapture)?;
@@ -673,6 +674,8 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<O
             app.editor_returned(&request, outcome);
             dirty = true;
         }
+        // Merges the background layout when it is done; a panic there ends the app here.
+        app.poll_layout();
         dirty |= app.poll_file_search();
         dirty |= app.poll_disk();
         dirty |= app.poll_pi();
@@ -682,7 +685,7 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<O
             app.record_frame(started.elapsed().as_secs_f64() * 1000.0);
             dirty = false;
         }
-        let wait_ms = if app.file_search_scanning() { 25 } else { 250 };
+        let wait_ms = if app.file_search_scanning() || app.layout_pending() { 25 } else { 250 };
         if event::poll(Duration::from_millis(wait_ms))? {
             app.handle_event(&event::read()?)?;
             dirty = true;
@@ -703,6 +706,13 @@ fn bench(path: &PathBuf) -> Result<()> {
     let t = Instant::now();
     let doc = Document::parse(source.content);
     let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+    let t = Instant::now();
+    let mut lazy = DocLayout::start(&doc, 100);
+    let start_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let (first_blocks, first_rows) = (lazy.blocks.len(), lazy.total_rows);
+    lazy.finish();
+    let finish_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     let t = Instant::now();
     let mut layout = DocLayout::build(&doc, 100);
@@ -727,6 +737,8 @@ fn bench(path: &PathBuf) -> Result<()> {
 
     println!("{}: {bytes} bytes, {} blocks", path.display(), doc.blocks.len());
     println!("parse+split          {parse_ms:8.1} ms");
+    println!("first screens        {start_ms:8.1} ms  ({first_blocks} blocks, {first_rows} rows)");
+    println!("  rest in background {finish_ms:8.1} ms  (until every block is laid out)");
     println!("render+align+wrap    {build_ms:8.1} ms  ({} rows)", layout.total_rows);
     println!("reflow               {}", reflow.join("  "));
     println!("row lookup           {lookup_us:8.3} µs avg ({hits} hits)");

@@ -3,7 +3,8 @@
 //! Each block is rendered in isolation through `tui-markdown` (cached, width-independent),
 //! aligned back to its source bytes, and wrapped to the current column width. List and quote
 //! blocks are decorated in between (`decorate`). Every screen cell therefore knows its block
-//! and, where it shows real text, its source byte.
+//! and, where it shows real text, its source byte. A long document lays out its first
+//! screens before the first frame and the rest in the background (`layout::background`).
 
 use std::borrow::Cow;
 use std::ops::Range;
@@ -19,8 +20,17 @@ use crate::srcmap::{LineOffsets, align};
 use crate::theme::palette;
 use crate::wrap::{Hang, Row, clip_line, rule_row, wrap_line, wrap_line_hanging, wrap_table};
 
+mod background;
+mod worker_panic;
+
+use background::{Rest, each_in_parallel, lay_out};
+pub(crate) use worker_panic::keep_hook_off_layout_threads;
+
 /// Rows of vertical space between blocks.
 const BLOCK_GAP: usize = 1;
+
+/// Rows [`DocLayout::start`] lays out before the first frame: more than any terminal shows.
+const FIRST_ROWS: usize = 500;
 
 /// House style: no `#` markers, headings carry weight through bold/underline rather than
 /// background color, so the palette stays available for selection and annotations.
@@ -64,11 +74,15 @@ pub(crate) struct RenderedBlock {
     pub(crate) first_row: usize,
 }
 
+/// A document laid out for one width. A long one opened with [`DocLayout::start`] holds
+/// only its first blocks until [`DocLayout::finish`] adds the rest from the background.
 #[derive(Debug)]
 pub(crate) struct DocLayout {
     pub(crate) width: usize,
     pub(crate) blocks: Vec<RenderedBlock>,
     pub(crate) total_rows: usize,
+    /// The blocks after `blocks`, still being laid out on another thread.
+    rest: Option<Rest>,
 }
 
 fn render_block(doc: &Document, index: usize) -> Decorated {
@@ -101,43 +115,110 @@ pub(crate) fn own(text: Text<'_>) -> Text<'static> {
     Text::from(lines).style(text.style)
 }
 
+impl RenderedBlock {
+    /// Render block `index` of `doc` (the expensive part) and wrap it to `width`.
+    fn new(doc: &Document, index: usize, width: usize) -> Self {
+        let Decorated { text, offsets, hangs } = render_block(doc, index);
+        let kind = doc.blocks.get(index).map_or(BlockKind::Other, |b| b.kind);
+        let mut block = Self { text, offsets, kind, hangs, rows: Vec::new(), first_row: 0 };
+        block.wrap(width);
+        block
+    }
+
+    /// Re-wrap the cached lines for `width`.
+    fn wrap(&mut self, width: usize) {
+        let lines = || self.text.lines.iter().zip(&self.offsets);
+        self.rows = if self.kind == BlockKind::Rule {
+            let offset = self.offsets.iter().flatten().flatten().next().copied();
+            vec![rule_row(RULE, Style::new().fg(palette().idle_fg), offset, width)]
+        } else if self.kind == BlockKind::Table {
+            wrap_table(&self.text.lines, &self.offsets, width)
+        } else if self.kind.preserves_columns() {
+            lines().map(|(l, o)| clip_line(l, o, width)).collect()
+        } else if self.hangs.is_empty() {
+            lines().flat_map(|(l, o)| wrap_line(l, o, width)).collect()
+        } else {
+            lines().zip(&self.hangs).flat_map(|((l, o), h)| wrap_line_hanging(l, o, h, width)).collect()
+        };
+    }
+}
+
 impl DocLayout {
-    /// Render every block once (the expensive part) and lay out for `width`.
+    /// Render and lay out every block for `width` before returning.
     pub(crate) fn build(doc: &Document, width: usize) -> Self {
-        let blocks = doc
-            .blocks
-            .iter()
-            .enumerate()
-            .map(|(i, block)| {
-                let Decorated { text, offsets, hangs } = render_block(doc, i);
-                RenderedBlock { text, offsets, kind: block.kind, hangs, rows: Vec::new(), first_row: 0 }
-            })
-            .collect();
-        let mut layout = Self { width: 0, blocks, total_rows: 0 };
-        layout.reflow(width);
+        let width = width.max(1);
+        let mut layout =
+            Self { width, blocks: lay_out(doc, 0..doc.blocks.len(), width), total_rows: 0, rest: None };
+        layout.place();
         layout
     }
 
-    /// Re-wrap for a new width without re-rendering markdown.
+    /// Lay out the first screens of `doc` now and the rest on a background thread, so a
+    /// long document shows without waiting for its last block. Rows already laid out never
+    /// move when the rest arrives: each block's rows depend on that block alone.
+    pub(crate) fn start(doc: &Document, width: usize) -> Self {
+        let width = width.max(1);
+        let mut blocks = Vec::new();
+        let mut rows = 0;
+        for index in 0..doc.blocks.len() {
+            if rows >= FIRST_ROWS {
+                break;
+            }
+            let block = RenderedBlock::new(doc, index, width);
+            rows += block.rows.len() + BLOCK_GAP;
+            blocks.push(block);
+        }
+        let rest = (blocks.len() < doc.blocks.len()).then(|| Rest::spawn(doc, blocks.len(), width));
+        let mut layout = Self { width, blocks, total_rows: 0, rest };
+        layout.place();
+        layout
+    }
+
+    /// Whether every block is laid out.
+    pub(crate) fn is_complete(&self) -> bool {
+        self.rest.is_none()
+    }
+
+    /// Wait for the blocks still being laid out and add them. Anything that needs the whole
+    /// document (its last row, a block far down, the text under a range) calls this first.
+    pub(crate) fn finish(&mut self) {
+        let Some(rest) = self.rest.take() else { return };
+        let (mut blocks, width) = rest.join();
+        if width != self.width {
+            each_in_parallel(&mut blocks, |block| block.wrap(self.width));
+        }
+        self.blocks.append(&mut blocks);
+        self.place();
+    }
+
+    /// Add the background blocks if they are ready, without waiting.
+    pub(crate) fn poll(&mut self) {
+        if self.rest.as_ref().is_some_and(Rest::is_finished) {
+            self.finish();
+        }
+    }
+
+    /// [`DocLayout::finish`] when document row `end` lies past the rows laid out so far.
+    pub(crate) fn finish_through(&mut self, end: usize) {
+        if end > self.total_rows {
+            self.finish();
+        }
+    }
+
+    /// Re-wrap for a new width without re-rendering markdown. Blocks still in the
+    /// background are re-wrapped when they arrive.
     pub(crate) fn reflow(&mut self, width: usize) {
         let width = width.max(1);
         self.width = width;
+        each_in_parallel(&mut self.blocks, |block| block.wrap(width));
+        self.place();
+    }
+
+    /// Give each block its first row, one gap row apart.
+    fn place(&mut self) {
         let mut row = 0usize;
         for block in &mut self.blocks {
             block.first_row = row;
-            let lines = || block.text.lines.iter().zip(&block.offsets);
-            block.rows = if block.kind == BlockKind::Rule {
-                let offset = block.offsets.iter().flatten().flatten().next().copied();
-                vec![rule_row(RULE, Style::new().fg(palette().idle_fg), offset, width)]
-            } else if block.kind == BlockKind::Table {
-                wrap_table(&block.text.lines, &block.offsets, width)
-            } else if block.kind.preserves_columns() {
-                lines().map(|(l, o)| clip_line(l, o, width)).collect()
-            } else if block.hangs.is_empty() {
-                lines().flat_map(|(l, o)| wrap_line(l, o, width)).collect()
-            } else {
-                lines().zip(&block.hangs).flat_map(|((l, o), h)| wrap_line_hanging(l, o, h, width)).collect()
-            };
             row += block.rows.len() + BLOCK_GAP;
         }
         self.total_rows = row.saturating_sub(BLOCK_GAP);
@@ -241,5 +322,33 @@ tested; it's live, but QA hasn't finished acceptance testing | Close it now, or 
             }
         }
         assert!(cells > 300, "only {cells} cells checked");
+    }
+
+    fn rows(layout: &DocLayout) -> Vec<(usize, String, Vec<Option<usize>>)> {
+        layout
+            .blocks
+            .iter()
+            .flat_map(|b| b.rows.iter().map(|r| (b.first_row, r.line.to_string(), r.cells.clone())))
+            .collect()
+    }
+
+    /// A long document opens on its first screens only, and the rest, laid out in the
+    /// background (here for a width the first frame changed), is exactly a full build.
+    #[test]
+    fn a_long_document_lays_out_its_first_screens_first_and_the_rest_matches_a_full_build() {
+        let section = "## Step\n\nSome **bold** words that wrap at a narrow width, and more.\n\n\
+- one\n- two\n\n| a | b |\n|---|---|\n| x | y |\n\n```\ncode\n```\n\n---\n\n";
+        let doc = Document::parse(section.repeat(400));
+        let mut lazy = DocLayout::start(&doc, 70);
+        assert!(!lazy.is_complete());
+        assert!(lazy.blocks.len() < doc.blocks.len() / 10, "laid out {} blocks up front", lazy.blocks.len());
+        assert!(lazy.total_rows >= FIRST_ROWS);
+        lazy.reflow(50);
+        lazy.finish();
+        assert!(lazy.is_complete());
+        let full = DocLayout::build(&doc, 50);
+        assert_eq!(lazy.blocks.len(), doc.blocks.len());
+        assert_eq!(lazy.total_rows, full.total_rows);
+        assert!(rows(&lazy) == rows(&full), "rows differ from a full build");
     }
 }

@@ -4,6 +4,8 @@
 mod approve;
 mod archive_view;
 mod disk;
+#[cfg(test)]
+mod doc_size_tests;
 mod draw;
 mod editor;
 mod feedback;
@@ -143,7 +145,7 @@ impl Open {
     fn new(source: DocumentSource, width: usize, data_dir: &Path, project: &str) -> Result<Self> {
         let disk = disk::DiskStamp::of_source(&source.provenance);
         let doc = Document::of(&source);
-        let layout = DocLayout::build(&doc, width);
+        let layout = DocLayout::start(&doc, width);
         let store = match (&source.provenance, source.transient) {
             (Provenance::File { path }, false) => {
                 Store::load(&Location::for_file(data_dir, project, path), &doc)?
@@ -485,6 +487,7 @@ impl App {
     /// Annotate a source range: the rendered text is derived from the layout so the
     /// Workspaces web client can find it. Saved immediately.
     fn annotate(&mut self, range: Range<usize>, kind: Kind, body: String) -> Result<()> {
+        self.open.layout.finish();
         let rendered = self.open.layout.rendered_in_range(&self.open.doc.source, &range);
         self.open.store.add(&self.open.doc, range, rendered, kind, body)?;
         self.mark_unsent();
@@ -598,6 +601,28 @@ impl App {
         }
     }
 
+    /// Wait for the background layout when the view, the cursor, the selected block or a
+    /// pending selection lies past the rows laid out so far, as after a reload deep in a long
+    /// document. A view near the top, as every document opens, does not wait.
+    fn settle_layout_for_view(&mut self) {
+        let height = usize::from(self.geometry.doc.height.max(1));
+        let pending = self.pending.as_ref().map_or(0, |p| p.at.0 + 1);
+        self.open.layout.finish_through((self.scroll + height).max(self.cursor.0 + 1).max(pending));
+        if self.selected >= self.open.layout.blocks.len() {
+            self.open.layout.finish();
+        }
+    }
+
+    /// Add the background layout once it is ready, without waiting for it.
+    pub(crate) fn poll_layout(&mut self) {
+        self.open.layout.poll();
+    }
+
+    /// Whether part of the open document is still being laid out in the background.
+    pub(crate) fn layout_pending(&self) -> bool {
+        !self.open.layout.is_complete()
+    }
+
     /// The footer took rows from a document `old_height` tall: scroll just enough to keep what
     /// the keys act on in view. Anything already off screen stays there, so a reader who
     /// scrolled away is not pulled back.
@@ -618,6 +643,9 @@ impl App {
 
     fn scroll_by(&mut self, delta: i64) {
         let height = usize::from(self.geometry.doc.height.max(1));
+        // The clamp needs the document's real end, not the end of the rows ready so far.
+        let wanted = (self.scroll as i64 + delta).max(0) as usize;
+        self.open.layout.finish_through(wanted + height);
         let max = self.open.layout.total_rows.saturating_sub(height);
         self.scroll = (self.scroll as i64 + delta).clamp(0, max as i64) as usize;
     }
@@ -697,7 +725,7 @@ impl App {
         self.open.disk = disk;
         self.open.disk_noticed = None;
         self.open.doc = Document::parse(self.open.source.content.clone());
-        self.open.layout = DocLayout::build(&self.open.doc, self.open.layout.width);
+        self.open.layout = DocLayout::start(&self.open.doc, self.open.layout.width);
         self.open.store =
             Store::load(&Location::for_file(&self.data_dir, &self.project, &path), &self.open.doc)?;
         self.refresh_review_counts();
@@ -750,7 +778,8 @@ impl App {
         self.annotate(start..start + quote.len(), kind, body)
     }
 
-    pub(crate) fn describe_blocks(&self) -> Vec<String> {
+    pub(crate) fn describe_blocks(&mut self) -> Vec<String> {
+        self.open.layout.finish();
         self.open
             .doc
             .blocks
@@ -767,6 +796,7 @@ impl App {
 
     /// Scroll and select the first visible block.
     pub(crate) fn scroll_for_snapshot(&mut self, delta: i64) {
+        self.open.layout.finish();
         self.scroll_by(delta);
         if let Some(block) = self.open.layout.block_at_row(self.scroll) {
             self.selected = block;
@@ -778,6 +808,7 @@ impl App {
         let start =
             self.open.doc.source.find(quote).ok_or_else(|| anyhow::anyhow!("quote not found: {quote:?}"))?;
         let range = start..start + quote.len();
+        self.open.layout.finish();
         let cells = self.open.layout.blocks.iter().flat_map(|b| {
             b.rows.iter().enumerate().flat_map(move |(ri, row)| {
                 row.cells.iter().enumerate().map(move |(col, cell)| ((b.first_row + ri, col), *cell))
