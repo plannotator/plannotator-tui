@@ -87,7 +87,10 @@ impl Screen {
                         "review menu: whole-change comment, resend all, finish, undo",
                     ),
                     (key(&[Action::PickTarget]), "choose the agent Send goes to"),
-                    (key(&[Action::Reload]), "reload the diff; notes follow their lines"),
+                    (
+                        key(&[Action::Reload]),
+                        "reload the diff (the footer says when it changed); notes follow",
+                    ),
                     (key(&[Action::Quit]), "quit"),
                 ],
             ),

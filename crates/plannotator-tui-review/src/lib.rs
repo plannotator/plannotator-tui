@@ -14,6 +14,7 @@
 //! - [`store`]: `review.json`, saved on every change; sends and archiving.
 //! - [`progress`]: viewed marks, in the browser's review-progress format.
 //! - [`export`]: the feedback text, in the browser's `exportReviewFeedback` format.
+//! - [`stamp`]: a cheap fingerprint of what a scope's diff depends on, to notice changes.
 //!
 //! No terminal, no diff viewer: the app draws, this crate owns the records.
 
@@ -28,6 +29,7 @@ pub mod patch;
 pub mod progress;
 pub mod resolve;
 pub mod scope;
+pub mod stamp;
 pub mod store;
 
 pub use annotation::{AnchorContext, CodeAnnotation, Extras, NoteScope, NoteType, Side, Status};
@@ -44,6 +46,7 @@ pub use patch::{FilePatch, FileStatus};
 pub use progress::Progress;
 pub use resolve::{Current, Resolution, apply, resolve};
 pub use scope::Scope;
+pub use stamp::DiskStamp;
 pub use store::{Delivered, Record, ReviewStore, project_for, review_dir};
 
 /// sha256 over `parts` in order, as lowercase hex, first `chars` characters.

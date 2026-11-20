@@ -37,6 +37,9 @@ impl MenuRow {
 
 impl Screen {
     pub(crate) fn handle_event(&mut self, event: Event) -> Result<()> {
+        if matches!(event, Event::Key(_) | Event::Paste(_)) {
+            self.last_key = Some(std::time::Instant::now());
+        }
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => self.key(key),
             Event::Paste(text) if matches!(self.mode, Mode::Compose(_)) => {

@@ -106,7 +106,7 @@ dimmed. The keys also work without opening the menu.
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
-| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `M` note on the whole change; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `r` read the diff again; `?` keys |
+| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `M` note on the whole change; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `r` read the diff again (the footer says when it changed on disk); `?` keys |
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
 
@@ -195,6 +195,10 @@ clipboard, or the agent you choose when nothing named one; see [Choosing the age
 review, `U` undo.
 
 `r` reads the diff again after you or the agent change files. Notes follow their lines.
+The review checks for changes by itself every few seconds (a `git status` and the times of
+the changed files; never while you type, less often in a large repository), and the footer
+then says `the diff changed on disk · r refreshes`. It never reloads by itself. Commit and
+pull request reviews have nothing on disk to check.
 A note whose lines changed goes to the **Outdated** group at the end of the rail; it is
 still sent, marked as outdated. `u` switches between split and unified view, `w` wraps
 long lines, `f` lists the changed files and `?` shows every key.

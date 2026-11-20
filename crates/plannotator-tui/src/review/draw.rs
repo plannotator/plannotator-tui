@@ -146,7 +146,16 @@ impl Screen {
                 let [text_area, help_area] =
                     Layout::horizontal([Constraint::Min(0), Constraint::Length(hints.width() as u16)])
                         .areas(row);
-                frame.render_widget(Paragraph::new(Line::from(Span::raw(text.as_str()).dim())), text_area);
+                // The disk notice stands out from the rest of the dim text.
+                let notice = self.disk_notice().map(|n| format!(" {n}"));
+                let line = match notice.as_deref().and_then(|n| Some((n, text.strip_prefix(n)?))) {
+                    Some((notice, rest)) => Line::from(vec![
+                        Span::styled(notice.to_owned(), Style::new().fg(palette().accent).bold()),
+                        Span::raw(rest).dim(),
+                    ]),
+                    None => Line::from(Span::raw(text.as_str()).dim()),
+                };
+                frame.render_widget(Paragraph::new(line), text_area);
                 help_area
             } else {
                 row
@@ -158,7 +167,8 @@ impl Screen {
 
     /// The footer's left text (status first, as in document reviews) and its hint rows.
     fn footer_text(&self, width: u16) -> (String, Vec<String>) {
-        let mut parts: Vec<String> = self.status.iter().cloned().collect();
+        let mut parts: Vec<String> = self.disk_notice().into_iter().collect();
+        parts.extend(self.status.iter().cloned());
         match self.diff.progress() {
             Progress::Loading => parts.push("loading the diff\u{2026}".into()),
             Progress::Coloring => parts.push("coloring\u{2026}".into()),
@@ -191,6 +201,14 @@ impl Screen {
         let room = usize::from(width).saturating_sub(1);
         let beside = room.saturating_sub(text.width() + 1);
         (text, hints::flow(&self.footer_hints(), room, beside))
+    }
+
+    /// `the diff changed on disk · r refreshes`, once a check saw the diff change.
+    fn disk_notice(&self) -> Option<String> {
+        self.watch.changed().then(|| match self.keys.hint(Action::Reload) {
+            key if key.is_empty() => "the diff changed on disk".to_owned(),
+            key => format!("the diff changed on disk \u{b7} {key} refreshes"),
+        })
     }
 
     fn footer_hints(&self) -> Vec<String> {

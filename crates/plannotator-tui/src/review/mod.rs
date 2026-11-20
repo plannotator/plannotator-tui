@@ -14,6 +14,7 @@
 //!   and `hc review`, and the pane they open.
 //! - [`input`]: keys and the mouse. [`draw`], [`rail`] and [`overlays`]: the frame.
 //! - [`send`]: send, resend, finish and undo. [`pi`]: the Pi link.
+//! - [`watch`]: noticing that the diff changed on disk, for the footer.
 //! - [`cli`]: `plannotator-tui review [--staged | --base REF | --commit SHA | PR] [DIR]`.
 //!
 //! A pull request review (`PR` is a GitHub link, `N` or `#N`) fetches the PR with the
@@ -35,9 +36,11 @@ mod send;
 #[cfg(test)]
 mod tests;
 mod viewed;
+mod watch;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::SyncSender;
+use std::time::Instant;
 
 use anyhow::{Context as _, Result};
 use plannotator_tui_review::{Capture, FilePatch, Progress, Repo, ReviewStore, Status};
@@ -136,6 +139,10 @@ pub(crate) struct Screen {
     undo: Vec<String>,
     status: Option<String>,
     geometry: Geometry,
+    /// Whether the diff changed on disk since the last capture.
+    watch: watch::Watch,
+    /// The last key or paste, so no disk check starts while the person types.
+    last_key: Option<Instant>,
     quit: bool,
 }
 
@@ -161,6 +168,7 @@ impl Screen {
         let (project, owner) = capture.record_owner();
         let store = ReviewStore::load(data_dir, &project, &owner, &capture.scope)?;
         let light = crate::theme::theme() == crate::theme::Theme::Light;
+        let watch = watch::Watch::start(&capture.scope, wake.clone());
         let diff = Diff::open(&capture, light, wake)?;
         let progress = Progress::open(&capture, data_dir, viewed::saving(data_dir));
         let mut screen = Self {
@@ -189,6 +197,8 @@ impl Screen {
             undo: Vec::new(),
             status: None,
             geometry: Geometry::default(),
+            watch,
+            last_key: None,
             quit: false,
         };
         let placed = screen.place_notes()?;
@@ -218,6 +228,9 @@ impl Screen {
             changed = true;
         }
         changed |= self.poll_pi();
+        let typing = matches!(self.mode, Mode::Compose(_))
+            || self.last_key.is_some_and(|at| at.elapsed() < watch::QUIET_AFTER_KEY);
+        changed |= self.watch.poll(&self.repo, &self.capture.scope, !typing);
         Ok(changed || self.diff.needs_draw())
     }
 
@@ -250,13 +263,18 @@ impl Screen {
     /// Recapture the diff (`r`): notes follow their lines, the ones whose code is gone move
     /// to Outdated. A capture that fails leaves the review as it was.
     fn reload(&mut self) -> Result<()> {
-        let capture = match self.repo.capture(&self.capture.scope) {
+        let captured = {
+            let _no_check_meanwhile = self.watch.hold_git();
+            self.repo.capture(&self.capture.scope)
+        };
+        let capture = match captured {
             Ok(capture) => capture,
             Err(err) => {
                 self.status = Some(format!("reload failed: {err}"));
                 return Ok(());
             }
         };
+        self.watch.recaptured();
         self.diff.replace(&capture)?;
         self.progress = self.progress.reopen(&capture, &self.data_dir);
         self.capture = capture;
