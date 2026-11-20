@@ -36,7 +36,7 @@ pub(crate) struct Block {
     pub(crate) kind: BlockKind,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Document {
     pub(crate) source: String,
     pub(crate) blocks: Vec<Block>,

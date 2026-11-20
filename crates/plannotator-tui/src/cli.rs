@@ -202,7 +202,7 @@ fn tool(args: &[String]) -> Result<()> {
             Ok(())
         }
         Some("--blocks") => {
-            let app = open_app(&path(1)?, 100, false)?;
+            let mut app = open_app(&path(1)?, 100, false)?;
             for line in app.describe_blocks() {
                 println!("{line}");
             }
@@ -705,6 +705,13 @@ fn bench(path: &PathBuf) -> Result<()> {
     let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     let t = Instant::now();
+    let mut lazy = DocLayout::start(&doc, 100);
+    let start_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let (first_blocks, first_rows) = (lazy.blocks.len(), lazy.total_rows);
+    lazy.finish();
+    let finish_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+    let t = Instant::now();
     let mut layout = DocLayout::build(&doc, 100);
     let build_ms = t.elapsed().as_secs_f64() * 1000.0;
 
@@ -727,6 +734,8 @@ fn bench(path: &PathBuf) -> Result<()> {
 
     println!("{}: {bytes} bytes, {} blocks", path.display(), doc.blocks.len());
     println!("parse+split          {parse_ms:8.1} ms");
+    println!("first screens        {start_ms:8.1} ms  ({first_blocks} blocks, {first_rows} rows)");
+    println!("  rest in background {finish_ms:8.1} ms  (until every block is laid out)");
     println!("render+align+wrap    {build_ms:8.1} ms  ({} rows)", layout.total_rows);
     println!("reflow               {}", reflow.join("  "));
     println!("row lookup           {lookup_us:8.3} µs avg ({hits} hits)");

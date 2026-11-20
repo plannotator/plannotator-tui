@@ -25,6 +25,8 @@ fn chars_by_column(line: &Line<'_>) -> Vec<char> {
 
 impl App {
     pub(crate) fn handle_event(&mut self, event: &Event) -> Result<()> {
+        // Keys can reach any row (`G`, a page down, a click), so input sees the whole layout.
+        self.open.layout.finish();
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => match &self.mode {
                 Mode::Browse => self.browse_key(*key),

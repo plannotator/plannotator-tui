@@ -92,6 +92,9 @@ impl App {
         if doc.height < old_height {
             self.keep_focus_in_view(old_height);
         }
+        // A long document is laid out below the first screens in the background; wait for
+        // it only when the view reaches past what is ready.
+        self.open.layout.finish_through(self.scroll + usize::from(doc.height));
 
         self.draw_header(frame, header);
         if show_tree {

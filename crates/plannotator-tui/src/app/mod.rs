@@ -11,6 +11,8 @@ mod file_search;
 mod header;
 mod images;
 mod input;
+#[cfg(test)]
+mod long_doc_tests;
 mod menu;
 mod pi_target;
 mod pick;
@@ -143,7 +145,7 @@ impl Open {
     fn new(source: DocumentSource, width: usize, data_dir: &Path, project: &str) -> Result<Self> {
         let disk = disk::DiskStamp::of_source(&source.provenance);
         let doc = Document::of(&source);
-        let layout = DocLayout::build(&doc, width);
+        let layout = DocLayout::start(&doc, width);
         let store = match (&source.provenance, source.transient) {
             (Provenance::File { path }, false) => {
                 Store::load(&Location::for_file(data_dir, project, path), &doc)?
@@ -485,6 +487,7 @@ impl App {
     /// Annotate a source range: the rendered text is derived from the layout so the
     /// Workspaces web client can find it. Saved immediately.
     fn annotate(&mut self, range: Range<usize>, kind: Kind, body: String) -> Result<()> {
+        self.open.layout.finish();
         let rendered = self.open.layout.rendered_in_range(&self.open.doc.source, &range);
         self.open.store.add(&self.open.doc, range, rendered, kind, body)?;
         self.mark_unsent();
@@ -697,7 +700,7 @@ impl App {
         self.open.disk = disk;
         self.open.disk_noticed = None;
         self.open.doc = Document::parse(self.open.source.content.clone());
-        self.open.layout = DocLayout::build(&self.open.doc, self.open.layout.width);
+        self.open.layout = DocLayout::start(&self.open.doc, self.open.layout.width);
         self.open.store =
             Store::load(&Location::for_file(&self.data_dir, &self.project, &path), &self.open.doc)?;
         self.refresh_review_counts();
@@ -750,7 +753,8 @@ impl App {
         self.annotate(start..start + quote.len(), kind, body)
     }
 
-    pub(crate) fn describe_blocks(&self) -> Vec<String> {
+    pub(crate) fn describe_blocks(&mut self) -> Vec<String> {
+        self.open.layout.finish();
         self.open
             .doc
             .blocks
@@ -767,6 +771,7 @@ impl App {
 
     /// Scroll and select the first visible block.
     pub(crate) fn scroll_for_snapshot(&mut self, delta: i64) {
+        self.open.layout.finish();
         self.scroll_by(delta);
         if let Some(block) = self.open.layout.block_at_row(self.scroll) {
             self.selected = block;
@@ -778,6 +783,7 @@ impl App {
         let start =
             self.open.doc.source.find(quote).ok_or_else(|| anyhow::anyhow!("quote not found: {quote:?}"))?;
         let range = start..start + quote.len();
+        self.open.layout.finish();
         let cells = self.open.layout.blocks.iter().flat_map(|b| {
             b.rows.iter().enumerate().flat_map(move |(ri, row)| {
                 row.cells.iter().enumerate().map(move |(col, cell)| ((b.first_row + ri, col), *cell))
