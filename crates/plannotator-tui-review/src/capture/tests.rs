@@ -285,3 +285,43 @@ fn a_whole_change_note_resolves_without_reading_a_file_in_every_scope() {
     let note = CodeAnnotation::general_comment("split it".into(), "another patch");
     assert_eq!(capture.resolve_all(&[note]).expect("resolves"), [Resolution::StillThere]);
 }
+
+/// An edit git can only catch by content: same size and mtime as the staged entry, in the
+/// second the index was written. Git compares content for such "racily clean" entries only
+/// when the index file is no newer than them, so the copy must keep the index's mtime.
+#[test]
+fn an_edit_in_the_second_the_index_was_written_still_shows() {
+    let Some(t) = TestRepo::new("racy") else { return };
+    // Only mtime and size then tell git whether a file changed: no ctime, no nanoseconds.
+    t.git(&["config", "core.trustctime", "false"]);
+    t.git(&["config", "core.checkStat", "minimal"]);
+    let second = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    let set_mtime = |path: &Path| {
+        let file = std::fs::File::options().write(true).open(path).expect("open");
+        file.set_modified(second).expect("set mtime");
+    };
+    let lib = t.dir.join("lib.rs");
+    t.write("lib.rs", "fn old() {}\n");
+    set_mtime(&lib);
+    t.commit_all("init");
+    set_mtime(&t.dir.join(".git").join("index"));
+    t.write("lib.rs", "fn new() {}\n");
+    set_mtime(&lib);
+
+    let capture = t.repo().capture(&Scope::Uncommitted).expect("captures");
+    assert!(capture.file("lib.rs").is_some(), "the edit is in the diff: {:?}", capture.files);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_read_only_index_still_captures() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let Some(t) = TestRepo::new("readonly") else { return };
+    t.write("lib.rs", "fn old() {}\n");
+    t.commit_all("init");
+    t.write("lib.rs", "fn new() {}\n");
+    let index = t.dir.join(".git").join("index");
+    std::fs::set_permissions(&index, std::fs::Permissions::from_mode(0o444)).expect("chmod");
+    let capture = t.repo().capture(&Scope::Uncommitted).expect("captures");
+    assert!(capture.file("lib.rs").is_some());
+}
