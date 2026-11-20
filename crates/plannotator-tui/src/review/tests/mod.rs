@@ -6,6 +6,7 @@ mod blocked_send;
 #[cfg(unix)]
 mod disk_flow;
 mod notes_flow;
+mod notes_rail;
 mod pi_notes;
 #[cfg(unix)]
 mod pull_flow;

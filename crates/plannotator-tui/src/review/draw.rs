@@ -38,7 +38,8 @@ impl Screen {
             Constraint::Length(self.footer_height(area.width)),
         ])
         .areas(area);
-        let rail_width = if area.width >= RAIL_MIN_TOTAL_WIDTH {
+        // A hidden rail gives its columns to the diff, which the viewer reflows as on a resize.
+        let rail_width = if self.rail_shown() && area.width >= RAIL_MIN_TOTAL_WIDTH {
             (area.width * 3 / 10).clamp(RAIL_MIN_WIDTH, RAIL_WIDTH)
         } else {
             0
@@ -205,7 +206,12 @@ impl Screen {
             };
             parts.push(format!("selected {span} {}", lines.side.as_str()));
         }
-        if width < RAIL_MIN_TOTAL_WIDTH {
+        if self.notes_rail.closed() {
+            parts.push(match self.keys.hint(Action::ToggleNotes) {
+                key if key.is_empty() => "notes hidden".to_owned(),
+                key => format!("notes hidden: {key} shows them"),
+            });
+        } else if self.rail_shown() && width < RAIL_MIN_TOTAL_WIDTH {
             parts.push("rail hidden: widen to \u{2265}80 cols".into());
         }
         let text = format!(" {}", parts.join(" \u{b7} "));
@@ -276,6 +282,7 @@ impl Screen {
                 pair(Action::Down, Action::Up, "move"),
                 key(Action::Edit, "edit"),
                 key(Action::Remove, "remove"),
+                key(Action::ToggleNotes, "hide"),
                 key(Action::CycleFocus, "diff"),
             ]
             .into_iter()

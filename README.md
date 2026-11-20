@@ -96,7 +96,7 @@ dimmed. The keys also work without opening the menu.
 
 | Where | Keys |
 |---|---|
-| anywhere | `Tab` cycle tree · document · notes; `E` send; `P` choose the agent to send to; `t` tree; `r` reload; `o` open the file in `$EDITOR`; `q` quit |
+| anywhere | `Tab` cycle tree · document · notes; `z` hide or show the notes; `E` send; `P` choose the agent to send to; `t` tree; `r` reload; `o` open the file in `$EDITOR`; `q` quit |
 | reply review | `S` send and close |
 | gated review | `A` approve; `E` send and finish; `q` dismiss |
 | document | `j`/`k` block; `c` comment on the block; `a` looks good; `d` delete; `x` clear its annotations; `X` clear every annotation on the document, after a `y`; `v` select with `hjkl` `w` `b` `e` `0` `$`, then `a`, `c` or `d` to act on it, `y` to copy it, or `Enter` for the toolbar; `V` select whole rows; `i` move the cursor with those keys first, then `v` to select from there; `I`/`D` attach or remove an image on the block's note |
@@ -106,9 +106,16 @@ dimmed. The keys also work without opening the menu.
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
-| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `M` note on the whole change; `o`/`O` whole file now/before; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `r` read the diff again (the footer says when it changed on disk); `?` keys |
+| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `M` note on the whole change; `o`/`O` whole file now/before; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `z` hide or show the notes; `r` read the diff again (the footer says when it changed on disk); `?` keys |
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
+
+The notes rail on the right appears with the first note: a document or diff without notes
+gets every column. `z` closes it, and it stays closed until `z` or `Tab` opens it again: a
+new note, a wider window, another file or a reload leave it closed, and the header and
+footer still count the notes, whose marks stay in the text. The next session starts the way
+you left it. `notes_rail` in the config file's `[ui]` table changes how it starts; it is
+described with the other `[ui]` settings.
 
 ### Approval gate
 
@@ -186,7 +193,9 @@ plannotator-tui review https://github.com/owner/repo/pull/123
 
 Notes appear in the rail on the right, grouped by file, and a mark in the diff shows their
 lines. Sent notes get a dimmer mark. `Tab` moves to the rail; `j`/`k` there moves to a
-note and the diff moves with it; `e` edits and `x` removes it.
+note and the diff moves with it; `e` edits and `x` removes it. The rail appears with the
+first note; `z` closes it and gives the diff its columns, and `z` or `Tab` opens it again.
+Closed, it stays closed, as in a document review.
 
 `E` sends the new notes, `S` sends them and closes, and `P` picks the agent to send
 to. Sends go to the same place a document review's do (Herdr pane, Rex, Pi or the
@@ -373,6 +382,19 @@ and a narrower pane still narrows it:
 comment_width = 72
 ```
 
+The notes rail appears with a review's first note and stays away while there are none.
+`notes_rail` changes how a session starts:
+
+```toml
+[ui]
+notes_rail = "when-notes"   # default; or "shown" (always, notes or not) or "hidden" (closed)
+```
+
+`z` (`toggle-notes`) closes or opens the rail in the document and the code review alike,
+and the last choice is remembered in `clients/plannotator-tui/ui-state.json` under the data
+folder. A remembered choice wins over `notes_rail`; with `when-notes`, a rail remembered
+open still waits for the first note before it takes any columns.
+
 A mouse selection is copied to the clipboard when you release the button. To leave the
 clipboard alone, as with Herdr's `ui.copy_on_select = false`, turn it off and press `y` on
 the selection when you want a copy:
@@ -438,6 +460,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `whole-file` `whole-base` | `o` `O` | code review: the whole file as it is now, or before the change; again to go back |
 | `help` | `?` | code review: every key |
 | `narrow-column` `widen-column` | `<` `>` | the reading column, by eight columns |
+| `toggle-notes` | `z` | close the notes rail, or open it again; remembered for the next session |
 
 Actions forwarded by Herdr Mirror default to a split beside the invoking remote
 pane. Mirror does not preserve overlay presentation, and Herdr 0.8.2 opens an

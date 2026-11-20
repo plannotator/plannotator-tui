@@ -21,6 +21,7 @@ mod highlight;
 mod keys;
 mod last;
 mod layout;
+mod notes_rail;
 mod pi;
 #[cfg(unix)]
 mod review;

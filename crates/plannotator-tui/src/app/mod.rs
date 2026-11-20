@@ -14,6 +14,8 @@ mod header;
 mod images;
 mod input;
 mod menu;
+#[cfg(test)]
+mod notes_rail_tests;
 mod pi_target;
 mod pick;
 mod replies;
@@ -212,6 +214,8 @@ pub(crate) struct App {
     roam: bool,
     /// Index into the rail's placed annotations.
     rail_cursor: usize,
+    /// Whether the rail shows: `[ui] notes_rail`, the last session's choice, `toggle-notes`.
+    notes_rail: crate::notes_rail::NotesRail,
     mode: Mode,
     /// `last`: the agent's recent messages, newest first, and the picker's cursor.
     candidates: Vec<plannotator_tui_hosts::Message>,
@@ -309,6 +313,7 @@ impl App {
             cursor: (0, 0),
             roam: false,
             rail_cursor: 0,
+            notes_rail: crate::notes_rail::NotesRail::default(),
             mode: Mode::Browse,
             candidates: Vec::new(),
             pick_cursor: 0,

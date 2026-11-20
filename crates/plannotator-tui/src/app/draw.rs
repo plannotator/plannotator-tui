@@ -54,7 +54,9 @@ impl App {
 
         let show_tree = self.tree_shown(area.width) || (self.tree.is_some() && self.focus == Focus::Tree);
         let tree_width = if show_tree { TREE_WIDTH } else { 0 };
-        let rail_width = if area.width.saturating_sub(tree_width) >= RAIL_MIN_TOTAL_WIDTH {
+        // A hidden rail gives its columns to the text, which reflows below as on a resize.
+        let rail_fits = area.width.saturating_sub(tree_width) >= RAIL_MIN_TOTAL_WIDTH;
+        let rail_width = if self.rail_shown() && rail_fits {
             (area.width * 3 / 10).clamp(RAIL_MIN_WIDTH, RAIL_WIDTH)
         } else {
             0
@@ -502,7 +504,12 @@ impl App {
                 None => format!("block {}/{}", self.selected + 1, self.open.doc.blocks.len()),
             },
         ]);
-        if viewport_width < RAIL_MIN_TOTAL_WIDTH {
+        if self.notes_rail.closed() {
+            parts.push(match self.keys.hint(Action::ToggleNotes) {
+                key if key.is_empty() => "notes hidden".to_owned(),
+                key => format!("notes hidden: {key} shows them"),
+            });
+        } else if self.rail_shown() && viewport_width < RAIL_MIN_TOTAL_WIDTH {
             parts.push("rail hidden: widen to ≥80 cols".into());
         }
         let text = format!(" {}", parts.join(" · "));
@@ -572,6 +579,7 @@ impl App {
                 key(Action::Remove, "remove"),
                 key(Action::AttachImage, "image"),
                 remove_image,
+                key(Action::ToggleNotes, "hide"),
                 tab,
             ]
             .into_iter()

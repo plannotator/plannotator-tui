@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::keys::Keymap;
+use crate::notes_rail::RailStart;
 use crate::theme::{Colors, ThemeSetting};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -51,6 +52,9 @@ pub(crate) struct UiConfig {
     pub(crate) copy_on_select: bool,
     /// Widest the comment box gets, borders included; a narrower pane narrows it further.
     pub(crate) comment_width: u16,
+    /// How the notes rail starts: `when-notes`, `shown` or `hidden`. A choice made with
+    /// `toggle-notes` (`z`) is remembered and wins over it; see `notes_rail`.
+    pub(crate) notes_rail: RailStart,
 }
 
 impl Default for UiConfig {
@@ -62,6 +66,7 @@ impl Default for UiConfig {
             doc_width: DOC_WIDTH,
             copy_on_select: true,
             comment_width: 48,
+            notes_rail: RailStart::default(),
         }
     }
 }
@@ -399,6 +404,20 @@ mod tests {
     fn comment_width_defaults_to_48_and_can_be_set() {
         assert_eq!(Config::default().ui.comment_width, 48);
         assert_eq!(Config::parse("[ui]\ncomment_width = 72\n").expect("parses").ui.comment_width, 72);
+    }
+
+    #[test]
+    fn the_notes_rail_waits_for_notes_unless_set_and_a_bad_value_is_named() {
+        assert_eq!(Config::default().ui.notes_rail, RailStart::WhenNotes);
+        for (text, start) in
+            [("shown", RailStart::Shown), ("hidden", RailStart::Hidden), ("when-notes", RailStart::WhenNotes)]
+        {
+            let config = Config::parse(&format!("[ui]\nnotes_rail = \"{text}\"\n")).expect("parses");
+            assert_eq!(config.ui.notes_rail, start);
+            assert_eq!(Config::parse(&config.to_toml().expect("serializes")).expect("parses"), config);
+        }
+        let err = Config::parse("[ui]\nnotes_rail = \"off\"\n").expect_err("rejected");
+        assert!(err.to_string().contains("off"), "{err}");
     }
 
     #[test]

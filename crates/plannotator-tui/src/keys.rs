@@ -95,6 +95,8 @@ pub(crate) enum Action {
     WholeFile,
     /// The whole file as it was before the change (its base), or back to the diff.
     WholeBase,
+    /// Hide the notes rail, or show it again, in the document and in the code review.
+    ToggleNotes,
 }
 
 use Action::{
@@ -108,7 +110,7 @@ use Action::{
     ChangeComment, FileComment, Help, NextFile, NextHunk, NextUnviewed, PreviousFile, PreviousHunk,
     PreviousUnviewed, Suggest, ToggleFiles, ToggleLayout, ToggleViewed, ToggleWrap, WholeBase, WholeFile,
 };
-use Action::{NarrowColumn, WidenColumn};
+use Action::{NarrowColumn, ToggleNotes, WidenColumn};
 
 /// Browsing, before the focused pane gets the key.
 pub(crate) const GLOBAL: &[Action] = &[
@@ -129,6 +131,7 @@ pub(crate) const GLOBAL: &[Action] = &[
     QuickOpen,
     PickMessage,
     PickTarget,
+    ToggleNotes,
 ];
 pub(crate) const TREE: &[Action] = &[Down, Up, Confirm, Right, ToggleHidden, Back];
 pub(crate) const RAIL: &[Action] = &[Down, Up, Confirm, Edit, Remove, AttachImage, RemoveImage, Back];
@@ -191,6 +194,7 @@ pub(crate) const REVIEW_GLOBAL: &[Action] = &[
     Reload,
     PickTarget,
     Help,
+    ToggleNotes,
 ];
 /// The diff. `left` and `right` pick the old and the new side.
 pub(crate) const DIFF: &[Action] = &[
@@ -425,10 +429,12 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (WidenColumn, &[ch('>')]),
     (WholeFile, &[ch('o')]),
     (WholeBase, &[ch('O')]),
+    (ToggleNotes, &[ch('z')]),
 ];
 
 /// Actions added after configs were written: `approve` (live only in a gated review), `copy`
-/// (on a waiting selection), `word-end`, `visual-line`, and the code review's own.
+/// (on a waiting selection), `word-end`, `visual-line`, the code review's own, the reading
+/// column's and `toggle-notes`.
 const LATE: &[Action] = &[
     Approve,
     CopySelection,
@@ -452,6 +458,7 @@ const LATE: &[Action] = &[
     WidenColumn,
     WholeFile,
     WholeBase,
+    ToggleNotes,
 ];
 
 /// The keys bound to each action. A `[keys]` entry replaces that action's keys and leaves the
@@ -612,6 +619,7 @@ impl Action {
             Self::WidenColumn => "widen-column",
             Self::WholeFile => "whole-file",
             Self::WholeBase => "whole-base",
+            Self::ToggleNotes => "toggle-notes",
         }
     }
 }

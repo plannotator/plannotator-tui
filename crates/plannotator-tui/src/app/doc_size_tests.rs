@@ -107,6 +107,7 @@ fn every_row_fits(app: &super::App) -> bool {
 #[test]
 fn the_reading_column_resizes_while_a_long_document_is_still_being_laid_out() {
     let (root, mut app) = long_app("long-column");
+    app.notes_rail = crate::notes_rail::NotesRail::new(crate::notes_rail::RailStart::Shown);
     assert!(!app.open.layout.is_complete());
     draw(&mut app, 200, 40);
     assert_eq!(app.open.layout.width, usize::from(crate::config::DOC_WIDTH));
@@ -128,6 +129,39 @@ fn the_reading_column_resizes_while_a_long_document_is_still_being_laid_out() {
     press(&mut app, '>');
     draw(&mut app, 200, 40);
     assert_eq!(app.open.layout.width, usize::from(crate::config::DOC_WIDTH) + 8);
+    assert!(every_row_fits(&app));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Closing the notes rail widens the text the way a resize does, also while the rest of a
+/// long document is still being laid out, and also when the config closes it from the start.
+#[test]
+fn the_notes_rail_toggles_while_a_long_document_is_still_being_laid_out() {
+    let (root, mut app) = long_app("long-rail");
+    app.add_block_annotation(1, Kind::Comment, "near the top".to_owned()).expect("annotation");
+    reopen(&mut app);
+    app.ui.doc_width = 0;
+    assert!(!app.open.layout.is_complete());
+    draw(&mut app, 200, 40);
+    assert_eq!(app.open.layout.width, 200 - 2 - 1 - 36);
+    app.toggle_notes();
+    draw(&mut app, 200, 40);
+    assert_eq!(app.open.layout.width, 198);
+    assert!(!app.open.layout.is_complete(), "the toggle waited for the whole layout");
+    app.open.layout.finish();
+    assert!(every_row_fits(&app), "a late block kept the width it was started at");
+    assert_eq!(app.open.layout.width, 198);
+
+    app.ui.notes_rail = crate::notes_rail::RailStart::Hidden;
+    app.notes_rail = crate::notes_rail::NotesRail::new(app.ui.notes_rail);
+    reopen(&mut app);
+    assert!(!app.open.layout.is_complete());
+    draw(&mut app, 200, 40);
+    assert_eq!(app.open.layout.width, 198, "a rail hidden from the start");
+    app.toggle_notes();
+    draw(&mut app, 200, 40);
+    assert_eq!(app.open.layout.width, 200 - 2 - 1 - 36);
+    app.open.layout.finish();
     assert!(every_row_fits(&app));
     let _ = std::fs::remove_dir_all(&root);
 }

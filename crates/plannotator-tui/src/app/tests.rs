@@ -434,6 +434,7 @@ fn margins_yield_before_the_app_drops_below_80_columns_and_default_to_none() {
 #[test]
 fn doc_width_is_a_reading_column_centred_in_what_the_rail_leaves() {
     let mut app = app(Box::new(Discard));
+    app.notes_rail = crate::notes_rail::NotesRail::new(crate::notes_rail::RailStart::Shown);
     app.ui.doc_width = 100;
     // (terminal, column, left margin): the cap holds when wide, centred between the gutter
     // and the rail; when narrow the rail keeps its width and the column absorbs the shortfall.
@@ -454,6 +455,7 @@ fn doc_width_is_a_reading_column_centred_in_what_the_rail_leaves() {
 #[test]
 fn the_reading_column_widens_and_narrows_by_eight_from_what_is_on_screen() {
     let mut app = app(Box::new(Discard));
+    app.notes_rail = crate::notes_rail::NotesRail::new(crate::notes_rail::RailStart::Shown);
     draw_sized(&mut app, 250, 20);
     assert_eq!(app.open.layout.width, usize::from(crate::config::DOC_WIDTH));
     press_char(&mut app, '>');
