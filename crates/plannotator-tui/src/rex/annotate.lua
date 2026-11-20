@@ -7,8 +7,10 @@
 --   require("plannotator.annotate").setup{}
 --
 -- Options, all optional:
---   placement = "split" | "popup"   where reviews open; default: [rex] placement in
---                                   plannotator-tui's config, else a split
+--   placement = "tab" | "split" | "popup"
+--                                   where reviews open: a full-size tab of their own, a split
+--                                   beside the pane, or a popup over it; default: [rex]
+--                                   placement in plannotator-tui's config, else a tab
 --   keys = { annotate_gate = "ctrl+cmd+a", annotate_last = false }
 --                                   change, add or drop keys; keys = false binds none
 --   bin = "/path/to/plannotator-tui"

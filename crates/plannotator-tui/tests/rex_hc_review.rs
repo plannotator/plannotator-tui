@@ -110,15 +110,19 @@ fn new_split(calls: &[String]) -> Value {
 }
 
 #[test]
-fn rex_review_opens_the_blocks_repository_beside_it_wired_to_its_agent() {
+fn rex_review_opens_the_blocks_repository_in_a_split_when_asked_wired_to_its_agent() {
     let root = temp_root("rex opens");
     let fake = fakes(&root);
     let repo = repo(&root);
     std::fs::write(repo.join("src/lib.rs"), "fn a() {}\nfn b() {}\n").expect("change");
     git(&repo, &["add", "-A"]);
 
-    let out =
-        plannotator(&root, &fake, &repo.join("src"), &["rex", "review", "--staged", "--block", "block:b"]);
+    let out = plannotator(
+        &root,
+        &fake,
+        &repo.join("src"),
+        &["rex", "review", "--staged", "--block", "block:b", "--placement", "split"],
+    );
 
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let split = new_split(&calls(&fake));
@@ -153,7 +157,7 @@ fn rex_review_opens_the_blocks_repository_beside_it_wired_to_its_agent() {
 }
 
 #[test]
-fn rex_review_opens_no_split_for_a_clean_repository_or_a_folder_that_is_none() {
+fn rex_review_opens_nothing_for_a_clean_repository_or_a_folder_that_is_none() {
     let root = temp_root("rex refuses");
     let fake = fakes(&root);
     let repo = repo(&root);
@@ -173,7 +177,7 @@ fn rex_review_opens_no_split_for_a_clean_repository_or_a_folder_that_is_none() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("no Rex block"), "needs a block");
 
     let asked: Vec<String> = calls(&fake).into_iter().filter(|c| c.starts_with("rex api")).collect();
-    assert_eq!(asked, [] as [String; 0], "Rex was never asked for a split");
+    assert_eq!(asked, [] as [String; 0], "Rex was never asked for a tab or a split");
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 

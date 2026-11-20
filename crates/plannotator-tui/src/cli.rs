@@ -46,7 +46,7 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui herdr review [--staged | --base REF | --commit SHA | PR] [--placement P] [--deliver-to <pane>]
   plannotator-tui herdr pane
   plannotator-tui rex open [file.md | folder] [--block <id>] [--session <id>] [--paste]
-                           [--placement split|popup] [--gate] [--result-file <path>]
+                           [--placement split|popup|tab] [--gate] [--result-file <path>]
   plannotator-tui rex last [--block <id>] [--session <id>] [--newest] [--paste] [--placement P]
   plannotator-tui rex terminal [--block <id>] [--session <id>] [--lines N] [--paste] [--placement P] [--print]
   plannotator-tui rex find [--block <id>] [--session <id>] [--lines N] [--paste] [--placement P]
