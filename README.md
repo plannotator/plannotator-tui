@@ -106,7 +106,7 @@ dimmed. The keys also work without opening the menu.
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
-| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `M` note on the whole change; `o`/`O` whole file now/before; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `z` hide or show the notes; `r` read the diff again (the footer says when it changed on disk); `?` keys |
+| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `M` note on the whole change; `o`/`O` whole file now/before; `d` go to definition, `ctrl+o`/`ctrl+i` back/forward; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `z` hide or show the notes; `r` read the diff again (the footer says when it changed on disk); `?` keys |
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
 
@@ -231,6 +231,16 @@ gets with the code quoted, as the browser sends one. `Enter` on such a note in t
 opens the whole file at its lines. The base is read-only for notes. Files over 5 MiB, binary
 files, an added file's base and a deleted file's current version are not shown; the view
 says which.
+
+`d` goes to the definition of a word on the cursor's line, in the diff or the whole file.
+With several identifiers on the line, a small list asks which (`1`-`9` or `Enter`). The
+search (`git grep`, the same patterns and ranking as the browser's code navigation) runs in
+the background on the side you are on: the new side searches the reviewed version, the old
+side and the base view search the base; in a pull request it reads the PR's commits, also
+from the cache repository. One clear answer is jumped to: in the diff when it shows that
+line, otherwise in the whole file. Several are listed with `path:line`, definition or use,
+and the line; `Enter` goes, `Esc` closes. `ctrl+o` goes back to where you jumped from and
+`ctrl+i` forward again (in terminals that tell `ctrl+i` from Tab).
 
 `r` reads the diff again after you or the agent change files. Notes follow their lines.
 The review checks for changes by itself every few seconds (a `git status` and the times of
@@ -478,7 +488,8 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `toggle-layout` `toggle-wrap` `toggle-files` | `u` `w` `f` | code review: split or unified view; wrap; the file list |
 | `toggle-viewed` `next-unviewed` `previous-unviewed` | `x` `ctrl+n`, none | code review: mark the file viewed; the next or previous file not viewed |
 | `whole-file` `whole-base` | `o` `O` | code review: the whole file as it is now, or before the change; again to go back |
-| `help` | `?` | code review: every key |
+| `go-to-definition` `jump-back` `jump-forward` | `d` `ctrl+o` `ctrl+i` | code review: search for the identifier on the line and go to its definition; back and forward through the places jumped from (`ctrl+i` needs a terminal that tells it from Tab) |
+| `help` | `?` | code review: every key (`j`/`k` scroll it when it does not fit) |
 | `narrow-column` `widen-column` | `<` `>` | the reading column, by eight columns |
 | `toggle-notes` | `z` | close the notes rail, or open it again; remembered for the next session |
 

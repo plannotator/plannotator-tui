@@ -69,12 +69,12 @@ impl Screen {
         self.geometry.menu_rows = menu_rows;
     }
 
-    /// `?`: every key, in the user's keymap.
-    pub(super) fn draw_help(&self, frame: &mut Frame, area: Rect) {
+    /// The key help's sections: a title, then each key with what it does.
+    fn help_sections(&self) -> [(&'static str, Vec<(String, &'static str)>); 4] {
         let key = |actions: &[Action]| {
             actions.iter().map(|a| self.keys.hint(*a)).filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" ")
         };
-        let sections: [(&str, Vec<(String, &str)>); 4] = [
+        [
             (
                 "anywhere",
                 vec![
@@ -114,6 +114,11 @@ impl Screen {
                     (key(&[Action::FileComment]), "comment on the file"),
                     (key(&[Action::WholeFile]), "the whole file as it is now, at this line"),
                     (key(&[Action::WholeBase]), "the whole file before the change (base)"),
+                    (key(&[Action::GoToDefinition]), "go to the definition of a word on the line"),
+                    (
+                        key(&[Action::JumpBack, Action::JumpForward]),
+                        "back / forward to where you jumped from",
+                    ),
                     (key(&[Action::Back]), "clear the selection"),
                     (key(&[Action::ToggleLayout]), "split / unified"),
                     (key(&[Action::ToggleWrap]), "wrap long lines"),
@@ -131,6 +136,7 @@ impl Screen {
                     (key(&[Action::NextHunk, Action::PreviousHunk]), "next / previous changed lines"),
                     (key(&[Action::NextFile, Action::PreviousFile]), "next / previous file"),
                     (key(&[Action::ToggleViewed]), "mark this file viewed, or not"),
+                    (key(&[Action::GoToDefinition]), "go to definition; on the base it searches the base"),
                 ],
             ),
             (
@@ -142,25 +148,50 @@ impl Screen {
                     (key(&[Action::Remove]), "remove"),
                 ],
             ),
-        ];
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        for (title, rows) in sections {
-            if !lines.is_empty() {
-                lines.push(Line::default());
+        ]
+    }
+
+    /// `?`: every key, in the user's keymap.
+    pub(super) fn draw_help(&self, frame: &mut Frame, area: Rect) {
+        let sections = self.help_sections();
+        let blocks: Vec<Vec<Line<'static>>> = sections
+            .into_iter()
+            .map(|(title, rows)| {
+                let heading =
+                    Line::from(Span::styled(format!(" {title}"), Style::new().fg(palette().accent).bold()));
+                let keys = rows.into_iter().filter(|(keys, _)| !keys.is_empty()).map(|(keys, what)| {
+                    Line::from(vec![Span::raw(format!("  {keys:<9} ")).bold(), Span::raw(what.to_owned())])
+                });
+                std::iter::once(heading).chain(keys).collect()
+            })
+            .collect();
+        let stack = |blocks: &[Vec<Line<'static>>]| -> Vec<Line<'static>> {
+            let mut lines = Vec::new();
+            for block in blocks {
+                if !lines.is_empty() {
+                    lines.push(Line::default());
+                }
+                lines.extend(block.iter().cloned());
             }
-            lines.push(Line::from(Span::styled(
-                format!(" {title}"),
-                Style::new().fg(palette().accent).bold(),
-            )));
-            for (keys, what) in rows.into_iter().filter(|(keys, _)| !keys.is_empty()) {
-                lines.push(Line::from(vec![
-                    Span::raw(format!("  {keys:<9} ")).bold(),
-                    Span::raw(what.to_owned()),
-                ]));
-            }
-        }
-        let width = (lines.iter().map(Line::width).max().unwrap_or(0) as u16 + 3).min(area.width);
-        let height = (lines.len() as u16 + 2).min(area.height);
+            lines
+        };
+        let widest = |lines: &[Line<'static>]| lines.iter().map(Line::width).max().unwrap_or(0) as u16;
+        let one = stack(&blocks);
+        // Too tall for one column: the diff's keys go in a second, beside the rest.
+        let columns = if one.len() as u16 + 2 > area.height
+            && let Some((diff, rest)) = blocks.split_at_checked(2).map(|(head, tail)| {
+                let (first, diff) = head.split_at(1);
+                (diff.to_vec(), [first, tail].concat())
+            })
+            && widest(&stack(&rest)) + widest(&stack(&diff)) + 4 <= area.width
+        {
+            vec![stack(&rest), stack(&diff)]
+        } else {
+            vec![one]
+        };
+        let column_widths: Vec<u16> = columns.iter().map(|c| widest(c) + 1).collect();
+        let width = (column_widths.iter().sum::<u16>() + 2).min(area.width);
+        let height = (columns.iter().map(Vec::len).max().unwrap_or(0) as u16 + 2).min(area.height);
         let rect = Rect {
             x: area.x + area.width.saturating_sub(width) / 2,
             y: area.y + area.height.saturating_sub(height) / 2,
@@ -168,7 +199,21 @@ impl Screen {
             height,
         };
         frame.render_widget(Clear, rect);
+        let tallest = columns.iter().map(Vec::len).max().unwrap_or(0);
+        let room = tallest.saturating_sub(usize::from(height.saturating_sub(2)));
+        self.help_room.set(room);
+        let scroll = self.help_scroll.min(room);
         let close = self.keys.labelled(Action::Back, "closes").unwrap_or_default();
+        let scrolls: Vec<String> = [Action::Down, Action::Up]
+            .map(|a| self.keys.hint(a))
+            .into_iter()
+            .filter(|k| !k.is_empty())
+            .collect();
+        let close = if room > 0 && !scrolls.is_empty() {
+            format!("{} scroll \u{b7} {close}", scrolls.join("/"))
+        } else {
+            close
+        };
         let boxed = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -177,6 +222,11 @@ impl Screen {
             .title_bottom(Span::styled(format!(" {close} "), Style::new().dim()));
         let inner = boxed.inner(rect);
         frame.render_widget(boxed, rect);
-        frame.render_widget(Paragraph::new(lines), inner);
+        let mut x = inner.x;
+        for (lines, column_width) in columns.into_iter().zip(column_widths) {
+            let area = Rect { x, width: column_width.min(inner.right().saturating_sub(x)), ..inner };
+            frame.render_widget(Paragraph::new(lines).scroll((scroll as u16, 0)), area);
+            x = x.saturating_add(column_width);
+        }
     }
 }

@@ -215,7 +215,7 @@ impl Whole {
     }
 
     /// Lines `first..=last` of the file, joined with `\n`, as a note quotes them.
-    fn code(&self, first: u32, last: u32) -> Option<String> {
+    pub(super) fn code(&self, first: u32, last: u32) -> Option<String> {
         let View::Shown { content, .. } = &self.view else { return None };
         let body = content.strip_suffix('\n').unwrap_or(content);
         let lines: Vec<&str> = body

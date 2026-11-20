@@ -28,6 +28,7 @@ mod drafts;
 mod draw;
 pub(crate) mod herdr;
 mod input;
+mod jump;
 mod notes;
 mod overlays;
 mod pi;
@@ -86,6 +87,8 @@ enum Mode {
     Menu(usize),
     PickTarget,
     Help,
+    /// Go to definition's list: which identifier, or which answer.
+    Pick(jump::Pick),
 }
 
 /// Which pane keys go to.
@@ -155,6 +158,11 @@ pub(crate) struct Screen {
     whole: Option<whole::Whole>,
     /// The event loop's wake channel, for the whole-file view's engine and the agent finder.
     wake: SyncSender<()>,
+    /// Go to definition: the search under way, and the places to go back to.
+    nav: jump::Nav,
+    /// The key help's scroll, and how far it can scroll at the size drawn last.
+    help_scroll: usize,
+    help_room: std::cell::Cell<usize>,
     quit: bool,
 }
 
@@ -214,6 +222,9 @@ impl Screen {
             last_key: None,
             whole: None,
             wake,
+            nav: jump::Nav::default(),
+            help_scroll: 0,
+            help_room: std::cell::Cell::new(0),
             quit: false,
         };
         let placed = screen.place_notes()?;
@@ -277,6 +288,7 @@ impl Screen {
             changed = true;
         }
         changed |= self.poll_pi();
+        changed |= self.poll_search()?;
         let typing = matches!(self.mode, Mode::Compose(_))
             || self.last_key.is_some_and(|at| at.elapsed() < watch::QUIET_AFTER_KEY);
         changed |= self.watch.poll(&self.repo, &self.capture.scope, !typing);

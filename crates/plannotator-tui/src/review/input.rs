@@ -112,9 +112,16 @@ impl Screen {
                 }
                 Ok(())
             }
+            Mode::Pick(pick) => self.pick_key(key, pick),
             Mode::Help => {
-                if self.keys.action(&key, keys::HELP).is_some() {
-                    self.mode = Mode::Browse;
+                let room = self.help_room.get();
+                match self.keys.action(&key, keys::HELP) {
+                    Some(Action::Down) => self.help_scroll = (self.help_scroll + 1).min(room),
+                    Some(Action::Up) => self.help_scroll = self.help_scroll.saturating_sub(1),
+                    Some(Action::PageDown) => self.help_scroll = (self.help_scroll + 10).min(room),
+                    Some(Action::PageUp) => self.help_scroll = self.help_scroll.saturating_sub(10),
+                    Some(_) => self.mode = Mode::Browse,
+                    None => {}
                 }
                 Ok(())
             }
@@ -163,6 +170,7 @@ impl Screen {
                 return Ok(());
             }
             Some(Action::Help) => {
+                self.help_scroll = 0;
                 self.mode = Mode::Help;
                 return Ok(());
             }
@@ -180,6 +188,12 @@ impl Screen {
 
     fn diff_key(&mut self, key: KeyEvent) -> Result<()> {
         let Some(action) = self.keys.action(&key, keys::DIFF) else { return Ok(()) };
+        match action {
+            Action::GoToDefinition => return self.go_to_definition(),
+            Action::JumpBack => return self.jump_history(false),
+            Action::JumpForward => return self.jump_history(true),
+            _ => {}
+        }
         if self.whole.is_some() {
             return self.whole_key(action);
         }
