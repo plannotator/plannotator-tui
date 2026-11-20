@@ -5,6 +5,8 @@
 //! - [`scope`]: what a review compares, and its names (record id, browser diff type, label).
 //! - [`capture`]: running git for a scope (temporary index for untracked files, size guard)
 //!   and reading either side's full files; fetching a pull request.
+//! - [`codenav`]: definition search on either side of a diff (`git grep`), ranked as the
+//!   browser ranks it, and the identifiers on a line.
 //! - [`github`]: PR links and numbers, and `gh pr view` (read-only).
 //! - [`patch`]: reading a unified patch: files, the lines each side shows, anchors.
 //! - [`annotation`]: a note, in the browser's `CodeAnnotation` shape.
@@ -16,6 +18,7 @@
 
 pub mod annotation;
 pub mod capture;
+pub mod codenav;
 pub mod error;
 pub mod export;
 mod git;
