@@ -9,6 +9,7 @@ mod config;
 mod decorate;
 mod delivery;
 mod doc;
+mod doc_search;
 mod editor;
 mod export;
 mod file_search;

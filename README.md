@@ -99,7 +99,7 @@ dimmed. The keys also work without opening the menu.
 | anywhere | `Tab` cycle tree · document · notes; `z` hide or show the notes; `E` send; `P` choose the agent to send to; `t` tree; `r` reload; `o` open the file in `$EDITOR`; `q` quit |
 | reply review | `S` send and close |
 | gated review | `A` approve; `E` send and finish; `q` dismiss |
-| document | `j`/`k` block; `c` comment on the block; `a` looks good; `d` delete; `x` clear its annotations; `X` clear every annotation on the document, after a `y`; `v` select with `hjkl` `w` `b` `e` `0` `$`, then `a`, `c` or `d` to act on it, `y` to copy it, or `Enter` for the toolbar; `V` select whole rows; `i` move the cursor with those keys first, then `v` to select from there; `I`/`D` attach or remove an image on the block's note |
+| document | `j`/`k` block; `c` comment on the block; `a` looks good; `d` delete; `x` clear its annotations; `X` clear every annotation on the document, after a `y`; `v` select with `hjkl` `w` `b` `e` `0` `$`, then `a`, `c` or `d` to act on it, `y` to copy it, or `Enter` for the toolbar; `V` select whole rows; `i` move the cursor with those keys first, then `v` to select from there; `I`/`D` attach or remove an image on the block's note; `/` search the text, then `n`/`N` next/previous match |
 | toolbar | `a` looks good · `c` comment · `d` delete · `y` copy · `Esc` |
 | comment box | `Enter` save; `Shift+Enter`, `Alt+Enter` or `Ctrl+J` new line; `↑`/`↓` move by display row; `Ctrl+←`/`Ctrl+→`, `Alt+←`/`Alt+→` or `Alt+B`/`Alt+F` jump by word; `Ctrl+A`/`Ctrl+E` line start/end; `Ctrl+W`, `Alt+Backspace` or `Ctrl+Backspace` delete the previous word; `Alt+D` or `Ctrl+Delete` delete the next word; `Ctrl+U`/`Ctrl+K` delete to line start/end; `Esc` cancel, asking first if the text changed |
 | notes | `j`/`k`; `e` edit; `x` remove; `I` attach an image, `D` remove the last; click a bubble |
@@ -167,6 +167,23 @@ part of the review and are sent whether or not its folder is listed.
 `product-requirements.md`). Results show the path within the folder, so files with the same
 name are told apart, and opening one expands the tree down to it. It follows the tree's
 hidden-entries setting and skips the same folders the tree does.
+
+### Search
+
+`/` opens a search line at the bottom of the document. Every match is highlighted as you
+type, and the cursor moves to the first one at or after it; the footer counts them (`3/17`).
+`Enter` keeps the search and closes the line, `Esc` closes it and puts the view back. `n` and
+`N` then go to the next and previous match, wrapping at either end, and `Esc` clears the
+highlights. An empty search clears them too.
+
+A search is plain text, not a pattern, and ignores case unless it has a capital letter. It
+matches the text as shown: Markdown markup is invisible to it, and a match can run across a
+wrapped line, inside a table cell or a list item. It does not cross a hard line break or run
+from one list item or table row into the next. The cursor lands on the match, so `v` selects
+from it. A search moves only the cursor and the view: a waiting selection and every note stay
+as they were.
+
+In a folder review a search covers the open file only; opening another file drops it.
 
 ## Code review
 
@@ -349,10 +366,12 @@ code-number = "yellow"   # numbers and constants; 130 on light
 code-function = "blue"
 code-type = "cyan"       # 30 on light
 code-comment = "dark-gray"  # comments (italic), the bar beside code and its language label
+search = "24"            # every match of a document search
+search-current = "208"   # the match the cursor is on (black text by default)
 ```
 
-`cursor` and `selection` become plain backgrounds when set: the text on them keeps the
-terminal's colour.
+`cursor`, `selection`, `search` and `search-current` become plain backgrounds when set: the
+text on them keeps the terminal's colour.
 
 The document's text sits in a reading column, centred in the columns the tree and the notes
 leave, and `[ui]` sizes it and the app around it:
@@ -451,6 +470,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `clear-all` | `X` | every annotation on the document, after `yes` |
 | `looks-good` `delete` | `a` `d` | toolbar, with `comment`; also on the selected block, unless another document action has the key |
 | `copy` | `y` | copy the selection waiting in the toolbar |
+| `search` `next-match` `previous-match` | `/` `n` `N` | search the open document; step through the matches |
 | `yes` `no` | `y` `n`, `Y` `N` | the send-before-quitting and clear-all questions |
 | `suggest` `file-comment` | `s` `C` | code review: suggest code for the lines; a note on the whole file |
 | `change-comment` | `M` | code review: a note on the whole change |

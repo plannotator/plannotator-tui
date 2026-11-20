@@ -37,6 +37,10 @@ impl App {
                     self.file_search_key(*key);
                     Ok(())
                 }
+                Mode::Search => {
+                    self.search_key(*key);
+                    Ok(())
+                }
                 Mode::Archive => {
                     self.archive_key(*key);
                     Ok(())
@@ -60,6 +64,10 @@ impl App {
             // In Quick Open a paste joins the query, newlines dropped.
             Event::Paste(text) if self.mode == Mode::FileSearch => {
                 self.file_search_paste(text);
+                Ok(())
+            }
+            Event::Paste(text) if self.mode == Mode::Search => {
+                self.search_paste(text);
                 Ok(())
             }
             Event::Mouse(mouse) if self.mode == Mode::Browse => self.mouse(*mouse),
@@ -287,13 +295,18 @@ impl App {
         let action =
             self.keys.action(&key, keys::DOCUMENT).or_else(|| self.keys.action(&key, keys::BLOCK_MARKS));
         match action {
+            // Esc peels one layer at a time: a selection, then a search's highlights, then
+            // the review itself.
             Some(Action::Back) => {
                 if self.pending.is_some() || self.selection.is_some() {
                     self.clear_selection();
-                } else {
+                } else if !self.clear_search() {
                     self.request_quit();
                 }
             }
+            Some(Action::Search) => self.start_search(),
+            Some(Action::NextMatch) => self.step_search(true),
+            Some(Action::PreviousMatch) => self.step_search(false),
             Some(Action::Visual) => self.start_visual(Selection::start(self.cursor)),
             Some(Action::VisualLine) => self.start_visual(Selection::start_rows(self.cursor)),
             Some(Action::MoveCursor) => self.start_roaming(),
@@ -512,6 +525,7 @@ impl App {
                     | Mode::ConfirmClearAll
                     | Mode::Pick
                     | Mode::FileSearch
+                    | Mode::Search
                     | Mode::Archive
                     | Mode::ReviewMenu
                     | Mode::PickTarget => {

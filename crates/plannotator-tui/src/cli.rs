@@ -705,7 +705,7 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<O
     Ok(app.take_decision())
 }
 
-/// Headless timing of the expensive paths: parse, per-block render + align, and reflow.
+/// Headless timing of the expensive paths: parse, per-block render + align, reflow, and search.
 fn bench(path: &PathBuf) -> Result<()> {
     let source = open_file(path)?;
     let bytes = source.content.len();
@@ -737,6 +737,19 @@ fn bench(path: &PathBuf) -> Result<()> {
     let hits = (0..layout.total_rows).step_by(7).filter(|&row| layout.block_at_row(row).is_some()).count();
     let lookup_us = t.elapsed().as_secs_f64() * 1e6 / (layout.total_rows / 7).max(1) as f64;
 
+    let t = Instant::now();
+    let index = crate::doc_search::Index::of(&layout);
+    let index_ms = t.elapsed().as_secs_f64() * 1000.0;
+    // What each keystroke of a typed query costs: one search of the whole text.
+    let searches: Vec<String> = ["e", "th", "the", "plugin", "Plugin", "no such text anywhere"]
+        .into_iter()
+        .map(|query| {
+            let t = Instant::now();
+            let found = index.find(query).len();
+            format!("{query:?} {found}→{:.1}ms", t.elapsed().as_secs_f64() * 1000.0)
+        })
+        .collect();
+
     let cells: usize = layout.blocks.iter().flat_map(|b| b.rows.iter()).map(|r| r.cells.len()).sum();
     let mapped: usize =
         layout.blocks.iter().flat_map(|b| b.rows.iter()).flat_map(|r| r.cells.iter()).flatten().count();
@@ -748,6 +761,8 @@ fn bench(path: &PathBuf) -> Result<()> {
     println!("render+align+wrap    {build_ms:8.1} ms  ({} rows)", layout.total_rows);
     println!("reflow               {}", reflow.join("  "));
     println!("row lookup           {lookup_us:8.3} µs avg ({hits} hits)");
+    println!("search index         {index_ms:8.1} ms");
+    println!("search               {}", searches.join("  "));
     println!("cells mapped         {mapped}/{cells} ({:.1}%)", mapped as f64 * 100.0 / cells.max(1) as f64);
     Ok(())
 }

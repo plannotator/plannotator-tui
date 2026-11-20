@@ -341,6 +341,25 @@ impl DocLayout {
         Some(painted.map_or(Cow::Borrowed(&laid_out.line), Cow::Owned))
     }
 
+    /// Every shown line as the renderer produced it, before wrapping, with each char's
+    /// source byte. Width-independent, so whatever is built from it survives a resize. A
+    /// thematic break is drawn, not rendered, so it has no line here.
+    pub(crate) fn rendered_lines(&self) -> impl Iterator<Item = (&Line<'static>, &LineOffsets)> {
+        self.blocks
+            .iter()
+            .filter(|block| block.kind != BlockKind::Rule)
+            .flat_map(|block| block.text.lines.iter().zip(&block.offsets))
+    }
+
+    /// The first cell, in reading order, that shows a source byte inside `range`.
+    pub(crate) fn first_cell_in_range(&self, block: usize, range: &Range<usize>) -> Option<(usize, usize)> {
+        let b = self.blocks.get(block)?;
+        b.rows.iter().enumerate().find_map(|(i, row)| {
+            let col = row.cells.iter().position(|c| c.is_some_and(|o| range.contains(&o)))?;
+            Some((b.first_row + i, col))
+        })
+    }
+
     /// First document row on which any cell falls inside `range`.
     pub(crate) fn first_row_in_range(&self, block: usize, range: &Range<usize>) -> Option<usize> {
         let b = self.blocks.get(block)?;
