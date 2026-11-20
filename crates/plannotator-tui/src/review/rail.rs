@@ -227,6 +227,9 @@ impl Screen {
         if sent {
             tags.push("sent".to_owned());
         }
+        if self.store.is_posted(note) {
+            tags.push("posted".to_owned());
+        }
         let mut title = format!(" {} {} ", notes::glyph(note), tags.join(" \u{b7} "));
         let mut text = notes::body(note);
         // A title wider than the bubble's top border would cut the credit off; it moves into

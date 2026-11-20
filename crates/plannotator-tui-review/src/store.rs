@@ -8,6 +8,10 @@
 //! review's `annotations.json`: a note is pending until a delivery at or after its last edit
 //! covers it, and finishing moves sent notes to `archived` whole.
 //!
+//! A pull request review also keeps `posted`: each review posted to GitHub, with its link and
+//! the notes it carried. Posting is its own state, beside sending: a note is posted once a post
+//! at or after its last edit covers it, whether or not an agent has had it too.
+//!
 //! Every change is made on a copy and committed to memory only once it is saved, so a
 //! failed write leaves the store as it was.
 
@@ -33,6 +37,19 @@ pub struct Delivered {
     pub annotation_ids: Vec<String>,
 }
 
+/// One review posted to GitHub: when, its link, the commit its comments are anchored to, and
+/// which notes it carried.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Posted {
+    /// RFC 3339, UTC, milliseconds, as a delivery's.
+    pub at: String,
+    /// The review's page on GitHub.
+    pub url: String,
+    pub commit_id: String,
+    pub annotation_ids: Vec<String>,
+}
+
 /// The `review.json` document.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Record {
@@ -44,6 +61,9 @@ pub struct Record {
     pub deliveries: Vec<Delivered>,
     #[serde(default)]
     pub archived: Vec<CodeAnnotation>,
+    /// Reviews posted to GitHub (pull request reviews only).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub posted: Vec<Posted>,
 }
 
 /// The notes of one review, bound to their file.
@@ -97,6 +117,7 @@ impl ReviewStore {
                 annotations: Vec::new(),
                 deliveries: Vec::new(),
                 archived: Vec::new(),
+                posted: Vec::new(),
             },
             Err(source) => return Err(Error::Io { action: "reading", path, source }),
         };
@@ -123,6 +144,10 @@ impl ReviewStore {
         &self.record.deliveries
     }
 
+    pub fn posts(&self) -> &[Posted] {
+        &self.record.posted
+    }
+
     /// Add a note and save.
     pub fn add(&mut self, note: CodeAnnotation) -> Result<()> {
         self.commit(|record| {
@@ -132,12 +157,14 @@ impl ReviewStore {
     }
 
     /// Change one note with `edit` and save. When `edit` reports a change, `updatedAt`
-    /// advances past both its old value and the note's last send, even if the clock has not,
-    /// so an edited note is pending again. Returns whether anything changed.
+    /// advances past its old value, the note's last send and its last post, even if the clock
+    /// has not, so an edited note is pending (and unposted) again. Returns whether anything
+    /// changed.
     pub fn edit(&mut self, id: &str, edit: impl FnOnce(&mut CodeAnnotation) -> bool) -> Result<bool> {
         let floor = self.find(id).map(|note| {
             let sent = self.last_delivery(id).and_then(|d| parse_millis(&d.at));
-            note.updated_at().max(sent.unwrap_or(0)) + 1
+            let posted = self.last_post(id).and_then(|p| parse_millis(&p.at));
+            note.updated_at().max(sent.unwrap_or(0)).max(posted.unwrap_or(0)) + 1
         });
         let Some(floor) = floor else { return Ok(false) };
         let mut changed = false;
@@ -211,6 +238,33 @@ impl ReviewStore {
         })
     }
 
+    /// True once a post to GitHub at or after the note's last edit carried it.
+    pub fn is_posted(&self, note: &CodeAnnotation) -> bool {
+        self.last_post(&note.id).and_then(|p| parse_millis(&p.at)).is_some_and(|at| note.updated_at() <= at)
+    }
+
+    /// True when some post carried the note, even before its last edit.
+    pub fn was_posted(&self, note: &CodeAnnotation) -> bool {
+        self.last_post(&note.id).is_some()
+    }
+
+    /// Record a review posted to GitHub at `url`, anchored to `commit_id`, carrying `ids`. Its
+    /// time is never before the newest covered edit, as a delivery's.
+    pub fn record_post(&mut self, url: &str, commit_id: &str, ids: &[String]) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let newest =
+            self.record.annotations.iter().filter(|n| ids.contains(&n.id)).map(CodeAnnotation::updated_at);
+        let at = format_millis(newest.max().unwrap_or(0).max(now_millis()));
+        let posted =
+            Posted { at, url: url.to_owned(), commit_id: commit_id.to_owned(), annotation_ids: ids.to_vec() };
+        self.commit(|record| {
+            record.posted.push(posted);
+            true
+        })
+    }
+
     /// Finish every sent, unchanged note (outdated ones too): move it to `archived` whole.
     /// Pending notes stay. Returns the archived ids, which [`Self::restore_archived`] undoes.
     pub fn archive_sent(&mut self) -> Result<Vec<String>> {
@@ -257,6 +311,10 @@ impl ReviewStore {
 
     fn last_delivery(&self, id: &str) -> Option<&Delivered> {
         self.record.deliveries.iter().rev().find(|d| d.annotation_ids.iter().any(|sent| sent == id))
+    }
+
+    fn last_post(&self, id: &str) -> Option<&Posted> {
+        self.record.posted.iter().rev().find(|p| p.annotation_ids.iter().any(|posted| posted == id))
     }
 
     /// Apply `change` to a copy; when it reports a change, save the copy and keep it.

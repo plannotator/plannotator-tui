@@ -75,6 +75,10 @@ impl Screen {
                 let pick = pick.clone();
                 self.draw_pick(frame, diff, &pick);
             }
+            Mode::Post(confirm) => {
+                let confirm = confirm.clone();
+                self.draw_post(frame, area, &confirm);
+            }
             Mode::Browse | Mode::ConfirmQuit => {}
         }
         Ok(())

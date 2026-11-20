@@ -17,18 +17,20 @@ use crate::ui::compose::{self, ComposeAction};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MenuRow {
     ChangeComment,
+    PostToGithub,
     ResendAll,
     Finish,
     Undo,
 }
 
-pub(super) const MENU: [MenuRow; 4] =
-    [MenuRow::ChangeComment, MenuRow::ResendAll, MenuRow::Finish, MenuRow::Undo];
+pub(super) const MENU: [MenuRow; 5] =
+    [MenuRow::ChangeComment, MenuRow::PostToGithub, MenuRow::ResendAll, MenuRow::Finish, MenuRow::Undo];
 
 impl MenuRow {
     pub(super) fn binding(self) -> Action {
         match self {
             Self::ChangeComment => Action::ChangeComment,
+            Self::PostToGithub => Action::PostToGithub,
             Self::ResendAll => Action::ResendAll,
             Self::Finish => Action::FinishReview,
             Self::Undo => Action::UndoFinish,
@@ -113,6 +115,10 @@ impl Screen {
                 Ok(())
             }
             Mode::Pick(pick) => self.pick_key(key, pick),
+            Mode::Post(confirm) => {
+                self.post_key(key, confirm);
+                Ok(())
+            }
             Mode::Help => {
                 let room = self.help_room.get();
                 match self.keys.action(&key, keys::HELP) {
@@ -162,6 +168,7 @@ impl Screen {
             Some(Action::FinishReview) => return self.run_menu(MenuRow::Finish),
             Some(Action::UndoFinish) => return self.run_menu(MenuRow::Undo),
             Some(Action::ChangeComment) => return self.run_menu(MenuRow::ChangeComment),
+            Some(Action::PostToGithub) => return self.run_menu(MenuRow::PostToGithub),
             Some(Action::Reload) => return self.reload(),
             Some(Action::PickTarget) => {
                 self.picker = AgentPicker::open(&self.reach, &self.real_root());
@@ -278,6 +285,7 @@ impl Screen {
         self.mode = Mode::Browse;
         match row {
             MenuRow::ChangeComment => self.start_change_comment(),
+            MenuRow::PostToGithub => self.open_post(),
             MenuRow::ResendAll => self.send(true),
             MenuRow::Finish => self.finish(),
             MenuRow::Undo => return self.undo_finish(),

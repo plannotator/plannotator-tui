@@ -8,6 +8,8 @@
 //! - [`codenav`]: definition search on either side of a diff (`git grep`), ranked as the
 //!   browser ranks it, and the identifiers on a line.
 //! - [`github`]: PR links and numbers, and `gh pr view` (read-only).
+//! - [`post`]: a pull request review on GitHub built from the notes, as the browser builds
+//!   one, and posted in one `gh api` request (the only write to GitHub).
 //! - [`patch`]: reading a unified patch: files, the lines each side shows, anchors.
 //! - [`annotation`]: a note, in the browser's `CodeAnnotation` shape.
 //! - [`resolve`]: pure functions that place a note against the current files.
@@ -26,6 +28,7 @@ pub mod export;
 mod git;
 pub mod github;
 pub mod patch;
+pub mod post;
 pub mod progress;
 pub mod resolve;
 pub mod scope;
@@ -44,11 +47,12 @@ pub use export::{
 };
 pub use github::{Gh, PrRepo, PrSpec, PrView};
 pub use patch::{FilePatch, FileStatus};
+pub use post::{Event, Plan, PostError, PostedReview, Posting, ReviewRequest};
 pub use progress::Progress;
 pub use resolve::{Current, Resolution, apply, resolve};
 pub use scope::Scope;
 pub use stamp::DiskStamp;
-pub use store::{Delivered, Record, ReviewStore, project_for, review_dir};
+pub use store::{Delivered, Posted, Record, ReviewStore, project_for, review_dir};
 
 /// sha256 over `parts` in order, as lowercase hex, first `chars` characters.
 fn sha256_hex(parts: &[&[u8]], chars: usize) -> String {

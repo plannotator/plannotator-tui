@@ -12,6 +12,8 @@ mod notes_flow;
 mod notes_rail;
 mod pi_notes;
 #[cfg(unix)]
+mod post_flow;
+#[cfg(unix)]
 mod pull_flow;
 mod rex_picker;
 mod send_flow;
