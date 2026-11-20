@@ -1,5 +1,6 @@
-//! The app's half of the Pi link (`docs/spec-pi-link.md`): the picker that makes a running
-//! Pi session the Send target, and notes a Pi session leaves on the open document.
+//! The app's half of the Pi link (`docs/spec-pi-link.md`): the agent picker that makes a
+//! running Pi session or Herdr agent the Send target, and notes a Pi session leaves on the
+//! open document.
 
 use std::path::{Path, PathBuf};
 
@@ -11,22 +12,24 @@ use serde_json::{Value, json};
 use super::{App, Mode};
 use crate::pi;
 use crate::pi::link::{self, Link, Note};
-pub(super) use crate::ui::pi_picker::PiPicker;
-use crate::ui::pi_picker::{self, PickerKey};
+pub(super) use crate::ui::agent_picker::AgentPicker;
+use crate::ui::agent_picker::{self, Picked, PickerKey, Reach};
 
 #[cfg(test)]
 mod tests;
 
 impl App {
-    /// List this review in the registry and listen for notes. A review that cannot (no
-    /// writable data folder) works as before, without the link.
+    /// List this review in the registry and listen for notes, and start looking for the
+    /// agents Send can reach. A review that cannot list itself (no writable data folder)
+    /// works as before, without the link.
     pub(crate) fn start_pi_link(&mut self) {
-        let cwd = std::fs::canonicalize(self.review_folder()).unwrap_or_else(|_| self.review_folder());
-        self.pi_link = Link::start(&pi::root(), cwd, self.pi_files()).ok();
+        let cwd = agent_picker::real(&self.review_folder());
+        self.pi_link = Link::start(&pi::root(), cwd.clone(), self.pi_files()).ok();
+        self.reach = Reach::start(cwd);
     }
 
     /// The folder this review is about: the tree's root, the file's folder, or the cwd.
-    fn review_folder(&self) -> PathBuf {
+    pub(super) fn review_folder(&self) -> PathBuf {
         if let Some(tree) = &self.tree {
             return tree.root().to_path_buf();
         }
@@ -119,36 +122,51 @@ impl App {
         self.open.store.credit_last("pi", &note.author)
     }
 
-    /// Open the Pi picker on the live sessions, the ones in this review's folder first.
+    /// Open the agent picker on the agents within reach, the ones in this review's folder first.
     pub(super) fn open_pi_picker(&mut self) {
-        self.pi_picker = PiPicker::open(&pi_picker::real(&self.review_folder()));
+        self.agent_picker = AgentPicker::open(&self.reach, &agent_picker::real(&self.review_folder()));
+        self.pick_then = None;
         self.mode = Mode::PickTarget;
     }
 
     #[cfg(test)]
     fn pi_rows(&self) -> usize {
-        self.pi_picker.rows(self.start_delivery.is_some())
+        self.agent_picker.rows(self.start_delivery.is_some())
     }
 
-    pub(super) fn pick_target_key(&mut self, key: KeyEvent) {
-        match self.pi_picker.key(&self.keys, &key, self.start_delivery.is_some()) {
-            PickerKey::Stay => {}
-            PickerKey::Close => self.mode = Mode::Browse,
+    pub(super) fn pick_target_key(&mut self, key: KeyEvent) -> anyhow::Result<()> {
+        match self.agent_picker.key(&self.keys, &key, self.start_delivery.is_some()) {
+            PickerKey::Stay => Ok(()),
+            PickerKey::Close => {
+                self.mode = Mode::Browse;
+                if self.pick_then.take().is_some() {
+                    self.status = Some("nothing sent".into());
+                }
+                Ok(())
+            }
             PickerKey::Chose(row) => self.choose_target(row),
         }
     }
 
-    fn choose_target(&mut self, row: usize) {
+    /// Act on the picker's `row`, then send when Send opened the picker.
+    fn choose_target(&mut self, row: usize) -> anyhow::Result<()> {
         self.mode = Mode::Browse;
-        if let Some(status) = self.pi_picker.choose(row, &mut self.delivery, &mut self.start_delivery) {
-            self.status = Some(status);
+        let then = self.pick_then.take();
+        match self.agent_picker.choose(row, &mut self.delivery, &mut self.start_delivery) {
+            Picked::Moved(status) => self.status = Some(status),
+            Picked::Copy => {}
+            Picked::Nothing => return Ok(()),
+        }
+        match then {
+            Some(then) => self.send_picked(then),
+            None => Ok(()),
         }
     }
 
     pub(super) fn draw_pi_picker(&mut self, frame: &mut Frame) {
         let area = self.viewport(frame.area());
-        let folder = pi_picker::real(&self.review_folder());
-        self.pi_picker.draw(frame, area, &self.keys, &folder, self.start_delivery.as_deref());
+        let folder = agent_picker::real(&self.review_folder());
+        self.agent_picker.draw(frame, area, &self.keys, &folder, self.start_delivery.as_deref());
     }
 }
 

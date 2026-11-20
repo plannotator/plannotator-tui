@@ -60,7 +60,7 @@ impl Screen {
             }
             Mode::Menu(cursor) => self.draw_menu(frame, *cursor),
             Mode::PickTarget => {
-                let root = crate::ui::pi_picker::real(self.root());
+                let root = self.real_root();
                 self.picker.draw(frame, area, &self.keys, &root, self.start_delivery.as_deref());
             }
             Mode::Help => self.draw_help(frame, area),

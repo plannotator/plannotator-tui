@@ -41,7 +41,7 @@ pub(crate) enum Action {
     OpenInEditor,
     PickMessage,
     QuickOpen,
-    /// Choose which running Pi session Send goes to (`docs/spec-pi-link.md`).
+    /// Choose which agent Send goes to: a Pi session or a Herdr agent (`docs/spec-pi-link.md`).
     PickTarget,
     ReviewMenu,
     ResendAll,
@@ -155,7 +155,7 @@ pub(crate) const CONFIRM_CLEAR: &[Action] = &[Yes, No, Back];
 pub(crate) const MENU: &[Action] =
     &[Down, Up, Confirm, Back, ReviewMenu, Interrupt, ResendAll, FinishReview, UndoFinish, Archive];
 pub(crate) const PICK: &[Action] = &[Down, Up, PageDown, PageUp, Top, Bottom, Confirm, Back, Quit];
-/// The Pi picker: up and down as in the message picker; `pick-target` again closes it.
+/// The agent picker: up and down as in the message picker; `pick-target` again closes it.
 pub(crate) const PICK_TARGET: &[Action] = &[Down, Up, Confirm, Back, PickTarget, Interrupt];
 pub(crate) const ARCHIVE: &[Action] = &[Down, Up, Confirm, Back, Archive, Quit, Interrupt];
 

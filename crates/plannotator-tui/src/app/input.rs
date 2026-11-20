@@ -40,10 +40,7 @@ impl App {
                     Ok(())
                 }
                 Mode::ReviewMenu => self.menu_key(*key),
-                Mode::PickTarget => {
-                    self.pick_target_key(*key);
-                    Ok(())
-                }
+                Mode::PickTarget => self.pick_target_key(*key),
                 Mode::Compose | Mode::Edit(_) => self.text_key(*key),
                 Mode::AttachImage(_) => self.image_prompt_key(*key),
             },

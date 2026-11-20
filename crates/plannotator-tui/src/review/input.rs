@@ -9,8 +9,8 @@ use ratatui::layout::{Position, Rect};
 
 use super::{Focus, Mode, Screen};
 use crate::keys::{self, Action};
+use crate::ui::agent_picker::{AgentPicker, Picked, PickerKey};
 use crate::ui::compose::{self, ComposeAction};
-use crate::ui::pi_picker::PickerKey;
 
 /// The Review menu's rows, in display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,13 +79,22 @@ impl Screen {
             Mode::PickTarget => {
                 match self.picker.key(&self.keys, &key, self.start_delivery.is_some()) {
                     PickerKey::Stay => {}
-                    PickerKey::Close => self.mode = Mode::Browse,
+                    PickerKey::Close => {
+                        self.mode = Mode::Browse;
+                        if self.pick_then.take().is_some() {
+                            self.status = Some("nothing sent".into());
+                        }
+                    }
                     PickerKey::Chose(row) => {
                         self.mode = Mode::Browse;
-                        if let Some(status) =
-                            self.picker.choose(row, &mut self.delivery, &mut self.start_delivery)
-                        {
-                            self.status = Some(status);
+                        let then = self.pick_then.take();
+                        match self.picker.choose(row, &mut self.delivery, &mut self.start_delivery) {
+                            Picked::Moved(status) => self.status = Some(status),
+                            Picked::Copy => {}
+                            Picked::Nothing => return Ok(()),
+                        }
+                        if let Some(then) = then {
+                            self.send_picked(then);
                         }
                     }
                 }
@@ -133,7 +142,8 @@ impl Screen {
             Some(Action::UndoFinish) => return self.run_menu(MenuRow::Undo),
             Some(Action::Reload) => return self.reload(),
             Some(Action::PickTarget) => {
-                self.picker = crate::ui::pi_picker::PiPicker::open(&crate::ui::pi_picker::real(self.root()));
+                self.picker = AgentPicker::open(&self.reach, &self.real_root());
+                self.pick_then = None;
                 self.mode = Mode::PickTarget;
                 return Ok(());
             }

@@ -58,7 +58,8 @@ plannotator-tui last               # your coding agent's recent replies, pick on
 
 Drag with the mouse (or `v`, move, then `Enter`) to select, then `a` 👍 · `c` 💬 · `d` ✗. `E`
 copies the feedback to the clipboard as numbered annotations (`# Annotations on plan.md`,
-`## Annotation 1 (line 12)`, …). Every annotation is saved as JSON the moment you make it; `q`
+`## Annotation 1 (line 12)`, …), or, when an agent is within reach, first asks which agent
+to send to (see [Choosing the agent](#choosing-the-agent)). Every annotation is saved as JSON the moment you make it; `q`
 closes.
 
 `I` attaches a local image to the selected note (in the notes, or the selected block's note in
@@ -95,7 +96,7 @@ dimmed. The keys also work without opening the menu.
 
 | Where | Keys |
 |---|---|
-| anywhere | `Tab` cycle tree · document · notes; `E` send; `P` choose the Pi to send to; `t` tree; `r` reload; `o` open the file in `$EDITOR`; `q` quit |
+| anywhere | `Tab` cycle tree · document · notes; `E` send; `P` choose the agent to send to; `t` tree; `r` reload; `o` open the file in `$EDITOR`; `q` quit |
 | reply review | `S` send and close |
 | gated review | `A` approve; `E` send and finish; `q` dismiss |
 | document | `j`/`k` block; `c` comment on the block; `a` looks good; `d` delete; `x` clear its annotations; `X` clear every annotation on the document, after a `y`; `v` select with `hjkl` `w` `b` `e` `0` `$`, then `a`, `c` or `d` to act on it, `y` to copy it, or `Enter` for the toolbar; `V` select whole rows; `i` move the cursor with those keys first, then `v` to select from there; `I`/`D` attach or remove an image on the block's note |
@@ -182,9 +183,9 @@ Notes appear in the rail on the right, grouped by file, and a mark in the diff s
 lines. Sent notes get a dimmer mark. `Tab` moves to the rail; `j`/`k` there moves to a
 note and the diff moves with it; `e` edits and `x` removes it.
 
-`E` sends the new notes, `S` sends them and closes, and `P` picks the Pi session to send
+`E` sends the new notes, `S` sends them and closes, and `P` picks the agent to send
 to. Sends go to the same place a document review's do (Herdr pane, Rex, Pi or the
-clipboard), and are kept in the feedback archive. `q` asks first when notes are unsent.
+clipboard, or the agent you choose when nothing named one; see [Choosing the agent](#choosing-the-agent)), and are kept in the feedback archive. `q` asks first when notes are unsent.
 `m` opens the Review menu: `R` resend all, `F` finish review, `U` undo.
 
 `r` reads the diff again after you or the agent change files. Notes follow their lines.
@@ -354,7 +355,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `open-in-editor` | `o` | edit the open file in `$VISUAL` or `$EDITOR`, then reload it |
 | `quick-open` | `ctrl+p` | find a file by name in a folder review |
 | `review-menu` | `m` | the Review menu |
-| `pick-target` | `P` | choose the Pi session Send goes to (see [Pi](#pi)) |
+| `pick-target` | `P` | choose the agent Send goes to (see [Choosing the agent](#choosing-the-agent)) |
 | `resend-all` `finish-review` `undo-finish` `archive` | `R` `F` `U` `H` | file and folder review actions |
 | `toggle-hidden` | `.` | show/hide dot-prefixed entries in the tree |
 | `edit` `remove` | `e` `x`, `Delete` | the selected note |
@@ -507,6 +508,28 @@ supported yet. The feedback travels as one argument to `hc send`, so the OS caps
 on Linux, about 1 MiB on macOS). A longer review is not sent: the review copies it instead and says
 why.
 
+## Choosing the agent
+
+`P` (`pick-target`) opens a picker of every agent Send can reach, in document and code
+reviews alike:
+
+- running Pi sessions with the [Pi extension](#pi);
+- inside Herdr, every pane with an agent (Claude, Codex, Pi and the rest), named by agent,
+  folder, state, and `workspace › tab · pane`, so two Claude panes are told apart. The
+  review's own pane is never listed.
+
+Agents in the review's folder come first, then by name; the rows do not move while the
+picker is open. The pick becomes the Send target until you change it, and the last row goes
+back to the target the review started with.
+
+Launched from an agent (a Herdr, Rex or herdr-core launcher, or `--deliver-to`), Send goes to
+that agent and `P` switches. Launched on its own, with no [delivery command](#any-other-agent-a-delivery-command),
+Send opens the picker whenever an agent is within reach, and the button says
+`Send 1 new ▸ choose agent (E)`. `Enter` sends to the agent under the cursor (the first one)
+and keeps it as the target; `Copy to clipboard`, one row up, copies this once; `Esc` sends
+nothing. With no agent within reach, Send copies as before. Rex and herdr-core agents are
+reached only through their launchers.
+
 ## Pi
 
 plannotator-tui can send a review to any running [Pi](https://github.com/earendil-works/pi)
@@ -518,10 +541,9 @@ plannotator-tui pi install   # copies it into ~/.pi/agent/extensions/
 
 Restart your Pi sessions, or run `/reload` in each one. Then:
 
-- **Send to a Pi:** press `P` (`pick-target`) to choose a session: its name, folder, and
-  whether it is busy. Sessions in the review's folder are listed first. Send (`E`) then
-  goes to that session, as a user message. A busy Pi reads it once its current work is done. The
-  last row of the picker goes back to the target the review started with.
+- **Send to a Pi:** press `P` (`pick-target`) to choose a session (see
+  [Choosing the agent](#choosing-the-agent)). Send (`E`) then goes to that session, as a
+  user message. A busy Pi reads it once its current work is done.
 - **Notes from Pi:** Pi gets a `plannotator_tui_note` tool. It quotes text from a file you
   have open, optionally with a line number, and its note shows up beside that text marked
   `pi · <session name>`. The note is sent with the rest of your review.
@@ -573,7 +595,7 @@ names it by its first word: `Send 3 new ▸ cmd · tmux (E)`.
 - **Where it sits:** a target that a Herdr, Rex or herdr-core launcher named for this review
   comes first, because it names one agent for one review. The command replaces the clipboard
   everywhere else. A gated review (`--gate`) with no launcher still gives its decision to
-  whoever ran it, and `P` can still switch Send to a Pi session.
+  whoever ran it, and `P` can still switch Send to another agent.
 
 For Pi, `plannotator-tui pi send` is already such a command (see [Pi](#pi)):
 

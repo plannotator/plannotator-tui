@@ -67,6 +67,11 @@ pub(crate) trait Delivery {
     fn is_agent(&self) -> bool {
         false
     }
+    /// True for the clipboard a review falls back to when nothing names a target. Send then
+    /// offers the agents it can reach before copying (`ui::agent_picker`).
+    fn is_fallback(&self) -> bool {
+        false
+    }
     /// The receiving agent's host label (`claude`, `codex`, ...), when the target is one.
     fn agent_host(&self) -> Option<&str> {
         None
@@ -96,6 +101,10 @@ pub(crate) struct Clipboard;
 impl Delivery for Clipboard {
     fn describe(&self) -> String {
         "clipboard".to_owned()
+    }
+
+    fn is_fallback(&self) -> bool {
+        true
     }
 
     fn deliver(&self, feedback: &str) -> Result<(), DeliveryError> {

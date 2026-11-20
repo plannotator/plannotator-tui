@@ -75,7 +75,7 @@ enum Mode {
     Archive,
     /// The header's Review menu is open over a file or folder review.
     ReviewMenu,
-    /// Choosing which running Pi session Send goes to.
+    /// Choosing which agent Send goes to: a Pi session, or an agent in a Herdr pane.
     PickTarget,
 }
 
@@ -172,11 +172,15 @@ pub(crate) struct App {
     /// `t` toggles; `None` means "automatic by width".
     tree_visible: Option<bool>,
     delivery: Box<dyn Delivery>,
-    /// The target the review started with, while Send goes to a Pi picked instead.
+    /// The target the review started with, while Send goes to an agent picked instead.
     start_delivery: Option<Box<dyn Delivery>>,
     /// This review's registry entry and note listener, in an interactive review.
     pi_link: Option<crate::pi::link::Link>,
-    pi_picker: pi_target::PiPicker,
+    agent_picker: pi_target::AgentPicker,
+    /// Where the picker looks for agents, and whether Send asks which one first.
+    reach: crate::ui::agent_picker::Reach,
+    /// What to send once the picker that Send opened has a choice.
+    pick_then: Option<send::PickThen>,
     send_state: SendState,
     /// What ending the review means; `Gate::Off` unless `--gate` or `--json` asked for a
     /// decision.
@@ -279,7 +283,9 @@ impl App {
             delivery,
             start_delivery: None,
             pi_link: None,
-            pi_picker: pi_target::PiPicker::default(),
+            agent_picker: pi_target::AgentPicker::default(),
+            reach: crate::ui::agent_picker::Reach::default(),
+            pick_then: None,
             send_state,
             gate: Gate::Off,
             decision: None,
