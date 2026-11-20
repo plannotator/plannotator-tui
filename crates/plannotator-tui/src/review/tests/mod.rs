@@ -6,6 +6,7 @@ mod notes_flow;
 mod pi_notes;
 #[cfg(unix)]
 mod pull_flow;
+mod rex_picker;
 mod send_flow;
 
 use std::cell::{Cell, RefCell};

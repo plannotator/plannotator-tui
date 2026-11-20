@@ -169,6 +169,7 @@ fn a_code_review_with_no_target_asks_which_agent_like_a_document_review() {
     let finder = AgentFinder {
         pi_root: Some(fixture.dir.join("registry")),
         herdr: Some(HerdrAgents { bin, own_pane: Some("w1:p9".into()) }),
+        rex: None,
         ask_on_send: true,
     };
     screen.reach = Reach::start_with(finder, root.clone());

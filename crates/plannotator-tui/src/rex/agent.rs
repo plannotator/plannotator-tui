@@ -51,6 +51,12 @@ impl RexAgent {
         let submit = env(SUBMIT_VAR).as_deref() != Some("0");
         Some(Self { rex, block, agent: non_empty(AGENT_VAR), pid, submit, notice: RefCell::default() })
     }
+
+    /// The agent `agent` (its host label), process `pid`, that the agent picker found in
+    /// `block`. A send presses Enter, as a launcher's target does.
+    pub(crate) fn picked(rex: Rex, block: String, agent: String, pid: u32) -> Self {
+        Self { rex, block, agent: Some(agent), pid, submit: true, notice: RefCell::default() }
+    }
 }
 
 impl Delivery for RexAgent {

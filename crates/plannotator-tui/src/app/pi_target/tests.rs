@@ -156,6 +156,7 @@ mod in_herdr {
         let finder = AgentFinder {
             pi_root: Some(root.join("registry")),
             herdr: Some(HerdrAgents { bin, own_pane: Some("w1:p9".into()) }),
+            rex: None,
             ask_on_send: true,
         };
         app.reach = Reach::start_with(finder, folder.clone());

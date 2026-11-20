@@ -133,8 +133,12 @@ fn the_picker_send_opens_offers_copy_first_with_the_cursor_on_the_first_agent() 
 
 #[test]
 fn only_a_fallback_clipboard_in_an_interactive_review_asks() {
-    let none =
-        AgentFinder { pi_root: Some(PathBuf::from("/nowhere/registry")), herdr: None, ask_on_send: true };
+    let none = AgentFinder {
+        pi_root: Some(PathBuf::from("/nowhere/registry")),
+        herdr: None,
+        rex: None,
+        ask_on_send: true,
+    };
     let reach = Reach { finder: none, found: Arc::new(AtomicBool::new(true)) };
     assert!(reach.asks(&Clipboard));
     assert!(!reach.asks(&crate::delivery::Caller));
@@ -215,4 +219,21 @@ fn rows_name_the_agent_its_folder_state_and_where_it_runs() {
     let text = render(&p, Some(moved.as_ref()), 90, 12);
     proof("p-picker-after-pick.txt", &text);
     assert!(text.contains("back to clipboard"), "{text}");
+}
+
+#[test]
+fn a_folder_too_long_for_the_pane_keeps_its_end() {
+    assert_eq!(keep_end("/Users/me/work/web", 30), "/Users/me/work/web");
+    assert_eq!(keep_end("/Users/me/work/web", 8), "…ork/web");
+    assert_eq!(keep_end("/Users/me/work/web", 8).width(), 8);
+    // Rows that do not fit shorten the folders, so the state and the place stay on screen.
+    let mut agents = mixed();
+    order(&mut agents, Path::new("/nowhere/repo"));
+    let p = AgentPicker { agents, cursor: 0, copy_row: false };
+    let text = render(&p, None, 54, 12);
+    proof("p-picker-narrow.txt", &text);
+    assert!(text.lines().any(|l| l.contains("…ere/web  idle     web › main · w2:p1")), "{text}");
+    // Still too wide: the names give way next, never the place.
+    assert_eq!(keep_start("claude · Fix login redirect", 12), "claude · Fi…");
+    assert_eq!(keep_start("claude", 12), "claude");
 }
