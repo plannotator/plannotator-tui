@@ -5,7 +5,6 @@
 #![allow(clippy::expect_used, clippy::panic, reason = "tests assert by panicking")]
 #![allow(clippy::print_stderr, reason = "a skipped test says why")]
 
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -95,8 +94,7 @@ impl World {
             log = self.dir.join("gh.log").display(),
             view = self.dir.join("view.json").display(),
         );
-        std::fs::write(&script, body).expect("gh script");
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        crate::test_support::write_script(&script, &body);
         Gh::at(script)
     }
 

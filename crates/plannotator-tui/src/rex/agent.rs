@@ -219,7 +219,6 @@ mod tests {
     /// nothing, and `enter-fails` makes `send-key` fail.
     #[cfg(unix)]
     fn fake_rex(tag: &str) -> std::path::PathBuf {
-        use std::os::unix::fs::PermissionsExt as _;
         let dir = std::env::temp_dir().join(format!("plannotator-tui-rex-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         let script = format!(
@@ -236,8 +235,7 @@ esac
 "#,
             dir = dir.display()
         );
-        std::fs::write(dir.join("rex"), script).expect("write rex");
-        std::fs::set_permissions(dir.join("rex"), std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        crate::test_support::write_script(&dir.join("rex"), &script);
         dir
     }
 
@@ -289,7 +287,8 @@ esac
         let dir = fake_rex("silent");
         std::fs::write(dir.join("silent"), "").expect("flag");
         let target = sender(&dir, "42");
-        assert!(matches!(target.deliver("notes"), Err(DeliveryError::Unavailable(_))));
+        let refused = target.deliver("notes");
+        assert!(matches!(refused, Err(DeliveryError::Unavailable(_))), "{refused:?}");
         assert_eq!(pastes(&dir), 0);
         let paste = sender_with(&dir, "42", &[(SUBMIT_VAR, "0")]);
         paste.deliver("notes").expect("a paste leaves Enter to you");

@@ -348,7 +348,6 @@ pub(crate) fn fixture_agents(own_block: Option<&str>) -> Vec<BlockAgent> {
 #[cfg(all(test, unix))]
 #[allow(clippy::expect_used, reason = "test fixtures assert by panicking")]
 pub(crate) fn fake_rex(dir: &std::path::Path) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt as _;
     let _ = std::fs::remove_dir_all(dir);
     std::fs::create_dir_all(dir).expect("fake rex dir");
     for entry in std::fs::read_dir(fixture_dir()).expect("fixtures") {
@@ -373,8 +372,7 @@ esac
         d = dir.display()
     );
     let bin = dir.join("rex");
-    std::fs::write(&bin, script).expect("script");
-    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    crate::test_support::write_script(&bin, &script);
     bin
 }
 
