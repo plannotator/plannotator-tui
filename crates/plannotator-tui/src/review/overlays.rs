@@ -79,6 +79,7 @@ impl Screen {
                 "anywhere",
                 vec![
                     (key(&[Action::CycleFocus]), "diff / notes"),
+                    (key(&[Action::ToggleNotes]), "hide the notes, or show them again"),
                     (key(&[Action::Send]), "send new and edited notes"),
                     (key(&[Action::SendAndClose]), "send and close"),
                     (key(&[Action::ChangeComment]), "comment on the whole change"),

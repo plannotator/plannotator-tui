@@ -142,6 +142,10 @@ impl App {
                 self.reopen_picker();
                 return Ok(());
             }
+            Some(Action::ToggleNotes) => {
+                self.toggle_notes();
+                return Ok(());
+            }
             _ => {}
         }
         match self.focus {
@@ -202,7 +206,11 @@ impl App {
         let has_tree = self.tree.is_some();
         let has_rail = !self.open.store.placed().is_empty();
         self.focus = match self.focus {
-            Focus::Document if has_rail => Focus::Rail,
+            // Moving to the notes shows them again when `toggle-notes` hid them.
+            Focus::Document if has_rail => {
+                self.reveal_notes();
+                Focus::Rail
+            }
             Focus::Document | Focus::Rail if has_tree => Focus::Tree,
             Focus::Tree | Focus::Document | Focus::Rail => Focus::Document,
         };

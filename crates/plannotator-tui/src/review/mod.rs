@@ -51,6 +51,7 @@ use ratatui::style::Style;
 
 use crate::delivery::Delivery;
 use crate::keys::Keymap;
+use crate::notes_rail::{NotesRail, RailStart};
 use crate::theme::palette;
 use crate::ui::agent_picker::{AgentPicker, Reach};
 use crate::ui::compose::Compose;
@@ -138,6 +139,8 @@ pub(crate) struct Screen {
     rail_cursor: usize,
     /// First rail row drawn.
     rail_scroll: usize,
+    /// Whether the rail shows: `[ui] notes_rail`, the last session's choice, `toggle-notes`.
+    notes_rail: NotesRail,
     compose: Compose,
     send_state: SendState,
     /// Notes the last finish archived, for undo.
@@ -201,6 +204,7 @@ impl Screen {
             focus: Focus::Diff,
             rail_cursor: 0,
             rail_scroll: 0,
+            notes_rail: NotesRail::default(),
             compose: Compose::default(),
             send_state: SendState::Ready,
             undo: Vec::new(),
@@ -221,6 +225,39 @@ impl Screen {
     pub(crate) fn set_keys(&mut self, keys: Keymap, shift_enter: bool) {
         self.keys = keys;
         self.shift_enter = shift_enter;
+    }
+
+    /// Start the notes rail as the last session left it, else as `[ui] notes_rail` says.
+    pub(crate) fn start_notes_rail(&mut self, start: RailStart) {
+        self.notes_rail = NotesRail::load(start, &self.data_dir);
+    }
+
+    /// Whether the rail is shown, width allowing. Hidden, notes keep their gutter marks.
+    fn rail_shown(&self) -> bool {
+        self.notes_rail.shown(!self.store.annotations().is_empty())
+    }
+
+    /// `toggle-notes`: close the rail, or open it again, and remember which. The next frame
+    /// gives the diff the rail's columns, or takes them back, and the viewer reflows as on a
+    /// resize.
+    fn toggle_notes(&mut self) {
+        let remembered = self.notes_rail.toggle(!self.store.annotations().is_empty(), &self.data_dir);
+        self.after_rail_change(remembered);
+    }
+
+    /// Moving the focus to the notes opens a closed rail.
+    fn reveal_notes(&mut self) {
+        let remembered = self.notes_rail.reveal(!self.store.annotations().is_empty(), &self.data_dir);
+        self.after_rail_change(remembered);
+    }
+
+    fn after_rail_change(&mut self, remembered: Result<()>) {
+        if let Err(error) = remembered {
+            self.status = Some(format!("{error:#}"));
+        }
+        if !self.rail_shown() && self.focus == Focus::Notes {
+            self.focus = Focus::Diff;
+        }
     }
 
     pub(crate) fn enable_clipboard(&mut self) {

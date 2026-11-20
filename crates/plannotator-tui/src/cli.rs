@@ -66,11 +66,13 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes|opencode|cmd|agy] [--pid N] [--session <transcript>]
                        [--session-id <id>] [--stdin] [--print] [--pick N] [--newest]";
 
-/// Width the document gets when nothing else is known: gutter + rail + gap subtracted, then
-/// held to the reading column `cap` (`[ui] doc_width`; zero for none), so the first frame
-/// finds the text already wrapped to it.
-fn doc_width(cols: u16, cap: u16) -> usize {
-    let room = cols.saturating_sub(2 + 1 + 36).max(20);
+/// Width the document gets when nothing else is known: the gutter subtracted, and the rail
+/// and its gap when `[ui] notes_rail` always shows it, then held to the reading column
+/// (`[ui] doc_width`; zero for none), so the first frame finds the text already wrapped to it.
+fn doc_width(cols: u16, ui: &crate::config::UiConfig) -> usize {
+    let rail = if ui.notes_rail == crate::notes_rail::RailStart::Shown { 1 + 36 } else { 0 };
+    let room = cols.saturating_sub(2 + rail).max(20);
+    let cap = ui.doc_width;
     usize::from(if cap > 0 { room.min(cap.max(20)) } else { room })
 }
 
@@ -573,11 +575,12 @@ pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
 /// `run_ui`, returning how a gated review ended; `None` for an ordinary one.
 fn run_review(build: impl FnOnce(usize) -> Result<App>) -> Result<Option<Decision>> {
     with_terminal(|terminal, session| {
-        let width = doc_width(terminal.size().map_or(120, |s| s.width), session.config.ui.doc_width);
+        let width = doc_width(terminal.size().map_or(120, |s| s.width), &session.config.ui);
         let mut app = build(width)?;
         app.shift_enter = session.shift_enter;
         app.keys = session.config.keys;
         app.ui = session.config.ui;
+        app.start_notes_rail();
         app.editor = crate::editor::from_env(|key| std::env::var(key).ok());
         event_loop(terminal, app)
     })
@@ -762,7 +765,7 @@ fn snapshot(
     use ratatui::backend::TestBackend;
     use ratatui::style::Modifier;
     let mut terminal = ratatui::Terminal::new(TestBackend::new(cols, rows))?;
-    let mut app = open_app(path, doc_width(cols, crate::config::UiConfig::default().doc_width), false)?;
+    let mut app = open_app(path, doc_width(cols, &crate::config::UiConfig::default()), false)?;
     terminal.draw(|frame| app.draw(frame))?;
     app.scroll_for_snapshot(scroll);
     if let Some(quote) = select {
@@ -808,7 +811,9 @@ fn snapshot(
 #[cfg(test)]
 #[allow(clippy::expect_used, reason = "tests assert by panicking")]
 mod tests {
-    use super::last_options;
+    use super::{doc_width, last_options};
+    use crate::config::UiConfig;
+    use crate::notes_rail::RailStart;
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|&arg| arg.to_owned()).collect()
@@ -818,5 +823,14 @@ mod tests {
     fn last_offers_the_configured_count_and_pick_overrides_it() {
         assert_eq!(last_options(&args(&["--newest"]), 60).expect("parses").pick, 60);
         assert_eq!(last_options(&args(&["--pick", "5"]), 60).expect("parses").pick, 5);
+    }
+
+    #[test]
+    fn the_first_frames_width_leaves_out_a_rail_unless_it_always_shows() {
+        let fill = UiConfig { doc_width: 0, ..UiConfig::default() };
+        assert_eq!(doc_width(120, &UiConfig { notes_rail: RailStart::Shown, ..fill }), 120 - 2 - 1 - 36);
+        assert_eq!(doc_width(120, &UiConfig { notes_rail: RailStart::Hidden, ..fill }), 118);
+        assert_eq!(doc_width(120, &fill), 118, "when-notes: the rail comes with the first note");
+        assert_eq!(doc_width(120, &UiConfig::default()), 80);
     }
 }

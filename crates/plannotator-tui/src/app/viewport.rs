@@ -2,7 +2,8 @@
 
 use ratatui::layout::Rect;
 
-use super::App;
+use super::{App, Focus};
+use crate::notes_rail::NotesRail;
 
 /// Columns `narrow-column` and `widen-column` move the reading column by.
 const COLUMN_STEP: u16 = 8;
@@ -40,6 +41,45 @@ impl App {
         };
         self.ui.doc_width = next;
         self.status = Some(format!("reading column {next} wide"));
+    }
+
+    /// Start the notes rail as the last session left it, else as `[ui] notes_rail` says.
+    pub(crate) fn start_notes_rail(&mut self) {
+        self.notes_rail = NotesRail::load(self.ui.notes_rail, &self.data_dir);
+    }
+
+    /// Whether the open document has a note the rail would show: orphans have no place there.
+    fn has_notes(&self) -> bool {
+        self.open.store.len() > self.open.store.orphans()
+    }
+
+    /// Whether the notes rail is shown, width allowing. Hidden, its notes keep their marks in
+    /// the text; only the bubbles go, and the text takes their columns.
+    pub(super) fn rail_shown(&self) -> bool {
+        self.notes_rail.shown(self.has_notes())
+    }
+
+    /// `toggle-notes`: close the notes rail, or open it again, and remember which. Only the
+    /// state changes here; the next frame finds the text column wider or narrower and lays the
+    /// text out again, the way a resize does.
+    pub(super) fn toggle_notes(&mut self) {
+        let remembered = self.notes_rail.toggle(self.has_notes(), &self.data_dir);
+        self.after_rail_change(remembered);
+    }
+
+    /// Moving the focus to the notes opens a closed rail.
+    pub(super) fn reveal_notes(&mut self) {
+        let remembered = self.notes_rail.reveal(self.has_notes(), &self.data_dir);
+        self.after_rail_change(remembered);
+    }
+
+    fn after_rail_change(&mut self, remembered: anyhow::Result<()>) {
+        if let Err(error) = remembered {
+            self.status = Some(format!("{error:#}"));
+        }
+        if !self.rail_shown() && self.focus == Focus::Rail {
+            self.focus = Focus::Document;
+        }
     }
 }
 

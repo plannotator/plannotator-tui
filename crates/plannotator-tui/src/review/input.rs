@@ -129,7 +129,9 @@ impl Screen {
             }
             Some(Action::CycleFocus) => {
                 self.focus = match self.focus {
+                    // Moving to the notes shows them again when `toggle-notes` hid them.
                     Focus::Diff if !self.store.annotations().is_empty() => {
+                        self.reveal_notes();
                         self.show_selected_note();
                         Focus::Notes
                     }
@@ -162,6 +164,10 @@ impl Screen {
             }
             Some(Action::Help) => {
                 self.mode = Mode::Help;
+                return Ok(());
+            }
+            Some(Action::ToggleNotes) => {
+                self.toggle_notes();
                 return Ok(());
             }
             _ => {}
