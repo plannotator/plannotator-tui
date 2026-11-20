@@ -15,8 +15,11 @@
 
 use anyhow::Result;
 use diffs_rs::engine::Command;
-use plannotator_tui_review::{Capture, MAX_WHOLE_FILE_BYTES, NoteScope, Side, SideSource, WholeFile};
+use plannotator_tui_review::{
+    Capture, FileStatus, MAX_WHOLE_FILE_BYTES, NoteScope, Side, SideSource, WholeFile,
+};
 use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -70,6 +73,16 @@ pub(super) struct Whole {
     opened_on: String,
     /// The line to put the cursor on once the engine has the file.
     reveal: Option<u32>,
+    /// What the file heading says in place of the engine's `Modified +0 −0`: the file's
+    /// status and counts in the diff, or that the diff does not have it.
+    summary: Summary,
+}
+
+/// The file heading's right-hand summary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Summary {
+    status: &'static str,
+    counts: Option<(u32, u32)>,
 }
 
 impl std::fmt::Debug for Whole {
@@ -116,7 +129,19 @@ impl Whole {
             View::Shown { content, .. } => reveal.map(|line| line.clamp(1, line_count(content))),
             View::Message(_) => None,
         };
-        Self { path: path.to_owned(), version, view, opened_on: path.to_owned(), reveal }
+        let summary = match file {
+            Some(file) => Summary {
+                status: match file.status {
+                    FileStatus::Added => "Added",
+                    FileStatus::Deleted => "Deleted",
+                    FileStatus::Modified => "Modified",
+                    FileStatus::Renamed => "Renamed",
+                },
+                counts: Some((file.additions, file.deletions)),
+            },
+            None => Summary { status: "Not in the diff", counts: None },
+        };
+        Self { path: path.to_owned(), version, view, opened_on: path.to_owned(), reveal, summary }
     }
 
     fn diff(&self) -> Option<&Diff> {
@@ -203,13 +228,71 @@ impl Whole {
 
     pub(super) fn draw(&mut self, frame: &mut Frame, area: Rect) -> Result<()> {
         match &mut self.view {
-            View::Shown { diff, .. } => diff.draw(frame, area),
+            View::Shown { diff, .. } => {
+                diff.draw(frame, area)?;
+                relabel(frame.buffer_mut(), area, &self.summary);
+                Ok(())
+            }
             View::Message(text) => {
                 let lines = vec![Line::default(), Line::from(Span::raw(format!(" {text}")))];
                 frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
                 Ok(())
             }
         }
+    }
+}
+
+/// What diffs-rs writes at the right of the file heading for the made-up patch: the lines
+/// are all unchanged, so `Modified` with no additions or deletions.
+const ENGINE_SUMMARY: &str = " Modified   +0 \u{2212}0 ";
+
+/// Write the file's own status and counts over the engine's summary on the heading row (the
+/// view's first row: the heading, or the engine's sticky copy of it once scrolled). The new
+/// text ends where the engine's did and keeps its background; diffs-rs has no option to
+/// set the heading's text.
+fn relabel(buf: &mut Buffer, area: Rect, summary: &Summary) {
+    let pattern: Vec<char> = ENGINE_SUMMARY.chars().collect();
+    let width = pattern.len() as u16;
+    let y = area.y;
+    let symbol = |buf: &Buffer, x: u16| buf.cell((x, y)).map(|c| c.symbol().to_owned()).unwrap_or_default();
+    let Some(start) = (area.x..area.right().saturating_sub(width).saturating_add(1))
+        .rev()
+        .find(|&x| pattern.iter().enumerate().all(|(i, ch)| symbol(buf, x + i as u16) == ch.to_string()))
+    else {
+        return;
+    };
+    let end = start + width;
+    let style_at =
+        |buf: &Buffer, x: u16| buf.cell((x, y)).map(ratatui::buffer::Cell::style).unwrap_or_default();
+    let dim = style_at(buf, start);
+    let status_fg = match summary.status {
+        "Added" => Some(palette().looks_good),
+        "Deleted" => Some(palette().delete),
+        "Not in the diff" => None,
+        // The engine's own colour for a modified file; a rename gets it too.
+        _ => style_at(buf, start + 1).fg,
+    };
+    let mut spans =
+        vec![(" ".to_owned(), dim), (summary.status.to_owned(), status_fg.map_or(dim, |fg| dim.fg(fg)))];
+    if let Some((added, removed)) = summary.counts {
+        let count = |n: u32, fg: Color| if n == 0 { dim } else { dim.fg(fg) };
+        spans.push(("   ".to_owned(), dim));
+        spans.push((format!("+{added}"), count(added, palette().looks_good)));
+        spans.push((" ".to_owned(), dim));
+        spans.push((format!("\u{2212}{removed}"), count(removed, palette().delete)));
+    }
+    spans.push((" ".to_owned(), dim));
+    let text_width: u16 = spans.iter().map(|(t, _)| t.chars().count() as u16).sum();
+    let from = end.saturating_sub(text_width).max(area.x);
+    for x in start.min(from)..end {
+        if let Some(cell) = buf.cell_mut((x, y)) {
+            cell.set_symbol(" ").set_style(dim);
+        }
+    }
+    let mut x = from;
+    for (text, style) in spans {
+        let (next, _) = buf.set_stringn(x, y, &text, usize::from(end.saturating_sub(x)), style);
+        x = next;
     }
 }
 
