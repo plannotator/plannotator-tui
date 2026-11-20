@@ -184,6 +184,7 @@ fn a_pr_review_with_no_target_asks_which_agent_and_sends_the_pr_feedback() {
     let finder = AgentFinder {
         pi_root: Some(pull.dir.join("registry")),
         herdr: Some(HerdrAgents { bin, own_pane: Some("w1:p9".into()) }),
+        rex: None,
         ask_on_send: true,
     };
     screen.reach = Reach::start_with(finder, root.clone());
@@ -205,4 +206,56 @@ fn a_pr_review_with_no_target_asks_which_agent_and_sends_the_pr_feedback() {
     assert!(prompts.contains("# PR Review: o/app#7") && prompts.contains("name the total"), "{prompts}");
     assert_eq!(screen.status.as_deref(), Some("sent 1 note(s) → claude in w1:p2"));
     assert_eq!(copy.copied.borrow().len(), 0);
+}
+
+#[test]
+fn a_pr_review_from_one_rex_agent_can_go_to_another_picked_in_rex() {
+    use crate::review::Mode;
+    use crate::rex::agent::RexAgent;
+    use crate::rex::agents::{FIXTURE_OWN_BLOCK, FIXTURE_SESSION, RexAgents, fake_rex};
+    use crate::rex::command::Rex;
+    use crate::ui::agent_picker::{AgentFinder, Reach};
+    let pull = Pull::new("rex-picker");
+    let mut screen = pull.open();
+    let fake = pull.dir.join("fake rex");
+    let bin = fake_rex(&fake);
+    // As `rex review 7` opens it beside the Claude in the fixtures' `work › api`.
+    let claude = "block:01a1f658-997c-79c0-ae26-1bf77b9ba798".to_owned();
+    let rex = Rex::new(bin.clone(), FIXTURE_SESSION.into());
+    screen.delivery = Box::new(RexAgent::picked(rex, claude, "claude".into(), 94903));
+    let root = screen.real_root();
+    let finder = AgentFinder {
+        pi_root: Some(pull.dir.join("registry")),
+        herdr: None,
+        rex: Some(RexAgents {
+            bin,
+            session: FIXTURE_SESSION.into(),
+            own_block: Some(FIXTURE_OWN_BLOCK.into()),
+        }),
+        ask_on_send: true,
+    };
+    screen.reach = Reach::start_with(finder, root.clone());
+    screen.reach.find(&root);
+    at(&mut screen, 9);
+    keys(&mut screen, "c");
+    type_and_save(&mut screen, "name the total");
+    assert!(screen.send_label().contains("▸ claude in 9ba798"), "{}", screen.send_label());
+
+    keys(&mut screen, "P");
+    assert_eq!(screen.mode, Mode::PickTarget);
+    let rows = frame(&mut screen, 120, 40);
+    if let Some(dir) = std::env::var_os("REX_PICKER_PROOF_DIR") {
+        std::fs::create_dir_all(&dir).expect("proof dir");
+        std::fs::write(PathBuf::from(dir).join("pr-review-p-from-claude.txt"), rows.join("\n"))
+            .expect("proof");
+    }
+    assert!(rows[0].starts_with(" PR #7 · feat: greet from argv"), "{}", rows[0]);
+    assert!(row_with(&rows, "work › api · 31496a").contains("codex"));
+    keys(&mut screen, "j");
+    press(&mut screen, KeyCode::Enter);
+    keys(&mut screen, "E");
+    let pastes = read(&fake.join("pastes"));
+    assert!(pastes.contains("block:01a1f658-99b3-7134-b64a-0b9d9d31496a"), "{pastes}");
+    assert!(pastes.contains("# PR Review: o/app#7") && pastes.contains("name the total"), "{pastes}");
+    assert_eq!(screen.status.as_deref(), Some("sent 1 note(s) → codex in 31496a"));
 }
