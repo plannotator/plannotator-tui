@@ -65,7 +65,10 @@ impl Diff {
             chrome: false,
             ..Options::default()
         };
-        let engine = Engine::open(input(capture)?, options, wake).context("opening the diff viewer")?;
+        let mut engine = Engine::open(input(capture)?, options, wake).context("opening the diff viewer")?;
+        // Draw on the terminal's own background and text colour, as the document screen does;
+        // the changed-line tints come from the light or dark palette picked above.
+        engine.set_terminal_background(true)?;
         Ok(Self { engine, paths: Vec::new(), fixed: None })
     }
 
@@ -79,7 +82,9 @@ impl Diff {
             ..Options::default()
         };
         let input = input_bytes(bytes, name.to_owned())?;
-        let engine = Engine::open(input, options, wake).context("opening the whole-file view")?;
+        let mut engine = Engine::open(input, options, wake).context("opening the whole-file view")?;
+        // The same terminal background as the diff, so both views match.
+        engine.set_terminal_background(true)?;
         Ok(Self { engine, paths: Vec::new(), fixed: Some(name.to_owned()) })
     }
 
