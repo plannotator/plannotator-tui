@@ -10,6 +10,8 @@ use std::process::{Command, Output, Stdio};
 
 use serde_json::Value;
 
+mod support;
+
 fn temp_root(tag: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!("plannotator rex hc review {tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
@@ -44,10 +46,7 @@ esac
 "#;
     let app = "#!/bin/sh\nprintf 'herdr-app %s\\n' \"$*\" >> \"$FAKE_LOG\"\n";
     for (name, text) in [("rex", rex), ("hc", hc), ("herdr-app", app)] {
-        let path = dir.join(name);
-        std::fs::write(&path, text).expect("write fake");
-        let executable = std::os::unix::fs::PermissionsExt::from_mode(0o755);
-        std::fs::set_permissions(&path, executable).expect("make fake executable");
+        support::write_script(&dir.join(name), text);
     }
     dir
 }

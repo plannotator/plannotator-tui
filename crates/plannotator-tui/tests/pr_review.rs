@@ -6,11 +6,12 @@
 #![cfg(unix)]
 #![allow(clippy::expect_used, clippy::indexing_slicing, reason = "tests assert by panicking")]
 
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use serde_json::{Value, json};
+
+mod support;
 
 const URL: &str = "https://github.com/o/app";
 
@@ -62,8 +63,7 @@ fn world(root: &Path) -> PathBuf {
         root.join("gh.log").display(),
         root.join("view.json").display()
     );
-    std::fs::write(fake.join("gh"), script).expect("gh");
-    std::fs::set_permissions(fake.join("gh"), std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    support::write_script(&fake.join("gh"), &script);
     // Git config every run of the binary reads: GitHub is the bare repository.
     let config = format!("[url \"{}\"]\n\tinsteadOf = {URL}.git\n", root.join("upstream.git").display());
     std::fs::write(root.join("gitconfig"), config).expect("gitconfig");
@@ -232,8 +232,7 @@ esac
         log = log.display(),
         cwd = clone.display()
     );
-    std::fs::write(dir.join("rex"), script).expect("rex");
-    std::fs::set_permissions(dir.join("rex"), std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    support::write_script(&dir.join("rex"), &script);
     dir
 }
 
