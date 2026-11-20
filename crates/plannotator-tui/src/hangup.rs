@@ -58,16 +58,18 @@ mod tests {
     use std::os::unix::net::UnixStream;
 
     use rustix::fs::{Mode, OFlags};
-    use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
+    use rustix::pty::{grantpt, ptsname, unlockpt};
 
     use super::*;
 
     /// A pseudo-terminal: the controller a multiplexer holds, and the terminal an app holds.
     fn pty() -> (OwnedFd, OwnedFd) {
-        let controller = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).expect("openpt");
-        // Close-on-exec, so a child another test spawns meanwhile cannot hold the controller
-        // open and keep the hang-up from happening.
-        rustix::io::fcntl_setfd(&controller, rustix::io::FdFlags::CLOEXEC).expect("cloexec");
+        // `/dev/ptmx` rather than `openpt`, which cannot open close-on-exec on macOS. Setting it
+        // afterwards leaves a moment in which a child that another test spawns inherits the
+        // controller and holds off the hang-up for as long as it runs.
+        let controller =
+            rustix::fs::open(c"/dev/ptmx", OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC, Mode::empty())
+                .expect("open /dev/ptmx");
         grantpt(&controller).expect("grantpt");
         unlockpt(&controller).expect("unlockpt");
         let name = ptsname(&controller, Vec::new()).expect("ptsname");
@@ -82,8 +84,8 @@ mod tests {
         let (controller, tty) = pty();
         assert!(!hung_up(tty.as_fd()));
         drop(controller);
-        // A child that another test spawned in the moment before close-on-exec was set can
-        // still hold the controller; the hang-up follows once it exits.
+        // A child that another test is forking holds the controller until it execs; the
+        // hang-up follows then.
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while !hung_up(tty.as_fd()) && std::time::Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
