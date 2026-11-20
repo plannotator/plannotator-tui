@@ -44,10 +44,9 @@ fn entry(root: &Path, port: u16, token: &str) -> PiEntry {
     pi_entries(root).into_iter().next().expect("parsed")
 }
 
-/// A port nothing listens on: bound, then released.
-fn closed_port() -> u16 {
-    TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind").local_addr().expect("addr").port()
-}
+/// A port nothing listens on. It lies below every ephemeral range, so no `bind(0)` in a test
+/// running alongside is handed it, as it could be a port bound here and released.
+const CLOSED_PORT: u16 = 1;
 
 #[test]
 fn the_root_is_the_override_or_sessions_in_the_data_dir() {
@@ -125,7 +124,7 @@ fn a_rewritten_entry_is_read_again_after_a_bad_token() {
 #[test]
 fn a_closed_session_is_gone_and_its_entry_removed() {
     let root = temp_root("gone");
-    let session = entry(&root, closed_port(), "t");
+    let session = entry(&root, CLOSED_PORT, "t");
     assert!(matches!(send(&session, "hi"), Err(SendError::Gone)));
     assert!(!session.path.exists());
     std::fs::remove_dir_all(root).expect("cleanup");
@@ -152,7 +151,7 @@ fn live_sessions_keep_answering_ones_with_fresh_state_and_drop_closed_ones() {
     let dead = root.join("pi").join("s2-43.json");
     write_entry(
         &dead,
-        &json!({"v": 1, "host": "pi", "id": "s2", "pid": 43, "cwd": "/w", "port": closed_port(), "token": "t"}),
+        &json!({"v": 1, "host": "pi", "id": "s2", "pid": 43, "cwd": "/w", "port": CLOSED_PORT, "token": "t"}),
     )
     .expect("dead");
     let live = live_pi_sessions(&root);
