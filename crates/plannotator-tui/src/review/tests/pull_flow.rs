@@ -187,7 +187,7 @@ fn a_pr_review_with_no_target_asks_which_agent_and_sends_the_pr_feedback() {
         rex: None,
         ask_on_send: true,
     };
-    screen.reach = Reach::start_with(finder, root.clone());
+    screen.reach = Reach::start_with(finder, root.clone(), None);
     screen.reach.find(&root);
     at(&mut screen, 9);
     keys(&mut screen, "c");
@@ -234,7 +234,7 @@ fn a_pr_review_from_one_rex_agent_can_go_to_another_picked_in_rex() {
         }),
         ask_on_send: true,
     };
-    screen.reach = Reach::start_with(finder, root.clone());
+    screen.reach = Reach::start_with(finder, root.clone(), None);
     screen.reach.find(&root);
     at(&mut screen, 9);
     keys(&mut screen, "c");

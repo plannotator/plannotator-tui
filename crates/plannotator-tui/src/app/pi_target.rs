@@ -18,6 +18,8 @@ use crate::ui::agent_picker::{self, Picked, PickerKey, Reach};
 #[cfg(all(test, unix))]
 mod blocked_tests;
 #[cfg(all(test, unix))]
+mod first_look_tests;
+#[cfg(all(test, unix))]
 mod rex_tests;
 #[cfg(test)]
 mod tests;
@@ -29,7 +31,8 @@ impl App {
     pub(crate) fn start_pi_link(&mut self) {
         let cwd = agent_picker::real(&self.review_folder());
         self.pi_link = Link::start(&pi::root(), cwd.clone(), self.pi_files()).ok();
-        self.reach = Reach::start(cwd);
+        // The document loop cannot be woken; it checks often while the look runs.
+        self.reach = Reach::start(cwd, None);
     }
 
     /// The folder this review is about: the tree's root, the file's folder, or the cwd.

@@ -49,7 +49,7 @@ fn in_rex(tag: &str) -> (PathBuf, App, PathBuf) {
         }),
         ask_on_send: true,
     };
-    app.reach = Reach::start_with(finder, folder.clone());
+    app.reach = Reach::start_with(finder, folder.clone(), None);
     app.reach.find(&folder);
     (root, app, fake)
 }

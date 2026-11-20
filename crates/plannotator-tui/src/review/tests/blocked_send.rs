@@ -18,7 +18,7 @@ fn screen_with(fixture: &Fixture, finder: AgentFinder) -> Screen {
     screen.delivery = Box::new(Clipboard);
     screen.clipboard = true;
     let root = screen.real_root();
-    screen.reach = Reach::start_with(finder, root.clone());
+    screen.reach = Reach::start_with(finder, root.clone(), None);
     screen.reach.find(&root);
     at(&mut screen, 9);
     keys(&mut screen, "c");

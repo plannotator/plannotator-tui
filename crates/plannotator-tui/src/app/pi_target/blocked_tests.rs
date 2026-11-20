@@ -25,7 +25,7 @@ fn review(tag: &str, finder: impl FnOnce(&Path) -> AgentFinder) -> (PathBuf, App
     app.delivery = Box::new(Clipboard);
     app.clipboard = true;
     let folder = agent_picker::real(&root.join("docs"));
-    app.reach = Reach::start_with(finder(&root), folder.clone());
+    app.reach = Reach::start_with(finder(&root), folder.clone(), None);
     app.reach.find(&folder);
     app.add_quote_annotation("two", Kind::Comment, "tighten this".into()).expect("note");
     (root, app)

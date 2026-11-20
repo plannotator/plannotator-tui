@@ -159,7 +159,7 @@ mod in_herdr {
             rex: None,
             ask_on_send: true,
         };
-        app.reach = Reach::start_with(finder, folder.clone());
+        app.reach = Reach::start_with(finder, folder.clone(), None);
         // The first look runs on a thread; look once more here so the button is settled.
         app.reach.find(&folder);
         (root, app, copy, fake)
