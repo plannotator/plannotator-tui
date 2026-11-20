@@ -22,6 +22,10 @@
 //! instead of `# Code Review Feedback` and the `**Diff:**` line: `# PR Review: owner/repo#N`,
 //! the bold title, the `Branch:` line (head → base), and the PR's link.
 //!
+//! Unlike the browser, line breaks and other control characters in a title, commit subject
+//! or file path are written as escapes, and branch names keep to their code spans: a PR's
+//! author picks them, and they must not open sections of their own.
+//!
 //! Browser-only fields (conventional labels, call-flow targets, token selections) are not
 //! written: notes made here never carry them.
 
@@ -67,12 +71,12 @@ pub fn pull_feedback(pull: &PrView, notes: &[&CodeAnnotation]) -> String {
         return NO_FEEDBACK.to_owned();
     }
     let header = format!(
-        "# PR Review: {}#{}\n\n**{}**\nBranch: `{}` \u{2192} `{}`\n{}\n\n",
+        "# PR Review: {}#{}\n\n**{}**\nBranch: {} \u{2192} {}\n{}\n\n",
         pull.repo.slug(),
         pull.number,
-        pull.title,
-        pull.head_ref,
-        pull.base_ref,
+        one_line(&pull.title),
+        code_span(&pull.head_ref),
+        code_span(&pull.base_ref),
         pull.url
     );
     feedback(header, notes)
@@ -88,7 +92,7 @@ pub fn review_feedback(notes: &[&CodeAnnotation], diff: Option<&str>) -> String 
     }
     let mut header = String::from("# Code Review Feedback\n\n");
     if let Some(diff) = diff {
-        let _ = write!(header, "**Diff:** {diff}\n\n");
+        let _ = write!(header, "**Diff:** {}\n\n", one_line(diff));
     }
     feedback(header, notes)
 }
@@ -109,7 +113,7 @@ fn feedback(header: String, notes: &[&CodeAnnotation]) -> String {
     placed.sort_by(|a, b| a.file_path.cmp(&b.file_path));
     for file in placed.chunk_by(|a, b| a.file_path == b.file_path) {
         let Some(first) = file.first() else { continue };
-        let _ = write!(out, "## {}\n\n", first.file_path);
+        let _ = write!(out, "## {}\n\n", one_line(&first.file_path));
         let mut file = file.to_vec();
         file.sort_by_key(|n| (n.scope != NoteScope::File, n.line_start));
         for note in file {
@@ -207,9 +211,34 @@ fn suggestion_blocks(out: &mut String, note: &CodeAnnotation) {
 
 /// A fence longer than any backtick run in `code` (the browser's `codeFenceFor`).
 fn fenced(out: &mut String, code: &str) {
-    let longest = code.split(|c| c != '`').map(str::len).max().unwrap_or(0);
-    let fence = "`".repeat((longest + 1).max(3));
+    let fence = "`".repeat((longest_backtick_run(code) + 1).max(3));
     let _ = write!(out, "{fence}\n{code}\n{fence}\n");
+}
+
+fn longest_backtick_run(text: &str) -> usize {
+    text.split(|c| c != '`').map(str::len).max().unwrap_or(0)
+}
+
+/// `text` on one line: line breaks and other control characters written as escapes, so a
+/// PR's title, a commit subject or a file path can't open a section of its own.
+fn one_line(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') {
+                c.escape_default().to_string()
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
+}
+
+/// [`one_line`] `text` as inline code: the delimiter is longer than any backtick run inside,
+/// and a space keeps a backtick at either end from joining it.
+fn code_span(text: &str) -> String {
+    let tick = "`".repeat(longest_backtick_run(text) + 1);
+    let pad = if text.starts_with('`') || text.ends_with('`') { " " } else { "" };
+    format!("{tick}{pad}{}{pad}{tick}", one_line(text))
 }
 
 /// JavaScript truthiness for an optional string: absent and empty are both false.
