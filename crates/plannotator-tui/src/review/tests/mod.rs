@@ -3,6 +3,8 @@
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic, reason = "tests assert by panicking")]
 
 mod blocked_send;
+#[cfg(unix)]
+mod disk_flow;
 mod notes_flow;
 mod pi_notes;
 #[cfg(unix)]
