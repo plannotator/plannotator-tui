@@ -1,4 +1,4 @@
-//! `plannotator-tui herdr review [--staged | --base REF | --commit SHA] [--placement P]
+//! `plannotator-tui herdr review [--staged | --base REF | --commit SHA | PR] [--placement P]
 //! [--deliver-to PANE]`: a code review of the focused pane's repository in a Herdr pane.
 //!
 //! The launcher captures the diff before asking Herdr for a pane, so a folder that is no

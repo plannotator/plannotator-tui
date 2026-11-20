@@ -146,3 +146,41 @@ fn highlighted_text_stops_at_forty_lines_and_says_how_many_are_left() {
     );
     assert!(!out.contains("line 41"));
 }
+
+#[test]
+fn a_pull_request_opens_with_the_browsers_pr_header() {
+    // exportReviewFeedback(notes, prMeta) under bun, for a GitHub PR.
+    let notes = [
+        note(
+            r#"{"id":"b","type":"comment","filePath":"src/auth.ts","lineStart":40,"lineEnd":40,"side":"old",
+                "text":"Why drop this?","anchorText":"    cleanup()"}"#,
+        ),
+        note(
+            r#"{"id":"g","type":"comment","scope":"general","filePath":"","lineStart":0,"lineEnd":0,
+                "side":"new","text":"Overall fine."}"#,
+        ),
+        note(
+            r#"{"id":"a","type":"comment","filePath":"src/auth.ts","lineStart":12,"lineEnd":12,"side":"new",
+                "text":"Missing check.","anchorText":"next();"}"#,
+        ),
+    ];
+    let refs: Vec<&CodeAnnotation> = notes.iter().collect();
+    let pull = PrView {
+        repo: crate::PrRepo { host: "github.com".into(), owner: "o".into(), name: "r".into() },
+        number: 12,
+        url: "https://github.com/o/r/pull/12".into(),
+        title: "feat: login".into(),
+        base_ref: "main".into(),
+        head_ref: "feat/login".into(),
+        base_sha: SHA.into(),
+        head_sha: SHA.into(),
+    };
+    let browser = "# PR Review: o/r#12\n\n**feat: login**\nBranch: `feat/login` → `main`\nhttps://github.com/o/r/pull/12\n\n## Global comments\n\nOverall fine.\n\n## src/auth.ts\n\n### Line 12 (new)\nMissing check.\n\n**Highlighted text:**\n```\nnext();\n```\n\n### Line 40 (old)\nWhy drop this?\n\n**Highlighted text:**\n```\n    cleanup()\n```\n\n";
+    assert_eq!(pull_feedback(&pull, &refs), browser);
+    assert_eq!(pull_agent_feedback(&pull, None, &refs), format!("{browser}{REVIEW_SUFFIX}"));
+    assert_eq!(
+        pull_agent_feedback(&pull, Some("/src/r"), &refs),
+        format!("Review directory: /src/r\n\n{browser}{REVIEW_SUFFIX}")
+    );
+    assert_eq!(pull_feedback(&pull, &[]), "# Code Review\n\nNo feedback provided.");
+}
