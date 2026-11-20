@@ -224,23 +224,32 @@ impl Screen {
             tags.push(name.to_owned());
         }
         let sent = !self.store.is_pending(note);
+        let mut states = Vec::new();
         if sent {
-            tags.push("sent".to_owned());
+            states.push("sent");
         }
         if self.store.is_posted(note) {
-            tags.push("posted".to_owned());
+            states.push("posted");
         }
-        let mut title = format!(" {} {} ", notes::glyph(note), tags.join(" \u{b7} "));
+        tags.extend(states.iter().map(|s| (*s).to_owned()));
+        let fits = |tags: &[String]| {
+            format!(" {} {} ", notes::glyph(note), tags.join(" \u{b7} ")).width() <= width + 2
+        };
         let mut text = notes::body(note);
-        // A title wider than the bubble's top border would cut the credit off; it moves into
-        // the body instead. The border spans `width` plus the padding and two corners.
+        // A title wider than the bubble's top border would be cut off. The border spans
+        // `width` plus the padding and two corners. The credit moves into the body first,
+        // then the sent and posted marks.
         if let Some(name) = author
-            && title.width() > width + 2
+            && !fits(&tags)
         {
             tags.retain(|tag| tag != name);
-            title = format!(" {} {} ", notes::glyph(note), tags.join(" \u{b7} "));
             text = format!("From: {name}\n{text}");
         }
+        if !states.is_empty() && !fits(&tags) {
+            tags.retain(|tag| !states.contains(&tag.as_str()));
+            text = format!("{}\n{text}", states.join(" \u{b7} "));
+        }
+        let title = format!(" {} {} ", notes::glyph(note), tags.join(" \u{b7} "));
         let mut body: Vec<Line<'static>> = text
             .split('\n')
             .flat_map(|line| {

@@ -304,3 +304,27 @@ fn the_review_menu_offers_it_and_outside_a_pr_it_says_why_not() {
         )
     );
 }
+
+#[test]
+fn a_note_both_sent_and_posted_says_so_even_when_its_title_has_no_room() {
+    let pull = Pull::new("post-both");
+    pull.answer_created();
+    let mut screen = pull.open();
+    let outside = CodeAnnotation::outside_diff_comment(
+        "app.py",
+        14,
+        15,
+        "    greet(sys.argv[1])\n    print(add(1, 2))".into(),
+        "both lines?".into(),
+        &screen.capture.patch_key,
+    );
+    screen.store.add(outside).expect("adds");
+    keys(&mut screen, "E");
+    ctrl_g(&mut screen);
+    press(&mut screen, KeyCode::Enter);
+    let rows = frame(&mut screen, 120, 40);
+    let title = row_with(&rows, "app.py 14-15 new");
+    assert!(title.trim_end().ends_with('\u{256e}'), "the border is whole: {title}");
+    let below = rows.iter().position(|r| r.contains("app.py 14-15 new")).map(|i| &rows[i + 1]).expect("row");
+    assert!(below.contains("sent \u{b7} posted"), "{rows:#?}");
+}
