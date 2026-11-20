@@ -291,6 +291,53 @@ fn a_comment_on_the_whole_pr_goes_first_under_the_pr_header() {
 fn the_whole_file_of_a_pr_is_read_from_its_commits_in_the_cache_repository() {
     use super::whole_flow::settle_whole;
     let pull = Pull::new("whole");
+    let (mut screen, merge_base) = open_in_cache(&pull);
+    at(&mut screen, 9);
+    keys(&mut screen, "o");
+    settle_whole(&mut screen);
+    let rows = frame(&mut screen, 120, 40);
+    assert!(rows[0].starts_with(" Whole file · new · app.py "), "{:?}", rows[0]);
+    assert!(rows.iter().any(|r| r.contains("total = a + b")), "the head's version: {rows:#?}");
+    keys(&mut screen, "o");
+    keys(&mut screen, "O");
+    settle_whole(&mut screen);
+    let rows = frame(&mut screen, 120, 40);
+    let base = format!(" Whole file · base ({}) · app.py ", &merge_base[..7]);
+    assert!(rows[0].starts_with(&base), "{:?}", rows[0]);
+    assert!(rows.iter().any(|r| r.contains("return a + b")), "the base's version: {rows:#?}");
+    assert!(!rows.iter().any(|r| r.contains("total = a + b")));
+}
+
+#[test]
+fn go_to_definition_searches_a_pr_s_commits_in_the_cache_repository() {
+    let pull = Pull::new("jump");
+    let (mut screen, _) = open_in_cache(&pull);
+    let settle_search = |screen: &mut Screen| {
+        let started = Instant::now();
+        while screen.nav.notice().is_some() {
+            screen.tick().expect("tick");
+            assert!(started.elapsed() < Duration::from_secs(10), "no answer");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    let cursor = |screen: &Screen| {
+        let lines = screen.diff.cursor().expect("cursor").expect("a line");
+        (lines.side, lines.first)
+    };
+    // The head: `greet(sys.argv[1])`, pick `greet`.
+    at(&mut screen, 14);
+    keys(&mut screen, "d1");
+    settle_search(&mut screen);
+    assert_eq!(cursor(&screen), (Side::New, 4), "{:?}", screen.status);
+    // The base: the removed `greet("world")` finds the base's `def greet`.
+    screen.diff.reveal("app.py", Side::Old, 10).expect("removed line");
+    keys(&mut screen, "d");
+    settle_search(&mut screen);
+    assert_eq!(cursor(&screen), (Side::Old, 1), "{:?}", screen.status);
+}
+
+/// A screen on PR 7 fetched into a bare cache repository (no clone), and the PR's merge base.
+fn open_in_cache(pull: &Pull) -> (Screen, String) {
     // No clone: the PR goes into the bare cache repository, made here first so the GitHub
     // URL can be pointed at the local upstream for this repository only.
     let outside = pull.dir.join("outside");
@@ -309,19 +356,5 @@ fn the_whole_file_of_a_pr_is_read_from_its_commits_in_the_cache_repository() {
     let mut screen =
         Screen::open(repo, capture, &pull.data(), Box::new(pull.agent.clone()), wake).expect("screen");
     settle(&mut screen);
-
-    at(&mut screen, 9);
-    keys(&mut screen, "o");
-    settle_whole(&mut screen);
-    let rows = frame(&mut screen, 120, 40);
-    assert!(rows[0].starts_with(" Whole file · new · app.py "), "{:?}", rows[0]);
-    assert!(rows.iter().any(|r| r.contains("total = a + b")), "the head's version: {rows:#?}");
-    keys(&mut screen, "o");
-    keys(&mut screen, "O");
-    settle_whole(&mut screen);
-    let rows = frame(&mut screen, 120, 40);
-    let base = format!(" Whole file · base ({}) · app.py ", &merge_base[..7]);
-    assert!(rows[0].starts_with(&base), "{:?}", rows[0]);
-    assert!(rows.iter().any(|r| r.contains("return a + b")), "the base's version: {rows:#?}");
-    assert!(!rows.iter().any(|r| r.contains("total = a + b")));
+    (screen, merge_base)
 }

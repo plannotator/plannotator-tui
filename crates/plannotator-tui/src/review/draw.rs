@@ -71,6 +71,10 @@ impl Screen {
                 self.picker.draw(frame, area, &self.keys, &root, self.start_delivery.as_deref());
             }
             Mode::Help => self.draw_help(frame, area),
+            Mode::Pick(pick) => {
+                let pick = pick.clone();
+                self.draw_pick(frame, diff, &pick);
+            }
             Mode::Browse | Mode::ConfirmQuit => {}
         }
         Ok(())
@@ -174,7 +178,7 @@ impl Screen {
 
     /// The footer's left text (status first, as in document reviews) and its hint rows.
     fn footer_text(&self, width: u16) -> (String, Vec<String>) {
-        let mut parts: Vec<String> = self.disk_notice().into_iter().collect();
+        let mut parts: Vec<String> = self.nav.notice().into_iter().chain(self.disk_notice()).collect();
         parts.extend(self.status.iter().cloned());
         if self.whole.as_ref().is_some_and(|w| w.version == super::whole::Version::Base)
             && self.status.as_deref() != Some(super::whole::BASE_READ_ONLY)
@@ -250,6 +254,7 @@ impl Screen {
                 (!back.is_empty()).then(|| format!("{} back to the diff", back.join("/"))),
                 current.then(|| key(Action::Visual, "select")).flatten(),
                 current.then(|| key(Action::Comment, "comment")).flatten(),
+                key(Action::GoToDefinition, "definition"),
                 pair(Action::NextHunk, Action::PreviousHunk, "change"),
                 pair(Action::NextFile, Action::PreviousFile, "file"),
                 (!self.store.annotations().is_empty()).then(|| key(Action::CycleFocus, "notes")).flatten(),
@@ -269,6 +274,7 @@ impl Screen {
                 key(Action::Suggest, "suggest"),
                 key(Action::FileComment, "file note"),
                 pair(Action::WholeFile, Action::WholeBase, "whole file"),
+                key(Action::GoToDefinition, "definition"),
                 pair(Action::NextHunk, Action::PreviousHunk, "hunk"),
                 pair(Action::NextFile, Action::PreviousFile, "file"),
                 key(Action::ToggleViewed, "viewed"),

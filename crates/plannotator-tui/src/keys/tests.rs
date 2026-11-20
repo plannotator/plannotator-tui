@@ -224,3 +224,18 @@ fn the_search_keys_yield_to_an_older_config_that_gave_them_away() {
     assert_eq!(parse("comment = [\"/\"]\n").expect("loads").hint(Search), "");
     assert_eq!(parse("search = [\"ctrl+f\"]\n").expect("rebinds").hint(Search), "ctrl+f");
 }
+
+#[test]
+fn go_to_definition_is_d_with_ctrl_o_back_and_ctrl_i_forward_in_the_diff() {
+    let keymap = Keymap::default();
+    assert_eq!(keymap.action(&press(KeyCode::Char('d'), KeyModifiers::NONE), DIFF), Some(GoToDefinition));
+    assert_eq!(keymap.action(&press(KeyCode::Char('o'), KeyModifiers::CONTROL), DIFF), Some(JumpBack));
+    assert_eq!(keymap.action(&press(KeyCode::Char('i'), KeyModifiers::CONTROL), DIFF), Some(JumpForward));
+    // Where the terminal sends Ctrl+I as Tab, Tab still cycles the focus.
+    assert_eq!(keymap.action(&press(KeyCode::Tab, KeyModifiers::NONE), REVIEW_GLOBAL), Some(CycleFocus));
+    // `d` stays a block mark in a document review.
+    assert_eq!(keymap.action(&press(KeyCode::Char('d'), KeyModifiers::NONE), BLOCK_MARKS), Some(Delete));
+    let keymap = parse("toggle-files = [\"d\"]\n").expect("an older config keeps loading");
+    assert_eq!(keymap.hint(GoToDefinition), "");
+    assert_eq!((keymap.hint(JumpBack), keymap.hint(JumpForward)), ("ctrl+o".into(), "ctrl+i".into()));
+}

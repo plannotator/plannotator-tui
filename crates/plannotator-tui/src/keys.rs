@@ -102,6 +102,11 @@ pub(crate) enum Action {
     /// The next or previous match of the last search, wrapping at either end.
     NextMatch,
     PreviousMatch,
+    /// Search for the identifier on the line and go to its definition.
+    GoToDefinition,
+    /// Back to the place before a jump, and forward again.
+    JumpBack,
+    JumpForward,
 }
 
 use Action::{
@@ -116,6 +121,7 @@ use Action::{
     PreviousHunk, PreviousMatch, PreviousUnviewed, Search, Suggest, ToggleFiles, ToggleLayout, ToggleViewed,
     ToggleWrap, WholeBase, WholeFile,
 };
+use Action::{GoToDefinition, JumpBack, JumpForward};
 use Action::{NarrowColumn, ToggleNotes, WidenColumn};
 
 /// Browsing, before the focused pane gets the key.
@@ -233,13 +239,17 @@ pub(crate) const DIFF: &[Action] = &[
     PreviousUnviewed,
     WholeFile,
     WholeBase,
+    GoToDefinition,
+    JumpBack,
+    JumpForward,
     Confirm,
 ];
 /// The code review's notes rail.
 pub(crate) const NOTES: &[Action] = &[Down, Up, Confirm, Edit, Remove, Back];
 pub(crate) const REVIEW_MENU: &[Action] =
     &[Down, Up, Confirm, Back, ReviewMenu, Interrupt, ChangeComment, ResendAll, FinishReview, UndoFinish];
-pub(crate) const HELP: &[Action] = &[Back, Help, Quit, Interrupt];
+/// The code review's key help: the motions scroll it when it does not fit; the rest close it.
+pub(crate) const HELP: &[Action] = &[Back, Help, Quit, Interrupt, Down, Up, PageDown, PageUp];
 
 /// Contexts that read the same keypress: the global keys come first while browsing, and
 /// roaming tries the motions before the document's own keys.
@@ -442,6 +452,10 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (Search, &[ch('/')]),
     (NextMatch, &[ch('n')]),
     (PreviousMatch, &[ch('N')]),
+    (GoToDefinition, &[ch('d')]),
+    (JumpBack, &[ctrl('o')]),
+    // Ctrl+I is Tab in terminals that do not tell them apart; there `cycle-focus` gets it.
+    (JumpForward, &[ctrl('i')]),
 ];
 
 /// Actions added after configs were written: `approve` (live only in a gated review), `copy`
@@ -474,6 +488,9 @@ const LATE: &[Action] = &[
     Search,
     NextMatch,
     PreviousMatch,
+    GoToDefinition,
+    JumpBack,
+    JumpForward,
 ];
 
 /// The keys bound to each action. A `[keys]` entry replaces that action's keys and leaves the
@@ -638,6 +655,9 @@ impl Action {
             Self::Search => "search",
             Self::NextMatch => "next-match",
             Self::PreviousMatch => "previous-match",
+            Self::GoToDefinition => "go-to-definition",
+            Self::JumpBack => "jump-back",
+            Self::JumpForward => "jump-forward",
         }
     }
 }

@@ -7,6 +7,7 @@ mod blocked_send;
 mod disk_flow;
 #[cfg(unix)]
 mod first_look;
+mod jump_flow;
 mod notes_flow;
 mod notes_rail;
 mod pi_notes;

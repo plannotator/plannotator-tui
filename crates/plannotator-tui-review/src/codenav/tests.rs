@@ -416,9 +416,28 @@ fn typescript_identifiers() {
         idents(r#"export const total = sum(items, "items") + $el.width; // count(all)"#, TS),
         ["total", "sum", "items", "$el", "width"]
     );
-    assert_eq!(idents("const s = `hi ${name}`; /* note */ run(s)", TS), ["s", "run", "s"]);
+    assert_eq!(idents("const s = `hi ${name}`; /* note */ run(s)", TS), ["s", "name", "run", "s"]);
     assert_eq!(idents("if (x instanceof Foo) return this.bar(0x1f, 1e5);", TS), ["x", "Foo", "bar"]);
     assert_eq!(idents(" * @param foo the thing", TS), Vec::<&str>::new());
+}
+
+#[test]
+fn names_inside_template_substitutions_are_offered_and_the_text_around_them_is_not() {
+    let line = "  return `${name} costs ${formatPrice(cents)}`;";
+    assert_eq!(idents(line, TS), ["name", "formatPrice", "cents"]);
+    let found = identifiers_on_line(line, TS);
+    let price = found.iter().find(|i| i.text == "formatPrice").expect("offered");
+    assert_eq!(line.get(price.start..price.end), Some("formatPrice"), "byte offsets into the line");
+    // Braces inside a substitution, strings holding `}`, and templates inside templates.
+    assert_eq!(
+        idents("`${ {a: one}.a } and ${ \"}\" + two }`", Some(Language::JavaScript)),
+        ["a", "one", "a", "two"]
+    );
+    assert_eq!(idents("`outer ${ `inner ${deep} text` } ${tail}` + after", TS), ["deep", "tail", "after"]);
+    // An escaped `${` is text; an unclosed substitution runs to the end of the line.
+    assert_eq!(idents("`cost \\${price}` + next; `${open", TS), ["next", "open"]);
+    // Other languages' backticks keep their meaning: a Go raw string is skipped whole.
+    assert_eq!(idents("s := `${notcode}` + x", GO), ["s", "x"]);
 }
 
 #[test]

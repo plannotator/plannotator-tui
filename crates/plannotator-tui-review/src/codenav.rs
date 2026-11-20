@@ -692,7 +692,8 @@ pub fn identifier_at(line: &str, column: usize, language: Option<Language>) -> O
 /// The identifiers on one source line, left to right, without keywords, literals, strings
 /// or comments, as far as a single-line lexer can tell. A line inside a multi-line string or
 /// block comment cannot be told apart from code, except a `*` continuation line in a C-style
-/// block comment; a JavaScript template literal is skipped whole, `${…}` included.
+/// block comment. A JavaScript template literal's text is skipped, but the code in its
+/// `${…}` substitutions is read like any other, nested templates included.
 pub fn identifiers_on_line(line: &str, language: Option<Language>) -> Vec<Ident<'_>> {
     let lex = Lexer::new(line, language);
     lex.run()
@@ -760,8 +761,25 @@ impl<'a> Lexer<'a> {
         if matches!(self.language, Some(Language::C | Language::Cpp)) && trimmed.starts_with("#include") {
             return out;
         }
-        let mut i = 0;
+        self.scan(0, false, &mut out);
+        out
+    }
+
+    /// Read code from char `i`, adding its identifiers to `out`, to the end of the line; or,
+    /// inside a template substitution (`substitution`), to the `}` that closes it. Returns
+    /// the char index where it stopped (past that `}`).
+    fn scan(&self, mut i: usize, substitution: bool, out: &mut Vec<Ident<'a>>) -> usize {
+        let mut depth = 0usize;
         while let Some(c) = self.at(i) {
+            if substitution && c == '{' {
+                depth += 1;
+            }
+            if substitution && c == '}' {
+                if depth == 0 {
+                    return i + 1;
+                }
+                depth -= 1;
+            }
             if self.comments == Comments::Slash && self.starts(i, "//") {
                 break;
             }
@@ -770,6 +788,10 @@ impl<'a> Lexer<'a> {
             }
             if self.comments == Comments::Slash && self.starts(i, "/*") {
                 i = self.find_from(i + 2, "*/").map_or(self.chars.len(), |end| end + 2);
+                continue;
+            }
+            if c == '`' && self.is_js() {
+                i = self.skip_template(i, out);
                 continue;
             }
             if c == '"' || c == '`' || (c == '\'' && self.language != Some(Language::Rust)) {
@@ -817,7 +839,28 @@ impl<'a> Lexer<'a> {
             }
             i += 1;
         }
-        out
+        self.chars.len()
+    }
+
+    /// Past a JavaScript template literal starting at `i` (its backtick): its text is
+    /// skipped, the code in each `${…}` is read for identifiers. Unclosed runs to the end.
+    fn skip_template(&self, i: usize, out: &mut Vec<Ident<'a>>) -> usize {
+        let mut j = i + 1;
+        while let Some(c) = self.at(j) {
+            if c == '\\' {
+                j += 2;
+                continue;
+            }
+            if c == '`' {
+                return j + 1;
+            }
+            if self.starts(j, "${") {
+                j = self.scan(j + 2, true, out);
+                continue;
+            }
+            j += 1;
+        }
+        self.chars.len()
     }
 
     /// The char index where `needle` next starts at or after `from`.
