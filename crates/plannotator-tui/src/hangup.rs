@@ -53,7 +53,9 @@ fn hung_up(fd: BorrowedFd<'_>) -> bool {
 mod tests {
     #![allow(clippy::expect_used, reason = "tests assert by panicking")]
 
+    use std::net::Shutdown;
     use std::os::fd::{AsFd as _, OwnedFd};
+    use std::os::unix::net::UnixStream;
 
     use rustix::fs::{Mode, OFlags};
     use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
@@ -91,11 +93,14 @@ mod tests {
 
     #[test]
     fn piped_stdin_is_passed_over_for_the_terminal() {
-        let (reader, writer) = std::io::pipe().expect("pipe");
-        drop(writer);
+        // A socket stands in for the pipe: a pipe hangs up only once every copy of its writer
+        // is closed, and a child another test is forking holds copies until it execs. A
+        // shutdown hangs the socket up while copies, `writer` among them, stay open.
+        let (stdin, writer) = UnixStream::pair().expect("socketpair");
+        writer.shutdown(Shutdown::Both).expect("shutdown");
         let (_controller, tty) = pty();
-        assert!(hung_up(reader.as_fd()), "a finished pipe reports a hang-up");
-        let watched = terminal([reader.as_fd(), tty.as_fd()]).expect("a terminal");
+        assert!(hung_up(stdin.as_fd()), "a finished stream reports a hang-up");
+        let watched = terminal([stdin.as_fd(), tty.as_fd()]).expect("a terminal");
         assert!(!hung_up(watched));
     }
 }
