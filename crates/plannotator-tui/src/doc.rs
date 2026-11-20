@@ -8,7 +8,7 @@
 use std::ops::Range;
 
 use plannotator_tui_schema::{DocumentSource, Provenance};
-use pulldown_cmark::{Event, Options, Parser, Tag};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlockKind {
@@ -18,6 +18,7 @@ pub(crate) enum BlockKind {
     CodeBlock,
     BlockQuote,
     Table,
+    DefinitionList,
     Rule,
     Html,
     Other,
@@ -34,6 +35,27 @@ impl BlockKind {
 pub(crate) struct Block {
     pub(crate) range: Range<usize>,
     pub(crate) kind: BlockKind,
+    pub(crate) opening: Opening,
+}
+
+/// What a block's opening tag says beyond its kind, passed on for the renderer's house style.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum Opening {
+    #[default]
+    Plain,
+    /// A heading's level, 1 to 6.
+    Heading(u8),
+    /// A code block's info string: the words after the opening fence, empty for none.
+    Code(Box<str>),
+}
+
+fn opening_of(tag: &Tag<'_>) -> Opening {
+    match tag {
+        Tag::Heading { level, .. } => Opening::Heading(*level as u8),
+        Tag::CodeBlock(CodeBlockKind::Fenced(info)) => Opening::Code(info.trim().into()),
+        Tag::CodeBlock(CodeBlockKind::Indented) => Opening::Code("".into()),
+        _ => Opening::Plain,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +115,7 @@ fn kind_of(tag: &Tag<'_>) -> BlockKind {
         Tag::BlockQuote(_) => BlockKind::BlockQuote,
         Tag::Table(_) => BlockKind::Table,
         Tag::HtmlBlock => BlockKind::Html,
+        Tag::DefinitionList => BlockKind::DefinitionList,
         _ => BlockKind::Other,
     }
 }
@@ -115,7 +138,7 @@ fn front_matter_len(source: &str) -> usize {
 fn split_blocks(source: &str, front_matter: bool) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut depth = 0usize;
-    let mut open: Option<(usize, BlockKind)> = None;
+    let mut open: Option<(usize, BlockKind, Opening)> = None;
 
     let body = if front_matter { front_matter_len(source) } else { 0 };
     let mut options = parse_options();
@@ -125,21 +148,23 @@ fn split_blocks(source: &str, front_matter: bool) -> Vec<Block> {
         match event {
             Event::Start(tag) => {
                 if depth == 0 {
-                    open = Some((range.start, kind_of(&tag)));
+                    open = Some((range.start, kind_of(&tag), opening_of(&tag)));
                 }
                 depth += 1;
             }
             Event::End(_) => {
                 depth = depth.saturating_sub(1);
                 if depth == 0
-                    && let Some((start, kind)) = open.take()
+                    && let Some((start, kind, opening)) = open.take()
                 {
-                    blocks.push(Block { range: start..range.end, kind });
+                    blocks.push(Block { range: start..range.end, kind, opening });
                 }
             }
-            Event::Rule if depth == 0 => blocks.push(Block { range, kind: BlockKind::Rule }),
+            Event::Rule if depth == 0 => {
+                blocks.push(Block { range, kind: BlockKind::Rule, opening: Opening::Plain });
+            }
             // Any other depth-zero leaf (rare: stray html/text) becomes its own block.
-            _ if depth == 0 => blocks.push(Block { range, kind: BlockKind::Other }),
+            _ if depth == 0 => blocks.push(Block { range, kind: BlockKind::Other, opening: Opening::Plain }),
             _ => {}
         }
     }

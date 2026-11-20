@@ -66,9 +66,12 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes|opencode|cmd|agy] [--pid N] [--session <transcript>]
                        [--session-id <id>] [--stdin] [--print] [--pick N] [--newest]";
 
-/// Width the document gets when nothing else is known: gutter + rail + gap subtracted.
-fn doc_width(cols: u16) -> usize {
-    usize::from(cols.saturating_sub(2 + 1 + 36).max(20))
+/// Width the document gets when nothing else is known: gutter + rail + gap subtracted, then
+/// held to the reading column `cap` (`[ui] doc_width`; zero for none), so the first frame
+/// finds the text already wrapped to it.
+fn doc_width(cols: u16, cap: u16) -> usize {
+    let room = cols.saturating_sub(2 + 1 + 36).max(20);
+    usize::from(if cap > 0 { room.min(cap.max(20)) } else { room })
 }
 
 fn open_file(path: &PathBuf) -> Result<DocumentSource> {
@@ -570,7 +573,7 @@ pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
 /// `run_ui`, returning how a gated review ended; `None` for an ordinary one.
 fn run_review(build: impl FnOnce(usize) -> Result<App>) -> Result<Option<Decision>> {
     with_terminal(|terminal, session| {
-        let width = doc_width(terminal.size().map_or(120, |s| s.width));
+        let width = doc_width(terminal.size().map_or(120, |s| s.width), session.config.ui.doc_width);
         let mut app = build(width)?;
         app.shift_enter = session.shift_enter;
         app.keys = session.config.keys;
@@ -759,7 +762,7 @@ fn snapshot(
     use ratatui::backend::TestBackend;
     use ratatui::style::Modifier;
     let mut terminal = ratatui::Terminal::new(TestBackend::new(cols, rows))?;
-    let mut app = open_app(path, doc_width(cols), false)?;
+    let mut app = open_app(path, doc_width(cols, crate::config::UiConfig::default().doc_width), false)?;
     terminal.draw(|frame| app.draw(frame))?;
     app.scroll_for_snapshot(scroll);
     if let Some(quote) = select {

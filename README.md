@@ -317,23 +317,35 @@ block = "236"            # the focused block and the focused tree row
 toolbar = "238"          # the floating toolbar and the idle header buttons
 cursor = "240"           # the keyboard cursor cell
 selection = "#45475a"    # a character selection, a picker row, a menu row
+code-keyword = "magenta" # fenced code with a known language: keywords
+code-string = "green"
+code-number = "yellow"   # numbers and constants; 130 on the light palette
+code-function = "blue"
+code-type = "cyan"
+code-comment = "dark-gray"  # comments (italic), the bar beside code and its language label
 ```
 
 `cursor` and `selection` become plain backgrounds when set: the text on them keeps the
 terminal's colour.
 
-On a wide terminal, `[ui]` can keep the text to a readable measure:
+The document's text sits in a reading column, centred in the columns the tree and the notes
+leave, and `[ui]` sizes it and the app around it:
 
 ```toml
 [ui]
-doc_width = 100          # the document's text columns; spare columns sit before the notes
+doc_width = 80           # the reading column, in columns; 0 lets the text fill the pane
 max_width = 160          # center the whole app in this many columns
 horizontal_margin = 2    # blank columns on each side
 ```
 
-All three default to `0`, which fills the terminal as before. The margin and `max_width`
-yield before the app drops below 80 columns, so a narrow pane keeps its notes rail; a
-narrow pane also lets the document shrink below `doc_width`.
+`doc_width` defaults to `80`; `max_width` and `horizontal_margin` default to `0`, which
+fills the terminal. `<` and `>` narrow and widen the column by eight for the session. The
+margin and `max_width` yield before the app drops below 80 columns, so a narrow pane keeps
+its notes rail; a narrow pane also lets the document shrink below `doc_width`.
+
+Fenced code is drawn without its fences, beside a bar, with its language at the top right
+when there is room, and coloured by language when the grammar is one of the bundled ones;
+other code keeps one colour. A line too long for the column continues on the next row.
 
 The comment box is 48 columns wide. `comment_width` changes that, down to a minimum of 38,
 and a narrower pane still narrows it:
@@ -406,6 +418,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `toggle-layout` `toggle-wrap` `toggle-files` | `u` `w` `f` | code review: split or unified view; wrap; the file list |
 | `toggle-viewed` `next-unviewed` `previous-unviewed` | `x` `ctrl+n`, none | code review: mark the file viewed; the next or previous file not viewed |
 | `help` | `?` | code review: every key |
+| `narrow-column` `widen-column` | `<` `>` | the reading column, by eight columns |
 
 Actions forwarded by Herdr Mirror default to a split beside the invoking remote
 pane. Mirror does not preserve overlay presentation, and Herdr 0.8.2 opens an

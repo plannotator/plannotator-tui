@@ -88,6 +88,9 @@ pub(crate) enum Action {
     NextUnviewed,
     PreviousUnviewed,
     Help,
+    /// The reading column, by eight columns.
+    NarrowColumn,
+    WidenColumn,
 }
 
 use Action::{
@@ -101,6 +104,7 @@ use Action::{
     ChangeComment, FileComment, Help, NextFile, NextHunk, NextUnviewed, PreviousFile, PreviousHunk,
     PreviousUnviewed, Suggest, ToggleFiles, ToggleLayout, ToggleViewed, ToggleWrap,
 };
+use Action::{NarrowColumn, WidenColumn};
 
 /// Browsing, before the focused pane gets the key.
 pub(crate) const GLOBAL: &[Action] = &[
@@ -144,6 +148,8 @@ pub(crate) const DOCUMENT: &[Action] = &[
     ClearAll,
     AttachImage,
     RemoveImage,
+    NarrowColumn,
+    WidenColumn,
 ];
 /// Marking the selected block, tried only when no `DOCUMENT` action claims the key. They sit
 /// outside `SHARED` so a config that gave `a` or `d` to a document action keeps loading.
@@ -409,6 +415,8 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (NextUnviewed, &[ctrl('n')]),
     (PreviousUnviewed, &[]),
     (Help, &[ch('?')]),
+    (NarrowColumn, &[ch('<')]),
+    (WidenColumn, &[ch('>')]),
 ];
 
 /// Actions added after configs were written: `approve` (live only in a gated review), `copy`
@@ -432,6 +440,8 @@ const LATE: &[Action] = &[
     PreviousUnviewed,
     Help,
     ChangeComment,
+    NarrowColumn,
+    WidenColumn,
 ];
 
 /// The keys bound to each action. A `[keys]` entry replaces that action's keys and leaves the
@@ -588,6 +598,8 @@ impl Action {
             Self::NextUnviewed => "next-unviewed",
             Self::PreviousUnviewed => "previous-unviewed",
             Self::Help => "help",
+            Self::NarrowColumn => "narrow-column",
+            Self::WidenColumn => "widen-column",
         }
     }
 }

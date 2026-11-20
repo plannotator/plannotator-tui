@@ -26,6 +26,12 @@ pub(crate) struct Config {
     pub(crate) colors: Colors,
 }
 
+/// The reading column a document gets unless `[ui] doc_width` says otherwise: eighty columns,
+/// list markers and quote bars included, which keeps prose near the seventy characters a line
+/// reads best at. Tables and code fit it too: a table's cells wrap, a long code line continues
+/// on the next row.
+pub(crate) const DOC_WIDTH: u16 = 80;
+
 /// Which palette the app starts from; `[colors]` adjusts individual roles of it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
@@ -37,8 +43,8 @@ pub(crate) struct UiConfig {
     pub(crate) horizontal_margin: u16,
     /// Widest the app gets, centered in the terminal. Zero fills the terminal.
     pub(crate) max_width: u16,
-    /// Widest the document's text gets; spare columns sit between it and the rail. Zero
-    /// lets the document take every column the rail leaves.
+    /// Widest the document's text gets: the reading column, centred in the columns the tree
+    /// and the rail leave. Zero lets the text take every column the rail leaves.
     pub(crate) doc_width: u16,
     /// Copy a mouse selection to the clipboard on release. Off leaves the clipboard alone
     /// until `copy` (`y`) on the waiting selection.
@@ -53,7 +59,7 @@ impl Default for UiConfig {
             theme: ThemeSetting::default(),
             horizontal_margin: 0,
             max_width: 0,
-            doc_width: 0,
+            doc_width: DOC_WIDTH,
             copy_on_select: true,
             comment_width: 48,
         }
@@ -352,10 +358,10 @@ mod tests {
     }
 
     #[test]
-    fn widths_default_to_filling_the_terminal_and_roundtrip() {
+    fn widths_default_to_a_reading_column_in_a_full_terminal_and_roundtrip() {
         assert_eq!(Config::default().ui.horizontal_margin, 0);
         assert_eq!(Config::default().ui.max_width, 0);
-        assert_eq!(Config::default().ui.doc_width, 0);
+        assert_eq!(Config::default().ui.doc_width, DOC_WIDTH);
         let config =
             Config::parse("[ui]\nhorizontal_margin = 2\nmax_width = 168\ndoc_width = 120\n").expect("parses");
         assert_eq!((config.ui.horizontal_margin, config.ui.max_width, config.ui.doc_width), (2, 168, 120));

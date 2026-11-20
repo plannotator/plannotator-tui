@@ -94,6 +94,10 @@ enum Focus {
 struct Geometry {
     tree: Rect,
     doc: Rect,
+    /// The app's columns, as the tree's automatic showing reads them.
+    width: u16,
+    /// The most columns the document's text could have: what the tree and the rail leave.
+    column_room: u16,
     /// The columns the compose box wrapped its text to this frame; zero when it is not open.
     compose_wrap: usize,
     /// Toolbar rect and the column span of each item, in screen coordinates.
