@@ -122,7 +122,7 @@ fn an_unknown_language_keeps_the_one_code_colour_and_its_label() {
     assert_eq!(rows(&layout, 0), [format!("{BAR} qapla' batlh{}klingon", " ".repeat(40 - 2 - 12 - 7))]);
     let line = layout.drawn_line(0).expect("a row");
     assert_eq!(*line, layout.blocks[0].rows[0].line, "drawn as laid out");
-    assert_eq!(line.style.fg, Some(Color::LightYellow));
+    assert_eq!(line.style.fg, Some(palette().code));
 }
 
 #[test]
@@ -229,7 +229,8 @@ Term\n: Its definition.\n\n---\n\n";
 /// Code laid out on a background thread is coloured when drawn, like code on the first screen.
 #[test]
 fn code_laid_out_in_the_background_is_coloured_when_drawn() {
-    let section = "Some words before the code, enough to make a long document.\n\n```rust\nlet n = 42;\n```\n\n";
+    let section =
+        "Some words before the code, enough to make a long document.\n\n```rust\nlet n = 42;\n```\n\n";
     let doc = Document::parse(section.repeat(1000));
     let mut layout = DocLayout::start(&doc, 60);
     let first = layout.blocks.len();
@@ -240,4 +241,47 @@ fn code_laid_out_in_the_background_is_coloured_when_drawn() {
     let line = layout.drawn_line(row).expect("the code row");
     let keyword = line.spans.iter().find(|span| span.content == "let").expect("let is a span of its own");
     assert_eq!(keyword.style.fg, Role::Keyword.style().fg);
+}
+
+const NESTED: &str = "- Step one:\n\n  ```rust\n  let n = 42; // answer\n  ```\n- Step two\n\n\
+> Quoted:\n>\n> ```klingon\n> qapla' batlh\n> ```\n";
+
+/// Code in a list or a quote looks like top-level code: no fences, a bar inside the bullet's
+/// indent or the quote bar, colours when drawn, and its cells still map to the code.
+#[test]
+fn code_inside_a_list_or_quote_gets_the_bar_and_colours_without_fences() {
+    let doc = Document::parse(NESTED.to_owned());
+    let layout = DocLayout::build(&doc, 40);
+    assert_eq!(
+        rows(&layout, 0),
+        [
+            "∙ Step one:".to_owned(),
+            String::new(),
+            format!("  {BAR} let n = 42; // answer"),
+            String::new(),
+            "∙ Step two".to_owned()
+        ]
+    );
+    assert_eq!(rows(&layout, 1), ["╎ Quoted:".to_owned(), "╎".to_owned(), format!("╎ {BAR} qapla' batlh")]);
+
+    let code_row = layout.blocks[0].first_row + 2;
+    let line = layout.drawn_line(code_row).expect("the code row");
+    let style_of = |text: &str| line.spans.iter().find(|s| s.content.contains(text)).map(|s| s.style.fg);
+    assert_eq!(style_of("let"), Some(Role::Keyword.style().fg));
+    assert_eq!(style_of("42"), Some(Role::Number.style().fg));
+    assert_eq!(style_of(&BAR.to_string()), Some(Some(palette().code_comment)));
+    // The bullet's line is not code and keeps its look.
+    let bullet = layout.drawn_line(layout.blocks[0].first_row).expect("bullet row");
+    assert_eq!(bullet.as_ref(), &layout.blocks[0].rows[0].line);
+    // A language without a grammar keeps the one code colour.
+    let quote_row = layout.blocks[1].first_row + 2;
+    assert_eq!(layout.drawn_line(quote_row).expect("quote row").as_ref(), &layout.blocks[1].rows[2].line);
+
+    // Selecting the whole code line gives the code, not the bar or the fences.
+    let start = doc.source.find("let n").expect("code");
+    let end = doc.source.find("answer").expect("comment") + "answer".len();
+    assert_eq!(layout.rendered_in_range(&doc.source, &(start..end)), "let n = 42; // answer");
+    let row = &layout.blocks[0].rows[2];
+    let first = row.cells.iter().flatten().next().copied();
+    assert_eq!(first, Some(start), "the bar maps to nothing, the code to its bytes");
 }

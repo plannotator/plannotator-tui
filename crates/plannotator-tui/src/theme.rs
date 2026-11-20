@@ -118,6 +118,8 @@ pub(crate) struct Palette {
     pub(crate) cursor: Style,
     /// A character selection, a picker row, a review-menu row.
     pub(crate) selection: Style,
+    /// Inline code, and fenced code in a language without a bundled grammar.
+    pub(crate) code: Color,
     /// Fenced code with a known language: keywords and storage.
     pub(crate) code_keyword: Color,
     /// Strings and characters in code.
@@ -147,6 +149,7 @@ pub(crate) static DARK: Palette = Palette {
     approve_bg: Color::Indexed(22),
     cursor: Style::new().bg(Color::Indexed(240)),
     selection: Style::new().add_modifier(Modifier::REVERSED),
+    code: Color::LightYellow,
     code_keyword: Color::Magenta,
     code_string: Color::Green,
     code_number: Color::Yellow,
@@ -174,12 +177,16 @@ pub(crate) static LIGHT: Palette = Palette {
     // A dark cell with its own light foreground, so the glyph under the cursor stays legible.
     cursor: Style::new().bg(Color::Indexed(238)).fg(Color::White),
     selection: Style::new().bg(Color::Indexed(153)),
+    // Light yellow, the code colour on dark, all but vanishes on white: a dark amber instead.
+    code: Color::Indexed(94),
     code_keyword: DARK.code_keyword,
-    code_string: DARK.code_string,
+    // Light themes' ANSI green and cyan are often too pale for text on white; these 256-colour
+    // ones are darker on every terminal.
+    code_string: Color::Indexed(28),
     // Yellow is the one ANSI hue most light themes leave too pale to read on white.
     code_number: Color::Indexed(130),
     code_function: DARK.code_function,
-    code_type: DARK.code_type,
+    code_type: Color::Indexed(30),
     code_comment: DARK.code_comment,
 };
 
@@ -295,6 +302,8 @@ pub(crate) struct Colors {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) selection: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) code: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) code_keyword: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) code_string: Option<ColorValue>,
@@ -326,6 +335,7 @@ impl Palette {
         set(&mut self.approve_bg, colors.looks_good_bg);
         set(&mut self.block_bg, colors.block);
         set(&mut self.toolbar_bg, colors.toolbar);
+        set(&mut self.code, colors.code);
         set(&mut self.code_keyword, colors.code_keyword);
         set(&mut self.code_string, colors.code_string);
         set(&mut self.code_number, colors.code_number);
@@ -550,6 +560,19 @@ mod tests {
         };
         assert_eq!(LIGHT.with(&colors).cursor, Style::new().bg(Color::Indexed(7)));
         assert_eq!(DARK.with(&colors).selection, Style::new().bg(Color::Indexed(8)));
+    }
+
+    /// On white, code avoids the pale ANSI hues light themes tend to ship: light yellow,
+    /// yellow, green and cyan. `[colors] code` still sets the one code colour.
+    #[test]
+    fn light_code_colours_stay_dark_enough_for_white_and_code_is_configurable() {
+        let pale = [Color::LightYellow, Color::Yellow, Color::Green, Color::Cyan];
+        for color in [LIGHT.code, LIGHT.code_string, LIGHT.code_number, LIGHT.code_type] {
+            assert!(!pale.contains(&color), "{color:?}");
+        }
+        let colors = Colors { code: Some(ColorValue(Color::Indexed(166))), ..Colors::default() };
+        assert_eq!(LIGHT.with(&colors).code, Color::Indexed(166));
+        assert_eq!(DARK.code, Color::LightYellow, "dark terminals see the code colour they always had");
     }
 
     #[test]

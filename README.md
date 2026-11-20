@@ -317,11 +317,12 @@ block = "236"            # the focused block and the focused tree row
 toolbar = "238"          # the floating toolbar and the idle header buttons
 cursor = "240"           # the keyboard cursor cell
 selection = "#45475a"    # a character selection, a picker row, a menu row
+code = "light-yellow"    # inline code, and fenced code without a bundled grammar; 94 on light
 code-keyword = "magenta" # fenced code with a known language: keywords
-code-string = "green"
-code-number = "yellow"   # numbers and constants; 130 on the light palette
+code-string = "green"    # 28 on the light palette
+code-number = "yellow"   # numbers and constants; 130 on light
 code-function = "blue"
-code-type = "cyan"
+code-type = "cyan"       # 30 on light
 code-comment = "dark-gray"  # comments (italic), the bar beside code and its language label
 ```
 
@@ -343,9 +344,10 @@ fills the terminal. `<` and `>` narrow and widen the column by eight for the ses
 margin and `max_width` yield before the app drops below 80 columns, so a narrow pane keeps
 its notes rail; a narrow pane also lets the document shrink below `doc_width`.
 
-Fenced code is drawn without its fences, beside a bar, with its language at the top right
-when there is room, and coloured by language when the grammar is one of the bundled ones;
-other code keeps one colour. A line too long for the column continues on the next row.
+Fenced code is drawn without its fences, beside a bar, and coloured by language when the
+grammar is one of the bundled ones; other code keeps one colour. This holds inside a list
+or a quote too. Top-level code also shows its language at the top right when there is
+room, and a line too long for the column continues on the next row.
 
 The comment box is 48 columns wide. `comment_width` changes that, down to a minimum of 38,
 and a narrower pane still narrows it:

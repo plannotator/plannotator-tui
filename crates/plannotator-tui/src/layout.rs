@@ -10,6 +10,7 @@
 
 mod code;
 mod definitions;
+mod nested;
 #[cfg(test)]
 mod tests;
 
@@ -27,6 +28,7 @@ use crate::srcmap::{LineOffsets, align};
 use crate::theme::palette;
 use crate::wrap::{Hang, Row, clip_line, rule_row, wrap_line, wrap_line_hanging, wrap_table};
 use code::Code;
+use nested::Nested;
 
 mod background;
 mod worker_panic;
@@ -64,7 +66,7 @@ impl StyleSheet for Styles {
         ""
     }
     fn code(&self) -> Style {
-        Style::new().fg(Color::LightYellow)
+        Style::new().fg(palette().code)
     }
     fn code_block_fence(&self) -> &str {
         if self.fences { "```" } else { "" }
@@ -90,6 +92,8 @@ pub(crate) struct RenderedBlock {
     heading: Option<u8>,
     /// A top-level code block's language and colours.
     code: Option<Code>,
+    /// Fenced code inside a list or quote.
+    nested: Vec<Nested>,
     /// Rows for the current width.
     pub(crate) rows: Vec<Row>,
     /// First screen row of this block in document coordinates.
@@ -148,7 +152,7 @@ fn render_block(doc: &Document, index: usize) -> RenderedBlock {
     let text = own(tui_markdown::from_str_with_options(&protected, &Options::new(styles)));
     let text = if matches!(protected, Cow::Owned(_)) { strip_marks(text) } else { text };
     let plain: Vec<String> = text.lines.iter().map(ToString::to_string).collect();
-    let block = |Decorated { text, offsets, hangs }| RenderedBlock {
+    let block = |Decorated { text, offsets, hangs }, nested| RenderedBlock {
         text,
         offsets,
         kind,
@@ -161,6 +165,7 @@ fn render_block(doc: &Document, index: usize) -> RenderedBlock {
             Some(Opening::Code(info)) => Some(Code::new(info)),
             _ => None,
         },
+        nested,
         rows: Vec::new(),
         first_row: 0,
     };
@@ -168,17 +173,23 @@ fn render_block(doc: &Document, index: usize) -> RenderedBlock {
         BlockKind::List | BlockKind::BlockQuote => {
             let syntax = Syntax::parse(source, base);
             let offsets = align(&plain, &syntax.aligned_source(source, base), base);
-            block(decorate::decorate(&syntax, source, base, text, offsets))
+            let decorated = decorate::decorate(&syntax, source, base, text, offsets);
+            let nested = nested::find(source, base);
+            if nested.is_empty() {
+                block(decorated, nested)
+            } else {
+                block(nested::restyle(decorated, &nested), nested)
+            }
         }
         BlockKind::DefinitionList => {
             let offsets = align(&plain, source, base);
             let definitions = definitions::ranges(source, base);
             let (lines, offsets, hangs) = definitions::indent(text.lines, offsets, &definitions);
-            block(Decorated { text: Text::from(lines).style(text.style), offsets, hangs })
+            block(Decorated { text: Text::from(lines).style(text.style), offsets, hangs }, Vec::new())
         }
         _ => {
             let offsets = align(&plain, source, base);
-            block(Decorated { text, offsets, hangs: Vec::new() })
+            block(Decorated { text, offsets, hangs: Vec::new() }, Vec::new())
         }
     }
 }
@@ -322,10 +333,11 @@ impl DocLayout {
         let block = self.blocks.get(self.block_at_row(row)?)?;
         let index = row - block.first_row;
         let laid_out = block.rows.get(index)?;
-        let painted = block
-            .code
-            .as_ref()
-            .and_then(|code| code.paint(&block.text.lines, &block.offsets, index, laid_out));
+        let painted = match &block.code {
+            Some(code) => code.paint(&block.text.lines, &block.offsets, index, laid_out),
+            None if !block.nested.is_empty() => nested::paint(&block.nested, laid_out),
+            None => None,
+        };
         Some(painted.map_or(Cow::Borrowed(&laid_out.line), Cow::Owned))
     }
 

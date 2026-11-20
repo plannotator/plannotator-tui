@@ -13,7 +13,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::{UnicodeWidthChar as _, UnicodeWidthStr as _};
 
-use crate::highlight::{CodeColors, syntax_for};
+use crate::highlight::{CodeColors, Role, syntax_for};
 use crate::srcmap::LineOffsets;
 use crate::theme::palette;
 use crate::wrap::{Row, split_line};
@@ -23,8 +23,8 @@ use crate::wrap::{Row, split_line};
 #[cfg(test)]
 pub(crate) const BAR: char = '▐';
 /// The bar and the space after it, starting each row.
-const BAR_PREFIX: &str = "▐ ";
-const BAR_WIDTH: usize = 2;
+pub(super) const BAR_PREFIX: &str = "▐ ";
+pub(super) const BAR_WIDTH: usize = 2;
 /// Fence words that name no language worth labelling.
 const UNLABELLED: [&str; 4] = ["text", "txt", "plain", "plaintext"];
 
@@ -91,6 +91,11 @@ impl Code {
         index: usize,
         row: &Row,
     ) -> Option<Line<'static>> {
+        self.known().then(|| paint_row(row, |offset| self.shade(lines, offsets, index, offset)))
+    }
+
+    /// Whether the language has a bundled grammar, looking it up the first time.
+    fn known(&self) -> bool {
         let mut colors = self.colors.borrow_mut();
         if matches!(*colors, Colors::Unresolved) {
             *colors = match syntax_for(&self.lang) {
@@ -98,27 +103,54 @@ impl Code {
                 None => Colors::Plain,
             };
         }
-        let Colors::Known(colors) = &mut *colors else { return None };
-        colors.advance(lines, offsets, index);
-        let mut spans: Vec<Span<'static>> = Vec::new();
-        let mut column = 0;
-        for span in &row.line.spans {
-            for ch in span.content.chars() {
-                let style = match row.cells.get(column).copied().flatten() {
-                    Some(offset) => match colors.role_at(offset) {
-                        Some(role) => span.style.patch(role.style()),
-                        // Plain code reads in the terminal's own colour beside coloured code.
-                        None => span.style.fg(Color::Reset),
-                    },
-                    None => span.style,
-                };
-                column += ch.width().unwrap_or(0);
-                match spans.last_mut() {
-                    Some(last) if last.style == style => last.content.to_mut().push(ch),
-                    _ => spans.push(Span::styled(ch.to_string(), style)),
-                }
+        matches!(*colors, Colors::Known(_))
+    }
+
+    /// How to draw the code at source byte `offset`, colouring `lines` through line `upto`
+    /// first.
+    pub(super) fn shade(
+        &self,
+        lines: &[Line<'_>],
+        offsets: &[LineOffsets],
+        upto: usize,
+        offset: usize,
+    ) -> Shade {
+        if !self.known() {
+            return Shade::Keep;
+        }
+        let mut colors = self.colors.borrow_mut();
+        let Colors::Known(colors) = &mut *colors else { return Shade::Keep };
+        colors.advance(lines, offsets, upto);
+        colors.role_at(offset).map_or(Shade::Plain, Shade::Role)
+    }
+}
+
+/// How a drawn cell of code is coloured.
+pub(super) enum Shade {
+    /// As laid out: not code, or code in a language without a grammar.
+    Keep,
+    /// Code with no role, in the terminal's own colour beside coloured code.
+    Plain,
+    Role(Role),
+}
+
+/// `row` redrawn with each cell's colour from `shade`, given the source byte the cell shows.
+pub(super) fn paint_row(row: &Row, mut shade: impl FnMut(usize) -> Shade) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut column = 0;
+    for span in &row.line.spans {
+        for ch in span.content.chars() {
+            let style = match row.cells.get(column).copied().flatten().map_or(Shade::Keep, &mut shade) {
+                Shade::Role(role) => span.style.patch(role.style()),
+                Shade::Plain => span.style.fg(Color::Reset),
+                Shade::Keep => span.style,
+            };
+            column += ch.width().unwrap_or(0);
+            match spans.last_mut() {
+                Some(last) if last.style == style => last.content.to_mut().push(ch),
+                _ => spans.push(Span::styled(ch.to_string(), style)),
             }
         }
-        Some(Line::from(spans).style(row.line.style))
     }
+    Line::from(spans).style(row.line.style)
 }
