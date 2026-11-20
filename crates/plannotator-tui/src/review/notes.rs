@@ -2,8 +2,9 @@
 //!
 //! Notes on the whole change come first, under "Whole change", as the feedback lists the
 //! browser's global comments first. Then notes are grouped by file, files by path, as the
-//! feedback text orders them: file comments first, then by line. Notes whose code is gone
-//! sit last, under "Outdated".
+//! feedback text orders them: file comments first, then by line. Line notes the diff does
+//! not show (made in the whole file, or whose lines are unchanged now) follow under "Not in
+//! the diff", and notes whose code is gone sit last, under "Outdated".
 
 use plannotator_tui_review::{CodeAnnotation, NoteScope, NoteType, Status};
 
@@ -14,6 +15,8 @@ pub(super) enum Row<'a> {
     Change,
     /// A file's heading.
     File(&'a str),
+    /// The heading over line notes the diff does not show.
+    NotInDiff,
     /// The heading over notes whose code is gone.
     Outdated,
     /// A note, by its index in the record.
@@ -22,6 +25,17 @@ pub(super) enum Row<'a> {
 
 pub(super) fn is_outdated(note: &CodeAnnotation) -> bool {
     note.outdated || note.status() == Some(Status::Outdated)
+}
+
+/// A line note whose code is there but that the diff does not show: made outside the diff
+/// in the whole file, or on lines that are unchanged now. Enter shows it in the whole file.
+pub(super) fn is_not_in_diff(note: &CodeAnnotation) -> bool {
+    note.scope == NoteScope::Line && !is_outdated(note) && note.status() == Some(Status::NotInDiff)
+}
+
+/// The rail's groups, in order: in the diff, not in the diff, outdated.
+fn group(note: &CodeAnnotation) -> u8 {
+    if is_outdated(note) { 2 } else { u8::from(is_not_in_diff(note)) }
 }
 
 /// Whether the diff shows the note's lines, so it gets a gutter marker.
@@ -36,37 +50,38 @@ pub(super) fn order(notes: &[CodeAnnotation]) -> Vec<usize> {
         let note = notes.get(i);
         note.map(|n| {
             let change = n.scope == NoteScope::General;
-            (is_outdated(n), !change, n.file_path.clone(), n.scope != NoteScope::File, n.line_start, i)
+            (group(n), !change, n.file_path.clone(), n.scope != NoteScope::File, n.line_start, i)
         })
     });
     indices
 }
 
-/// The rail: a heading before the notes on the whole change, before each file's notes, and
-/// before the outdated ones.
+/// The rail: a heading before the notes on the whole change, before each file's notes,
+/// before the notes not in the diff, and before the outdated ones.
 pub(super) fn rows(notes: &[CodeAnnotation]) -> Vec<Row<'_>> {
     let mut rows = Vec::new();
-    let mut last: Option<(bool, Option<&str>)> = None;
+    let mut last: Option<(u8, Option<&str>)> = None;
     for index in order(notes) {
         let Some(note) = notes.get(index) else { continue };
         let path = (note.scope != NoteScope::General).then_some(note.file_path.as_str());
-        let group = (is_outdated(note), path);
-        if last != Some(group) {
-            match group {
-                (true, _) if last.is_some_and(|(outdated, _)| outdated) => {}
-                (true, _) => rows.push(Row::Outdated),
-                (false, None) => rows.push(Row::Change),
-                (false, Some(path)) => rows.push(Row::File(path)),
+        let at = (group(note), path);
+        if last != Some(at) {
+            match at {
+                (kind, _) if kind > 0 && last.is_some_and(|(previous, _)| previous == kind) => {}
+                (2, _) => rows.push(Row::Outdated),
+                (1, _) => rows.push(Row::NotInDiff),
+                (_, None) => rows.push(Row::Change),
+                (_, Some(path)) => rows.push(Row::File(path)),
             }
-            last = Some(group);
+            last = Some(at);
         }
         rows.push(Row::Note(index));
     }
     rows
 }
 
-/// Where a note is: `file`, `12 new`, `12-14 old`. Outdated notes also name their file,
-/// since their group does not.
+/// Where a note is: `file`, `12 new`, `12-14 old`. Notes not in the diff and outdated ones
+/// also name their file, since their group does not.
 pub(super) fn place(note: &CodeAnnotation) -> String {
     let at = match note.scope {
         NoteScope::File => "file".to_owned(),
@@ -76,7 +91,7 @@ pub(super) fn place(note: &CodeAnnotation) -> String {
         }
         NoteScope::Line => format!("{}-{} {}", note.line_start, note.line_end, note.side.as_str()),
     };
-    if is_outdated(note) && note.scope != NoteScope::General {
+    if group(note) > 0 && note.scope != NoteScope::General {
         format!("{} {at}", file_name(&note.file_path))
     } else {
         at
@@ -153,6 +168,29 @@ mod tests {
             rows(&notes),
             [Row::Change, Row::Note(1), Row::File("src/a.rs"), Row::Note(2), Row::Note(0)]
         );
+    }
+
+    #[test]
+    fn notes_the_diff_does_not_show_have_their_own_group_before_outdated() {
+        let mut outside = note("src/b.rs", "line", 40, false);
+        outside.plannotator_tui.resolution = Some(Status::NotInDiff);
+        let mut unchanged = note("src/a.rs", "line", 2, false);
+        unchanged.plannotator_tui.resolution = Some(Status::NotInDiff);
+        let notes =
+            vec![outside, note("src/a.rs", "line", 9, true), unchanged, note("src/a.rs", "line", 5, false)];
+        assert_eq!(
+            rows(&notes),
+            [
+                Row::File("src/a.rs"),
+                Row::Note(3),
+                Row::NotInDiff,
+                Row::Note(2),
+                Row::Note(0),
+                Row::Outdated,
+                Row::Note(1)
+            ]
+        );
+        assert_eq!(notes.first().map(place).as_deref(), Some("b.rs 40 new"));
     }
 
     #[test]

@@ -51,7 +51,10 @@ impl Screen {
         .areas(body);
         self.geometry = Geometry { diff, rail, ..Geometry::default() };
         self.draw_header(frame, header);
-        self.diff.draw(frame, diff)?;
+        match &mut self.whole {
+            Some(whole) => whole.draw(frame, diff)?,
+            None => self.diff.draw(frame, diff)?,
+        }
         if rail_width > 0 {
             self.draw_rail(frame, rail);
         }
@@ -90,12 +93,15 @@ impl Screen {
     fn draw_header(&mut self, frame: &mut Frame, area: Rect) {
         let (added, removed) = self.capture.totals();
         let files = self.capture.files.len();
-        let title = format!(
-            " {} \u{b7} {files} file{} +{added} \u{2212}{removed} \u{b7} {} ",
-            self.scope_title(),
-            if files == 1 { "" } else { "s" },
-            self.viewed_label()
-        );
+        let title = match self.whole_title() {
+            Some(whole) => format!(" {whole} "),
+            None => format!(
+                " {} \u{b7} {files} file{} +{added} \u{2212}{removed} \u{b7} {} ",
+                self.scope_title(),
+                if files == 1 { "" } else { "s" },
+                self.viewed_label()
+            ),
+        };
         let send = format!(" {} ", self.send_label());
         let review = match self.keys.hint(Action::ReviewMenu) {
             key if key.is_empty() => " Review \u{25be} ".to_owned(),
@@ -169,6 +175,11 @@ impl Screen {
     fn footer_text(&self, width: u16) -> (String, Vec<String>) {
         let mut parts: Vec<String> = self.disk_notice().into_iter().collect();
         parts.extend(self.status.iter().cloned());
+        if self.whole.as_ref().is_some_and(|w| w.version == super::whole::Version::Base)
+            && self.status.as_deref() != Some(super::whole::BASE_READ_ONLY)
+        {
+            parts.push(super::whole::BASE_READ_ONLY.to_owned());
+        }
         match self.diff.progress() {
             Progress::Loading => parts.push("loading the diff\u{2026}".into()),
             Progress::Coloring => parts.push("coloring\u{2026}".into()),
@@ -222,6 +233,23 @@ impl Screen {
             (!keys.is_empty()).then(|| format!("{} {label}", keys.join("/")))
         };
         let tail = [key(Action::Send, "send"), key(Action::Help, "help"), key(Action::Quit, "quit")];
+        if let (Some(whole), Focus::Diff) = (&self.whole, self.focus) {
+            let current = whole.version == super::whole::Version::Current;
+            let back: Vec<String> = [Action::WholeFile, Action::WholeBase, Action::Back]
+                .map(|x| self.keys.hint(x))
+                .into_iter()
+                .filter(|k| !k.is_empty())
+                .collect();
+            let hints = [
+                (!back.is_empty()).then(|| format!("{} back to the diff", back.join("/"))),
+                current.then(|| key(Action::Visual, "select")).flatten(),
+                current.then(|| key(Action::Comment, "comment")).flatten(),
+                pair(Action::NextHunk, Action::PreviousHunk, "change"),
+                pair(Action::NextFile, Action::PreviousFile, "file"),
+                (!self.store.annotations().is_empty()).then(|| key(Action::CycleFocus, "notes")).flatten(),
+            ];
+            return hints.into_iter().chain(tail).flatten().collect();
+        }
         let hints: Vec<Option<String>> = match self.focus {
             Focus::Diff if self.diff.selection().is_some() => vec![
                 self.diff.selecting().then(|| key(Action::Visual, "end selection")).flatten(),
@@ -234,6 +262,7 @@ impl Screen {
                 key(Action::Comment, "comment"),
                 key(Action::Suggest, "suggest"),
                 key(Action::FileComment, "file note"),
+                pair(Action::WholeFile, Action::WholeBase, "whole file"),
                 pair(Action::NextHunk, Action::PreviousHunk, "hunk"),
                 pair(Action::NextFile, Action::PreviousFile, "file"),
                 key(Action::ToggleViewed, "viewed"),
@@ -277,6 +306,7 @@ impl Screen {
             }
             Draft::File(path) => format!("note on {path}"),
             Draft::Change => "comment on the whole change".to_owned(),
+            Draft::Outside(lines, _) => format!("comment on {} (not in the diff)", lines_label(lines)),
             Draft::Edit(_) => "edit".to_owned(),
         };
         let title = self.compose.heading(&verb, self.shift_enter, &self.keys);

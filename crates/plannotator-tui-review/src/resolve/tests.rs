@@ -217,3 +217,29 @@ fn a_suggestion_records_the_lines_it_replaces() {
     assert_eq!(note.text, None);
     assert_eq!(resolve(&note, &now(V1, &patch)), Resolution::StillThere);
 }
+
+#[test]
+fn a_note_outside_the_diff_stays_not_in_the_diff_and_follows_its_text() {
+    // Written on `run(x);` (line 8), which no hunk shows: the patch shows only fn a.
+    let patch = showing(V1, 1, 4, "");
+    let note = CodeAnnotation::outside_diff_comment(
+        "src/f.rs",
+        8,
+        8,
+        "    run(x);".into(),
+        "why run?".into(),
+        "key1",
+    );
+    assert_eq!(resolve(&note, &now(V1, &patch)), Resolution::NotInDiff { line_start: 8, line_end: 8 });
+    // Lines added above: its text is in one place only, so it moves with it.
+    let v2 = format!("// header\n{V1}");
+    let shifted = showing(&v2, 1, 2, "");
+    assert_eq!(resolve(&note, &now(&v2, &shifted)), Resolution::NotInDiff { line_start: 9, line_end: 9 });
+    // Its code rewritten: gone, so outdated, as for any note.
+    let v3 = V1.replace("run(x)", "walk(x)");
+    assert_eq!(resolve(&note, &now(&v3, &patch)), Resolution::Outdated);
+    // A line note made in the diff, with no context recorded, still does not move.
+    let mut plain = note.clone();
+    plain.outside_diff = false;
+    assert_eq!(resolve(&plain, &now(&v2, &shifted)), Resolution::Outdated);
+}

@@ -34,12 +34,13 @@ pub mod store;
 
 pub use annotation::{AnchorContext, CodeAnnotation, Extras, NoteScope, NoteType, Side, Status};
 pub use capture::{
-    Capture, DEFAULT_BASE, MAX_PATCH_BYTES, PullRequest, Repo, Request, SideSource, patch_key,
+    Capture, DEFAULT_BASE, MAX_PATCH_BYTES, MAX_WHOLE_FILE_BYTES, PullRequest, Repo, Request, SideSource,
+    WholeFile, patch_key,
 };
 pub use error::{Error, Result};
 pub use export::{
-    OUTDATED_ANNOTATION_LABEL, REVIEW_SUFFIX, agent_feedback, pull_agent_feedback, pull_feedback,
-    review_feedback,
+    OUTDATED_ANNOTATION_LABEL, OUTSIDE_DIFF_ANNOTATION_LABEL, REVIEW_SUFFIX, agent_feedback,
+    pull_agent_feedback, pull_feedback, review_feedback,
 };
 pub use github::{Gh, PrRepo, PrSpec, PrView};
 pub use patch::{FilePatch, FileStatus};

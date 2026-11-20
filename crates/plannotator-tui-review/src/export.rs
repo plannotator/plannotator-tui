@@ -12,6 +12,9 @@
 //!   deleted (old-side) lines;
 //! - a credited note says `From: <authorName>` under its heading, as file reviews do.
 //!
+//! A note made outside the diff (`outsideDiff`) is written as the browser writes one: its
+//! heading ends with `(not in the diff)` and its code follows as a `**Code:**` block.
+//!
 //! Files are sorted by path. [`agent_feedback`] adds the `Review directory:` header the
 //! browser's CLI writes (`withReviewDirectory`) and appends the review suffix unchanged.
 //!
@@ -29,6 +32,10 @@ use crate::github::PrView;
 
 /// The browser's `OUTDATED_ANNOTATION_LABEL`; its wording is fixed.
 pub const OUTDATED_ANNOTATION_LABEL: &str = "[Outdated — the code changed after this comment]";
+
+/// The browser's `OUTSIDE_DIFF_ANNOTATION_LABEL`: the heading suffix of a note on lines
+/// outside the diff (made in a whole-file view).
+pub const OUTSIDE_DIFF_ANNOTATION_LABEL: &str = "(not in the diff)";
 
 /// The browser's `GLOBAL_COMMENTS_HEADING`, for review-level notes.
 pub const GLOBAL_COMMENTS_HEADING: &str = "Global comments";
@@ -130,12 +137,26 @@ fn line_comment(out: &mut String, note: &CodeAnnotation) {
     } else {
         format!("Lines {}-{}", note.line_start, note.line_end)
     };
-    let _ = writeln!(out, "### {lines} ({})", note.side.as_str());
+    let outside = if note.outside_diff { format!(" {OUTSIDE_DIFF_ANNOTATION_LABEL}") } else { String::new() };
+    let _ = writeln!(out, "### {lines} ({}){outside}", note.side.as_str());
     if note.outdated {
         let _ = writeln!(out, "{OUTDATED_ANNOTATION_LABEL}");
     }
     credit(out, note);
     body(out, note);
+    if note.outside_diff {
+        // The browser's `outsideDiffCodeBlock`: the code it was written on, since the diff
+        // above does not show it. That block already quotes the lines.
+        if let Some(code) = present(note.anchor_text.as_deref()).or(present(note.original_code.as_deref())) {
+            out.push_str("\n**Code:**\n");
+            fenced(out, code);
+        }
+        if present(note.suggested_code.as_deref()).is_some() {
+            suggestion_blocks(out, note);
+        }
+        out.push('\n');
+        return;
+    }
     if note.original_code.is_none()
         && let Some(code) = note.anchor_text.as_deref()
     {

@@ -130,6 +130,11 @@ pub struct CodeAnnotation {
     /// The browser's flag for a note whose code changed. Kept in step with the resolution.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub outdated: bool,
+    /// The browser's flag for a note on lines outside the diff, made in a whole-file view: a
+    /// new-side line note whose code is in `anchorText` (and `originalCode`), with no
+    /// `anchorContext`. The feedback quotes the code; the diff never shows it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub outside_diff: bool,
     pub created_at: u64,
     /// Who wrote it, as an id (`pi`); display only, never an authority. The browser writes
     /// its reviewer identity here.
@@ -231,6 +236,7 @@ impl CodeAnnotation {
             anchor_text: None,
             anchor_context: None,
             outdated: false,
+            outside_diff: false,
             created_at: now,
             author: None,
             author_name: None,
@@ -261,6 +267,48 @@ impl CodeAnnotation {
 
     pub fn status(&self) -> Option<Status> {
         self.plannotator_tui.resolution
+    }
+
+    /// A comment on new-side lines `first..=last` of `path` that the diff does not show,
+    /// made in the whole file, as the browser makes one (`handleAddWholeFileAnnotation`):
+    /// `outsideDiff`, the lines' text as `anchorText` and `originalCode`, no context. It is
+    /// placed by its text alone, never by the patch.
+    pub fn outside_diff_comment(
+        path: &str,
+        first: u32,
+        last: u32,
+        code: String,
+        text: String,
+        patch_key: &str,
+    ) -> Self {
+        let now = now_millis();
+        Self {
+            id: local_id(),
+            kind: NoteType::Comment,
+            scope: NoteScope::Line,
+            file_path: path.to_owned(),
+            line_start: first.min(last),
+            line_end: first.max(last),
+            side: Side::New,
+            text: Some(text),
+            suggested_code: None,
+            original_code: Some(code.clone()),
+            anchor_text: Some(code),
+            anchor_context: None,
+            outdated: false,
+            outside_diff: true,
+            created_at: now,
+            author: None,
+            author_name: None,
+            plannotator_tui: Extras {
+                patch_key: Some(patch_key.to_owned()),
+                old_path: None,
+                updated_at: Some(now),
+                resolution: Some(Status::NotInDiff),
+                other: BTreeMap::new(),
+            },
+            other: BTreeMap::new(),
+        }
     }
 }
 
@@ -324,6 +372,28 @@ mod tests {
         assert_eq!(json["text"], "Split this PR in two.");
         assert_eq!(json["plannotator_tui"]["patchKey"], "0123456789abcdef");
         assert!(json["plannotator_tui"].get("oldPath").is_none());
+    }
+
+    #[test]
+    fn a_note_outside_the_diff_has_the_browsers_whole_file_shape() {
+        let note = CodeAnnotation::outside_diff_comment(
+            "src/auth.ts",
+            40,
+            41,
+            "if (!token) {\n  return;".into(),
+            "Why return silently?".into(),
+            "0123456789abcdef",
+        );
+        let json = serde_json::to_value(&note).expect("serializes");
+        assert_eq!(json["scope"], "line");
+        assert_eq!(json["side"], "new");
+        assert_eq!(json["outsideDiff"], true);
+        assert_eq!(json["anchorText"], "if (!token) {\n  return;");
+        assert_eq!(json["originalCode"], json["anchorText"]);
+        assert!(json.get("anchorContext").is_none());
+        assert_eq!(note.status(), Some(Status::NotInDiff));
+        let back: CodeAnnotation = serde_json::from_value(json).expect("parses");
+        assert!(back.outside_diff);
     }
 
     #[test]

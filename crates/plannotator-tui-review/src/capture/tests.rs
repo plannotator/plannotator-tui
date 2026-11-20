@@ -325,3 +325,44 @@ fn a_read_only_index_still_captures() {
     let capture = t.repo().capture(&Scope::Uncommitted).expect("captures");
     assert!(capture.file("lib.rs").is_some());
 }
+
+#[test]
+fn a_whole_file_is_read_from_either_side_with_its_limits() {
+    let Some(t) = TestRepo::new("whole") else { return };
+    t.write("kept.txt", "one\ntwo\n");
+    t.write("gone.txt", "bye\n");
+    t.write("bin.dat", "a\0b");
+    t.commit_all("init");
+    t.write("kept.txt", "one\n2\n");
+    t.write("new.txt", "hello\n");
+    std::fs::remove_file(t.dir.join("gone.txt")).expect("delete");
+    t.write("big.txt", &"x".repeat(usize::try_from(MAX_WHOLE_FILE_BYTES).expect("fits") + 1));
+    let capture = t.repo().capture(&Scope::Uncommitted).expect("captures");
+    assert_eq!(capture.read_whole(Side::New, "kept.txt").expect("reads"), WholeFile::Text("one\n2\n".into()));
+    assert_eq!(
+        capture.read_whole(Side::Old, "kept.txt").expect("reads"),
+        WholeFile::Text("one\ntwo\n".into())
+    );
+    assert_eq!(
+        capture.read_whole(Side::Old, "new.txt").expect("reads"),
+        WholeFile::Missing,
+        "added: no base"
+    );
+    assert_eq!(capture.read_whole(Side::New, "gone.txt").expect("reads"), WholeFile::Missing, "deleted");
+    assert_eq!(capture.read_whole(Side::Old, "bin.dat").expect("reads"), WholeFile::Binary);
+    assert_eq!(
+        capture.read_whole(Side::New, "big.txt").expect("reads"),
+        WholeFile::TooLarge { bytes: MAX_WHOLE_FILE_BYTES + 1 }
+    );
+    assert_eq!(capture.read_whole(Side::Old, "").expect("a tree is no file"), WholeFile::Missing);
+    // The same from commits, as a pull request (or a bare cache repository) reads them.
+    t.git(&["add", "-A"]);
+    let head = t.commit_all("change");
+    let commit = t.repo().capture(&Scope::Commit { sha: head }).expect("captures");
+    assert_eq!(commit.read_whole(Side::New, "kept.txt").expect("reads"), WholeFile::Text("one\n2\n".into()));
+    assert_eq!(
+        commit.read_whole(Side::New, "big.txt").expect("reads"),
+        WholeFile::TooLarge { bytes: MAX_WHOLE_FILE_BYTES + 1 }
+    );
+    assert_eq!(commit.read_whole(Side::New, "gone.txt").expect("reads"), WholeFile::Missing);
+}

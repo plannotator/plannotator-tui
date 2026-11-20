@@ -12,6 +12,7 @@ mod pull_flow;
 mod rex_picker;
 mod send_flow;
 mod viewed_flow;
+mod whole_flow;
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};

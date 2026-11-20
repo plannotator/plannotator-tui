@@ -91,6 +91,10 @@ pub(crate) enum Action {
     /// The reading column, by eight columns.
     NarrowColumn,
     WidenColumn,
+    /// The whole file under the cursor as it is now, or back to the diff.
+    WholeFile,
+    /// The whole file as it was before the change (its base), or back to the diff.
+    WholeBase,
 }
 
 use Action::{
@@ -102,7 +106,7 @@ use Action::{
 };
 use Action::{
     ChangeComment, FileComment, Help, NextFile, NextHunk, NextUnviewed, PreviousFile, PreviousHunk,
-    PreviousUnviewed, Suggest, ToggleFiles, ToggleLayout, ToggleViewed, ToggleWrap,
+    PreviousUnviewed, Suggest, ToggleFiles, ToggleLayout, ToggleViewed, ToggleWrap, WholeBase, WholeFile,
 };
 use Action::{NarrowColumn, WidenColumn};
 
@@ -214,6 +218,8 @@ pub(crate) const DIFF: &[Action] = &[
     ToggleViewed,
     NextUnviewed,
     PreviousUnviewed,
+    WholeFile,
+    WholeBase,
     Confirm,
 ];
 /// The code review's notes rail.
@@ -417,6 +423,8 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (Help, &[ch('?')]),
     (NarrowColumn, &[ch('<')]),
     (WidenColumn, &[ch('>')]),
+    (WholeFile, &[ch('o')]),
+    (WholeBase, &[ch('O')]),
 ];
 
 /// Actions added after configs were written: `approve` (live only in a gated review), `copy`
@@ -442,6 +450,8 @@ const LATE: &[Action] = &[
     ChangeComment,
     NarrowColumn,
     WidenColumn,
+    WholeFile,
+    WholeBase,
 ];
 
 /// The keys bound to each action. A `[keys]` entry replaces that action's keys and leaves the
@@ -600,6 +610,8 @@ impl Action {
             Self::Help => "help",
             Self::NarrowColumn => "narrow-column",
             Self::WidenColumn => "widen-column",
+            Self::WholeFile => "whole-file",
+            Self::WholeBase => "whole-base",
         }
     }
 }

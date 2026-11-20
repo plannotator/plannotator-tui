@@ -74,7 +74,7 @@ impl Screen {
         let key = |actions: &[Action]| {
             actions.iter().map(|a| self.keys.hint(*a)).filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" ")
         };
-        let sections: [(&str, Vec<(String, &str)>); 3] = [
+        let sections: [(&str, Vec<(String, &str)>); 4] = [
             (
                 "anywhere",
                 vec![
@@ -111,6 +111,8 @@ impl Screen {
                     (key(&[Action::Comment]), "comment on the selection or line"),
                     (key(&[Action::Suggest]), "suggest code for new lines"),
                     (key(&[Action::FileComment]), "comment on the file"),
+                    (key(&[Action::WholeFile]), "the whole file as it is now, at this line"),
+                    (key(&[Action::WholeBase]), "the whole file before the change (base)"),
                     (key(&[Action::Back]), "clear the selection"),
                     (key(&[Action::ToggleLayout]), "split / unified"),
                     (key(&[Action::ToggleWrap]), "wrap long lines"),
@@ -118,9 +120,23 @@ impl Screen {
                 ],
             ),
             (
+                "whole file",
+                vec![
+                    (
+                        key(&[Action::WholeFile, Action::WholeBase, Action::Back]),
+                        "back to the diff, where it was",
+                    ),
+                    (key(&[Action::Comment]), "comment; outside the hunks it is a note not in the diff"),
+                    (key(&[Action::NextHunk, Action::PreviousHunk]), "next / previous changed lines"),
+                    (key(&[Action::NextFile, Action::PreviousFile]), "next / previous file"),
+                    (key(&[Action::ToggleViewed]), "mark this file viewed, or not"),
+                ],
+            ),
+            (
                 "notes",
                 vec![
                     (key(&[Action::Down, Action::Up]), "next / previous (the diff follows)"),
+                    (key(&[Action::Confirm]), "show it; a note not in the diff opens the whole file"),
                     (key(&[Action::Edit]), "edit"),
                     (key(&[Action::Remove]), "remove"),
                 ],

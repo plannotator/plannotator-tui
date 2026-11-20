@@ -64,18 +64,23 @@ impl Screen {
             self.status = Some("move the cursor onto a line of the file first".into());
             return Ok(());
         };
-        let viewed = !self.progress.is_viewed(&path);
-        let saved = self.progress.set(&path, viewed);
+        self.toggle_viewed_of(&path);
+        Ok(())
+    }
+
+    /// Flip `path`'s mark and save it; the whole-file view's `x` too.
+    pub(super) fn toggle_viewed_of(&mut self, path: &str) {
+        let viewed = !self.progress.is_viewed(path);
+        let saved = self.progress.set(path, viewed);
         let count = self.viewed_label();
         self.status = Some(match (saved, viewed) {
             (Err(err), _) => format!("{path}: for this session only, the mark was not saved: {err}"),
-            (Ok(()), true) if !self.progress.is_saved(&path) => {
+            (Ok(()), true) if !self.progress.is_saved(path) => {
                 format!("\u{2713} {path} viewed for this session \u{b7} {count}")
             }
             (Ok(()), true) => format!("\u{2713} {path} viewed \u{b7} {count}"),
             (Ok(()), false) => format!("{path} not viewed \u{b7} {count}"),
         });
-        Ok(())
     }
 
     /// `ctrl+n` (and `previous-unviewed`): the next file in diff order that is not marked

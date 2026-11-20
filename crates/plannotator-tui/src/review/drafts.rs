@@ -98,6 +98,14 @@ impl Screen {
                 .map(|file| CodeAnnotation::suggestion(file, lines.first, lines.last, code, None, &key)),
             Draft::File(path) => self.file(path).map(|file| CodeAnnotation::file_comment(file, text, &key)),
             Draft::Change => Some(CodeAnnotation::general_comment(text, &key)),
+            Draft::Outside(lines, code) => Some(CodeAnnotation::outside_diff_comment(
+                &lines.path,
+                lines.first,
+                lines.last,
+                code.clone(),
+                text,
+                &key,
+            )),
             Draft::Edit(id) => {
                 let changed = self.store.edit(id, |note| {
                     let field = match note.kind {
