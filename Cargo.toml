@@ -61,3 +61,11 @@ strip = true
 inherits = "release"
 debug = 1
 strip = false
+
+# TEMPORARY: the viewed ticks in the file list use `Engine::set_file_marks`, which is not in
+# a diffs-rs release yet. This points at the feat/file-badges commit of plannotator/diffs-rs.
+# Once diffs-rs 0.2.1 is on crates.io: delete this section, set
+# `diffs-rs = { version = "0.2.1", default-features = false }` in
+# crates/plannotator-tui/Cargo.toml, and run `cargo update -p diffs-rs`.
+[patch.crates-io]
+diffs-rs = { git = "https://github.com/plannotator/diffs-rs", rev = "6b7862b3c6ebba656d37cc0f48ade6b0c48fed2f" }

@@ -27,6 +27,11 @@ fn x_marks_the_file_viewed_in_the_browsers_record_and_an_edit_drops_it() {
         rows.last().is_some_and(|r| r.contains("\u{2713} viewed")),
         "the footer ticks the file: {rows:#?}"
     );
+    // The viewer's file list, shown when the diff has room, ticks the file after its counts;
+    // the other file has none.
+    let rows = frame(&mut screen, 160, 40);
+    assert!(row_with(&rows, "*app.py").contains("\u{2713}  \u{2502}"), "{rows:#?}");
+    assert!(!row_with(&rows, "notes.txt  ").contains('\u{2713}'), "{rows:#?}");
 
     // The record is the browser's: <data>/review-progress/<key>/<sha256(path)>.json.
     let dir = screen.progress.dir().expect("saved").to_path_buf();

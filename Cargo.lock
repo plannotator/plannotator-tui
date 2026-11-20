@@ -524,8 +524,7 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 [[package]]
 name = "diffs-fancy-regex"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c8bafb03bb9ed9eeb28ac231849ae6be395c8bf483f6a6f46db0616828e8fbc"
+source = "git+https://github.com/plannotator/diffs-rs?rev=6b7862b3c6ebba656d37cc0f48ade6b0c48fed2f#6b7862b3c6ebba656d37cc0f48ade6b0c48fed2f"
 dependencies = [
  "bit-set 0.8.0",
  "regex-automata",
@@ -535,8 +534,7 @@ dependencies = [
 [[package]]
 name = "diffs-rs"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba4d00696219dd07340a9cdaae450ff29ff1ce73f306c46df10f03837d6121df"
+source = "git+https://github.com/plannotator/diffs-rs?rev=6b7862b3c6ebba656d37cc0f48ade6b0c48fed2f#6b7862b3c6ebba656d37cc0f48ade6b0c48fed2f"
 dependencies = [
  "anyhow",
  "clap",
@@ -562,8 +560,7 @@ dependencies = [
 [[package]]
 name = "diffs-syntect"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf57443c937ba79afc5d9c7ca4b63d411dad8fb25fa72f0a5f063c71234e0e4d"
+source = "git+https://github.com/plannotator/diffs-rs?rev=6b7862b3c6ebba656d37cc0f48ade6b0c48fed2f#6b7862b3c6ebba656d37cc0f48ade6b0c48fed2f"
 dependencies = [
  "bincode",
  "diffs-fancy-regex",
@@ -583,8 +580,7 @@ dependencies = [
 [[package]]
 name = "diffs-two-face"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fc53b9992dd1e96ffd1daf26d10ee81cfa0bbbe356b8eaf39a971d8819cd67e"
+source = "git+https://github.com/plannotator/diffs-rs?rev=6b7862b3c6ebba656d37cc0f48ade6b0c48fed2f#6b7862b3c6ebba656d37cc0f48ade6b0c48fed2f"
 dependencies = [
  "diffs-syntect",
  "serde",

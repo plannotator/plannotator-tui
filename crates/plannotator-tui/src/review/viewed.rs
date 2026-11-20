@@ -4,8 +4,8 @@
 //! `docs/spec-review-progress.md`), so a review continues in either app; a mark stops
 //! counting once its file changes.
 //!
-//! The file list is drawn by the diff viewer, which has no way to decorate a file yet, so the
-//! tick shows in the footer for the file under the cursor.
+//! The diff viewer ticks viewed files in its file list and dims their rows; the footer also
+//! ticks the file under the cursor.
 
 use std::path::Path;
 
@@ -29,6 +29,21 @@ impl Screen {
         let total = self.capture.files.len();
         let viewed = self.progress.count(self.capture.files.iter().map(|f| f.path.as_str()));
         format!("{viewed}/{total} viewed")
+    }
+
+    /// Tell the diff viewer which files are viewed, for the ticks in its file list. Call it
+    /// whenever a mark, the capture or the viewer's files change.
+    pub(super) fn sync_viewed(&mut self) {
+        let viewed: Vec<String> = self
+            .capture
+            .files
+            .iter()
+            .filter(|file| self.progress.is_viewed(&file.path))
+            .map(|file| file.path.clone())
+            .collect();
+        if let Err(err) = self.diff.set_viewed(&viewed) {
+            self.status = Some(format!("could not tick viewed files in the file list: {err:#}"));
+        }
     }
 
     /// Whether the file under the cursor is marked viewed, for the footer's tick. Reads the
@@ -72,6 +87,7 @@ impl Screen {
     pub(super) fn toggle_viewed_of(&mut self, path: &str) {
         let viewed = !self.progress.is_viewed(path);
         let saved = self.progress.set(path, viewed);
+        self.sync_viewed();
         let count = self.viewed_label();
         self.status = Some(match (saved, viewed) {
             (Err(err), _) => format!("{path}: for this session only, the mark was not saved: {err}"),
