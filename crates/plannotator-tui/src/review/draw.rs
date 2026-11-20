@@ -91,9 +91,10 @@ impl Screen {
         let (added, removed) = self.capture.totals();
         let files = self.capture.files.len();
         let title = format!(
-            " {} \u{b7} {files} file{} +{added} \u{2212}{removed} ",
+            " {} \u{b7} {files} file{} +{added} \u{2212}{removed} \u{b7} {} ",
             self.scope_title(),
-            if files == 1 { "" } else { "s" }
+            if files == 1 { "" } else { "s" },
+            self.viewed_label()
         );
         let send = format!(" {} ", self.send_label());
         let review = match self.keys.hint(Action::ReviewMenu) {
@@ -167,6 +168,9 @@ impl Screen {
         }
         let notes = self.store.annotations();
         let outdated = notes.iter().filter(|n| super::notes::is_outdated(n)).count();
+        if self.cursor_file_viewed() {
+            parts.push("\u{2713} viewed".into());
+        }
         parts.push(self.repo_name());
         parts.push(match outdated {
             0 => count(notes.len()),
@@ -214,6 +218,7 @@ impl Screen {
                 key(Action::FileComment, "file note"),
                 pair(Action::NextHunk, Action::PreviousHunk, "hunk"),
                 pair(Action::NextFile, Action::PreviousFile, "file"),
+                key(Action::ToggleViewed, "viewed"),
                 key(Action::Reload, "reload"),
                 (!self.store.annotations().is_empty()).then(|| key(Action::CycleFocus, "notes")).flatten(),
             ]

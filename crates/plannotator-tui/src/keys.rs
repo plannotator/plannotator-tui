@@ -80,6 +80,11 @@ pub(crate) enum Action {
     ToggleWrap,
     /// Show or hide the diff's file list.
     ToggleFiles,
+    /// Mark the file under the cursor viewed, or not (`docs/spec-review-progress.md`).
+    ToggleViewed,
+    /// The next or previous file not marked viewed, wrapping around.
+    NextUnviewed,
+    PreviousUnviewed,
     Help,
 }
 
@@ -91,8 +96,8 @@ use Action::{
     Up, Visual, VisualLine, WordBack, WordEnd, WordForward, Yes,
 };
 use Action::{
-    FileComment, Help, NextFile, NextHunk, PreviousFile, PreviousHunk, Suggest, ToggleFiles, ToggleLayout,
-    ToggleWrap,
+    FileComment, Help, NextFile, NextHunk, NextUnviewed, PreviousFile, PreviousHunk, PreviousUnviewed,
+    Suggest, ToggleFiles, ToggleLayout, ToggleViewed, ToggleWrap,
 };
 
 /// Browsing, before the focused pane gets the key.
@@ -197,6 +202,9 @@ pub(crate) const DIFF: &[Action] = &[
     ToggleLayout,
     ToggleWrap,
     ToggleFiles,
+    ToggleViewed,
+    NextUnviewed,
+    PreviousUnviewed,
     Confirm,
 ];
 /// The code review's notes rail.
@@ -391,6 +399,11 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (ToggleLayout, &[ch('u')]),
     (ToggleWrap, &[ch('w')]),
     (ToggleFiles, &[ch('f')]),
+    (ToggleViewed, &[ch('x')]),
+    // `n` with Ctrl: the next file, skipping viewed ones. Ctrl+Shift+N reaches most
+    // terminals as Ctrl+N, so the backward jump has no default key.
+    (NextUnviewed, &[ctrl('n')]),
+    (PreviousUnviewed, &[]),
     (Help, &[ch('?')]),
 ];
 
@@ -410,6 +423,9 @@ const LATE: &[Action] = &[
     ToggleLayout,
     ToggleWrap,
     ToggleFiles,
+    ToggleViewed,
+    NextUnviewed,
+    PreviousUnviewed,
     Help,
 ];
 
@@ -562,6 +578,9 @@ impl Action {
             Self::ToggleLayout => "toggle-layout",
             Self::ToggleWrap => "toggle-wrap",
             Self::ToggleFiles => "toggle-files",
+            Self::ToggleViewed => "toggle-viewed",
+            Self::NextUnviewed => "next-unviewed",
+            Self::PreviousUnviewed => "previous-unviewed",
             Self::Help => "help",
         }
     }

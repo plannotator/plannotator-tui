@@ -100,6 +100,11 @@ impl Diff {
         self.paths.len()
     }
 
+    /// The capture's paths of the files shown so far, in the viewer's order.
+    pub(super) fn paths(&self) -> &[String] {
+        &self.paths
+    }
+
     fn index(&self, path: &str) -> Option<usize> {
         self.paths.iter().position(|p| p == path)
     }

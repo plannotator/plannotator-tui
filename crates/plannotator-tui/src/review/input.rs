@@ -183,6 +183,9 @@ impl Screen {
             Action::ToggleLayout => Command::ToggleLayout,
             Action::ToggleWrap => Command::ToggleWrap,
             Action::ToggleFiles => Command::Files,
+            Action::ToggleViewed => return self.toggle_viewed(),
+            Action::NextUnviewed => return self.jump_unviewed(true),
+            Action::PreviousUnviewed => return self.jump_unviewed(false),
             Action::Confirm => Command::Activate,
             _ => return Ok(()),
         };

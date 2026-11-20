@@ -12,6 +12,7 @@
 //! - [`annotation`]: a note, in the browser's `CodeAnnotation` shape.
 //! - [`resolve`]: pure functions that place a note against the current files.
 //! - [`store`]: `review.json`, saved on every change; sends and archiving.
+//! - [`progress`]: viewed marks, in the browser's review-progress format.
 //! - [`export`]: the feedback text, in the browser's `exportReviewFeedback` format.
 //!
 //! No terminal, no diff viewer: the app draws, this crate owns the records.
@@ -24,6 +25,7 @@ pub mod export;
 mod git;
 pub mod github;
 pub mod patch;
+pub mod progress;
 pub mod resolve;
 pub mod scope;
 pub mod store;
@@ -39,6 +41,7 @@ pub use export::{
 };
 pub use github::{Gh, PrRepo, PrSpec, PrView};
 pub use patch::{FilePatch, FileStatus};
+pub use progress::Progress;
 pub use resolve::{Current, Resolution, apply, resolve};
 pub use scope::Scope;
 pub use store::{Delivered, Record, ReviewStore, project_for, review_dir};
