@@ -184,3 +184,21 @@ fn a_pull_request_opens_with_the_browsers_pr_header() {
     );
     assert_eq!(pull_feedback(&pull, &[]), "# Code Review\n\nNo feedback provided.");
 }
+
+#[test]
+fn a_note_outside_the_diff_is_labelled_and_quotes_its_code_as_the_browser_does() {
+    let notes = [
+        note(
+            r#"{"id":"o","type":"comment","filePath":"src/auth.ts","lineStart":40,"lineEnd":41,"side":"new",
+                "text":"Why return silently?","originalCode":"if (!token) {\n  return;",
+                "anchorText":"if (!token) {\n  return;","outsideDiff":true}"#,
+        ),
+        note(
+            r#"{"id":"a","type":"comment","filePath":"src/auth.ts","lineStart":12,"lineEnd":12,"side":"new",
+                "text":"Missing auth check here.","anchorText":"next();"}"#,
+        ),
+    ];
+    // The browser's output for the same notes (bun, exportFeedback.ts at 2232dd2ad).
+    let browser = "# Code Review Feedback\n\n**Diff:** Uncommitted changes\n\n## src/auth.ts\n\n### Line 12 (new)\nMissing auth check here.\n\n**Highlighted text:**\n```\nnext();\n```\n\n### Lines 40-41 (new) (not in the diff)\nWhy return silently?\n\n**Code:**\n```\nif (!token) {\n  return;\n```\n\n";
+    assert_eq!(review_feedback(&notes.iter().collect::<Vec<_>>(), Some("Uncommitted changes")), browser);
+}

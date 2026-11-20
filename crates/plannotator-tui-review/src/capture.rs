@@ -36,6 +36,23 @@ use crate::scope::Scope;
 /// measured patches.
 pub const MAX_PATCH_BYTES: usize = 8 * 1024 * 1024;
 
+/// The largest file a whole-file view shows, per side; the browser's cap
+/// (`MAX_REVIEW_FILE_CONTENT_BYTES`).
+pub const MAX_WHOLE_FILE_BYTES: u64 = 5 * 1024 * 1024;
+
+/// One side of one file, for a whole-file view ([`Capture::read_whole`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WholeFile {
+    /// The file does not exist on that side: added (no base) or deleted (no current file).
+    Missing,
+    /// Over [`MAX_WHOLE_FILE_BYTES`].
+    TooLarge { bytes: u64 },
+    /// A NUL byte in its first 8000 bytes, git's test for binary content.
+    Binary,
+    /// Its text, read lossily when it is not UTF-8.
+    Text(String),
+}
+
 /// The base a branch review uses when none is given.
 pub const DEFAULT_BASE: &str = "origin/HEAD";
 
@@ -477,6 +494,50 @@ impl Capture {
         let mut cmd = git::command(&self.root);
         cmd.args(["cat-file", "blob", "--end-of-options", &spec]);
         Ok(Some(String::from_utf8_lossy(&git::run(cmd, "cat-file blob")?).into_owned()))
+    }
+
+    /// The whole of `path` on `side`, for a whole-file view: its text, or why there is none.
+    /// The size is checked before anything is read.
+    pub fn read_whole(&self, side: Side, path: &str) -> Result<WholeFile> {
+        let bytes = match self.source(side) {
+            SideSource::Worktree => {
+                let full = self.root.join(path);
+                let bytes = match std::fs::metadata(&full) {
+                    Ok(meta) if meta.is_file() => meta.len(),
+                    Ok(_) => return Ok(WholeFile::Missing),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(WholeFile::Missing),
+                    Err(source) => return Err(Error::Io { action: "reading", path: full, source }),
+                };
+                if bytes > MAX_WHOLE_FILE_BYTES {
+                    return Ok(WholeFile::TooLarge { bytes });
+                }
+                std::fs::read(&full).map_err(|source| Error::Io { action: "reading", path: full, source })?
+            }
+            source => {
+                let spec = match source {
+                    SideSource::Rev(rev) => format!("{rev}:{path}"),
+                    SideSource::Index | SideSource::Worktree => format!(":{path}"),
+                };
+                let mut kind = git::command(&self.root);
+                kind.args(["cat-file", "-t", "--end-of-options", &spec]);
+                if !matches!(git::run_text(kind, "cat-file -t"), Ok(kind) if kind == "blob") {
+                    return Ok(WholeFile::Missing);
+                }
+                let mut measure = git::command(&self.root);
+                measure.args(["cat-file", "-s", "--end-of-options", &spec]);
+                let bytes: u64 = git::run_text(measure, "cat-file -s")?.parse().unwrap_or(u64::MAX);
+                if bytes > MAX_WHOLE_FILE_BYTES {
+                    return Ok(WholeFile::TooLarge { bytes });
+                }
+                let mut cmd = git::command(&self.root);
+                cmd.args(["cat-file", "blob", "--end-of-options", &spec]);
+                git::run(cmd, "cat-file blob")?
+            }
+        };
+        if bytes.iter().take(8000).any(|b| *b == 0) {
+            return Ok(WholeFile::Binary);
+        }
+        Ok(WholeFile::Text(String::from_utf8_lossy(&bytes).into_owned()))
     }
 
     /// Resolve every note against this capture, reading each (side, file) once.

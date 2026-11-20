@@ -106,7 +106,7 @@ dimmed. The keys also work without opening the menu.
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
-| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `M` note on the whole change; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `r` read the diff again (the footer says when it changed on disk); `?` keys |
+| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `M` note on the whole change; `o`/`O` whole file now/before; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `r` read the diff again (the footer says when it changed on disk); `?` keys |
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
 
@@ -193,6 +193,18 @@ to. Sends go to the same place a document review's do (Herdr pane, Rex, Pi or th
 clipboard, or the agent you choose when nothing named one; see [Choosing the agent](#choosing-the-agent)), and are kept in the feedback archive. `q` asks first when notes are unsent.
 `m` opens the Review menu: `M` comment on the whole change, `R` resend all, `F` finish
 review, `U` undo.
+
+`o` shows the whole file under the cursor as it is now, scrolled to the same line; `O`
+shows it as it was before the change (the base), at the matching old line. The header says
+`Whole file · new` or `Whole file · base (1a2b3c4)`, a bar in the gutter marks the lines the
+change added (or removed), and `]`/`[` move between them. `n`/`N` go to the next or previous
+file, and `o`, `O` or `Esc` go back to the diff where you left it. `c` in the current file
+writes an ordinary diff note when the diff shows those lines; on lines outside every hunk it
+writes a note **not in the diff**, which the rail lists under its own heading and the agent
+gets with the code quoted, as the browser sends one. `Enter` on such a note in the rail
+opens the whole file at its lines. The base is read-only for notes. Files over 5 MiB, binary
+files, an added file's base and a deleted file's current version are not shown; the view
+says which.
 
 `r` reads the diff again after you or the agent change files. Notes follow their lines.
 The review checks for changes by itself every few seconds (a `git status` and the times of
@@ -423,6 +435,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `next-hunk` `previous-hunk` `next-file` `previous-file` | `]` `[` `n` `N` | code review: move by hunk or file |
 | `toggle-layout` `toggle-wrap` `toggle-files` | `u` `w` `f` | code review: split or unified view; wrap; the file list |
 | `toggle-viewed` `next-unviewed` `previous-unviewed` | `x` `ctrl+n`, none | code review: mark the file viewed; the next or previous file not viewed |
+| `whole-file` `whole-base` | `o` `O` | code review: the whole file as it is now, or before the change; again to go back |
 | `help` | `?` | code review: every key |
 | `narrow-column` `widen-column` | `<` `>` | the reading column, by eight columns |
 

@@ -7,6 +7,7 @@ use plannotator_tui_review::Side;
 use ratatui::crossterm::event::{Event, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 
+use super::whole::Version;
 use super::{Focus, Mode, Screen};
 use crate::keys::{self, Action};
 use crate::ui::agent_picker::{AgentPicker, Picked, PickerKey};
@@ -47,7 +48,12 @@ impl Screen {
                 Ok(())
             }
             Event::Mouse(mouse) => self.mouse(mouse),
-            Event::Resize(..) => self.diff.handle_event(event).map(drop),
+            Event::Resize(..) => {
+                if let Some(whole) = &mut self.whole {
+                    whole.handle_event(event.clone())?;
+                }
+                self.diff.handle_event(event).map(drop)
+            }
             _ => Ok(()),
         }
     }
@@ -168,6 +174,9 @@ impl Screen {
 
     fn diff_key(&mut self, key: KeyEvent) -> Result<()> {
         let Some(action) = self.keys.action(&key, keys::DIFF) else { return Ok(()) };
+        if self.whole.is_some() {
+            return self.whole_key(action);
+        }
         let command = match action {
             Action::Back if self.diff.selection().is_some() => return self.diff.clear_selection(),
             Action::Back => Command::Back,
@@ -175,6 +184,8 @@ impl Screen {
             Action::Comment => return self.start_comment(),
             Action::Suggest => return self.start_suggestion(),
             Action::FileComment => return self.start_file_comment(),
+            Action::WholeFile => return self.open_whole(Version::Current),
+            Action::WholeBase => return self.open_whole(Version::Base),
             Action::Left => return self.go_to_side(Side::Old),
             Action::Right => return self.go_to_side(Side::New),
             Action::Down => Command::Down,
@@ -212,7 +223,7 @@ impl Screen {
             Some(Action::Down) => self.move_rail(1),
             Some(Action::Up) => self.move_rail(-1),
             Some(Action::Confirm) => {
-                self.show_selected_note();
+                self.open_selected_note()?;
                 self.focus = Focus::Diff;
             }
             Some(Action::Edit) => self.start_edit(),
@@ -298,7 +309,10 @@ impl Screen {
             if click {
                 self.focus = Focus::Diff;
             }
-            self.diff.handle_event(Event::Mouse(mouse))?;
+            match &mut self.whole {
+                Some(whole) => whole.handle_event(Event::Mouse(mouse))?,
+                None => self.diff.handle_event(Event::Mouse(mouse)).map(drop)?,
+            }
         }
         Ok(())
     }

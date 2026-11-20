@@ -39,12 +39,20 @@ pub struct FilePatch {
     new: BTreeMap<u32, SideLine>,
     /// Function context of each hunk header, in hunk order.
     hunks: Vec<String>,
+    /// Where each hunk ends: the next old and new line after it, in hunk order.
+    ends: Vec<(u32, u32)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SideLine {
     text: String,
     hunk: usize,
+    /// An added or removed line, not context.
+    changed: bool,
+    /// The line on the other side it sits against: a context line's twin; in a run of
+    /// changes, the removed and added lines pair up in order, and the rest sit against the
+    /// first line after the other side's run.
+    other: u32,
 }
 
 impl FilePatch {
@@ -88,6 +96,34 @@ impl FilePatch {
         let after = (1..=ANCHOR_CONTEXT_LINES).map(|k| read(last + k)).collect();
         let hunk = self.hunk_context(side, first).filter(|h| !h.is_empty()).map(str::to_owned);
         Some((text, AnchorContext { before, after, hunk }))
+    }
+
+    /// The runs of added (new side) or removed (old side) lines, as `(first, last)`.
+    pub fn changed_ranges(&self, side: Side) -> Vec<(u32, u32)> {
+        let mut ranges: Vec<(u32, u32)> = Vec::new();
+        for (&n, _) in self.side(side).iter().filter(|(_, line)| line.changed) {
+            match ranges.last_mut() {
+                Some((_, last)) if *last + 1 == n => *last = n,
+                _ => ranges.push((n, n)),
+            }
+        }
+        ranges
+    }
+
+    /// Line `n` of `from`, on the other side: its twin for an unchanged line (inside or
+    /// outside the hunks); for an added or removed line, the line it replaced (in order), or
+    /// where its run of changes sits. Never below 1; it can be one past the other side's end.
+    pub fn map_line(&self, from: Side, n: u32) -> u32 {
+        if let Some(line) = self.side(from).get(&n) {
+            return line.other.max(1);
+        }
+        let pick = |(old, new): (u32, u32)| if from == Side::Old { (old, new) } else { (new, old) };
+        // Outside the hunks the two sides differ by what the hunks above added and removed.
+        let above = self.ends.iter().rev().map(|&end| pick(end)).find(|&(this, _)| this <= n);
+        match above {
+            Some((this, other)) => (n - this + other).max(1),
+            None => n.max(1),
+        }
     }
 
     fn side(&self, side: Side) -> &BTreeMap<u32, SideLine> {
@@ -158,6 +194,7 @@ fn parse_file(chunk: &str) -> Option<FilePatch> {
         old: BTreeMap::new(),
         new: BTreeMap::new(),
         hunks: Vec::new(),
+        ends: Vec::new(),
     };
     read_hunks(&mut file, &lines);
     Some(file)
@@ -172,9 +209,16 @@ fn header_lines<'a>(lines: &'a [&'a str]) -> impl Iterator<Item = &'a str> {
 fn read_hunks(file: &mut FilePatch, lines: &[&str]) {
     let (mut old_line, mut new_line) = (0u32, 0u32);
     let mut in_hunk = false;
+    // Where the current run of removed and added lines started, on each side.
+    let mut run: Option<(u32, u32)> = None;
     for raw in lines {
         if let Some((old_start, new_start, context)) = hunk_header(raw) {
-            (old_line, new_line) = (old_start, new_start);
+            end_run(file, run.take(), new_line);
+            if !file.hunks.is_empty() {
+                file.ends.push((old_line, new_line));
+            }
+            // An empty side's range starts at 0 (`-0,0`); its first line would be line 1.
+            (old_line, new_line) = (old_start.max(1), new_start.max(1));
             file.hunks.push(context.to_owned());
             in_hunk = true;
             continue;
@@ -188,24 +232,49 @@ fn read_hunks(file: &mut FilePatch, lines: &[&str]) {
         let text = chars.as_str().to_owned();
         match marker {
             Some(' ') => {
-                file.old.insert(old_line, SideLine { text: text.clone(), hunk });
-                file.new.insert(new_line, SideLine { text, hunk });
+                end_run(file, run.take(), new_line);
+                file.old
+                    .insert(old_line, SideLine { text: text.clone(), hunk, changed: false, other: new_line });
+                file.new.insert(new_line, SideLine { text, hunk, changed: false, other: old_line });
                 old_line += 1;
                 new_line += 1;
             }
             Some('-') => {
-                file.old.insert(old_line, SideLine { text, hunk });
+                run.get_or_insert((old_line, new_line));
+                // Paired when the run ends, once its added lines are known.
+                file.old.insert(old_line, SideLine { text, hunk, changed: true, other: new_line });
                 file.deletions += 1;
                 old_line += 1;
             }
             Some('+') => {
-                file.new.insert(new_line, SideLine { text, hunk });
+                let (old_start, new_start) = *run.get_or_insert((old_line, new_line));
+                // Git writes a run's removed lines first: the j-th added line replaced the
+                // j-th removed one, if there was one.
+                let other = old_start + (new_line - new_start).min(old_line - old_start);
+                file.new.insert(new_line, SideLine { text, hunk, changed: true, other });
                 file.additions += 1;
                 new_line += 1;
             }
             Some('\\') => {} // "\ No newline at end of file" is not a line
-            _ => in_hunk = false,
+            _ => {
+                end_run(file, run.take(), new_line);
+                in_hunk = false;
+            }
         }
+    }
+    end_run(file, run.take(), new_line);
+    if !file.hunks.is_empty() {
+        file.ends.push((old_line, new_line));
+    }
+}
+
+/// Pair a finished run's removed lines with its added ones, in order: the i-th removed line
+/// sits against the i-th added line, or the first line after them when there are fewer.
+fn end_run(file: &mut FilePatch, run: Option<(u32, u32)>, new_line: u32) {
+    let Some((old_start, new_start)) = run else { return };
+    let added = new_line - new_start;
+    for (i, line) in file.old.range_mut(old_start..).enumerate().take_while(|(_, (_, l))| l.changed) {
+        line.1.other = new_start + (i as u32).min(added);
     }
 }
 

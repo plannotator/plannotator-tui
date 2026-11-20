@@ -15,6 +15,7 @@
 //! - [`input`]: keys and the mouse. [`draw`], [`rail`] and [`overlays`]: the frame.
 //! - [`send`]: send, resend, finish and undo. [`pi`]: the Pi link.
 //! - [`watch`]: noticing that the diff changed on disk, for the footer.
+//! - [`whole`]: the whole-file view (`o`, `O`), a second diffs-rs engine.
 //! - [`cli`]: `plannotator-tui review [--staged | --base REF | --commit SHA | PR] [DIR]`.
 //!
 //! A pull request review (`PR` is a GitHub link, `N` or `#N`) fetches the PR with the
@@ -37,6 +38,7 @@ mod send;
 mod tests;
 mod viewed;
 mod watch;
+mod whole;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::SyncSender;
@@ -66,6 +68,9 @@ enum Draft {
     File(String),
     /// A comment on the whole change, on no file.
     Change,
+    /// A comment on new-side lines outside every hunk, made in the whole file, with the code
+    /// it quotes.
+    Outside(Lines, String),
     /// A new body for an existing note, by id.
     Edit(String),
 }
@@ -143,6 +148,10 @@ pub(crate) struct Screen {
     watch: watch::Watch,
     /// The last key or paste, so no disk check starts while the person types.
     last_key: Option<Instant>,
+    /// The whole-file view, while it is open over the diff.
+    whole: Option<whole::Whole>,
+    /// The event loop's wake channel, for the whole-file view's engine.
+    wake: SyncSender<()>,
     quit: bool,
 }
 
@@ -169,7 +178,7 @@ impl Screen {
         let store = ReviewStore::load(data_dir, &project, &owner, &capture.scope)?;
         let light = crate::theme::theme() == crate::theme::Theme::Light;
         let watch = watch::Watch::start(&capture.scope, wake.clone());
-        let diff = Diff::open(&capture, light, wake)?;
+        let diff = Diff::open(&capture, light, wake.clone())?;
         let progress = Progress::open(&capture, data_dir, viewed::saving(data_dir));
         let mut screen = Self {
             repo,
@@ -199,6 +208,8 @@ impl Screen {
             geometry: Geometry::default(),
             watch,
             last_key: None,
+            whole: None,
+            wake,
             quit: false,
         };
         let placed = screen.place_notes()?;
@@ -231,16 +242,27 @@ impl Screen {
         let typing = matches!(self.mode, Mode::Compose(_))
             || self.last_key.is_some_and(|at| at.elapsed() < watch::QUIET_AFTER_KEY);
         changed |= self.watch.poll(&self.repo, &self.capture.scope, !typing);
-        Ok(changed || self.diff.needs_draw())
+        if let Some(whole) = &mut self.whole
+            && whole.poll(&self.capture)?
+        {
+            self.sync_whole_markers();
+            changed = true;
+        }
+        let whole_draw = self.whole.as_ref().is_some_and(whole::Whole::needs_draw);
+        Ok(changed || self.diff.needs_draw() || whole_draw)
     }
 
     pub(crate) fn after_draw(&mut self) {
         self.diff.after_draw();
+        if let Some(whole) = &mut self.whole {
+            whole.after_draw();
+        }
     }
 
     /// Stop the viewer's workers. Call it once the loop ends, so their errors are reported.
     pub(crate) fn close(&mut self) -> Result<()> {
-        self.diff.close()
+        let whole = self.whole.as_mut().map_or(Ok(()), whole::Whole::close);
+        self.diff.close().and(whole)
     }
 
     /// Resolve every note against the current capture and save where they are now. Returns
@@ -279,6 +301,12 @@ impl Screen {
         self.progress = self.progress.reopen(&capture, &self.data_dir);
         self.capture = capture;
         let placed = self.place_notes()?;
+        // The whole file is read again too, at the line it was on.
+        if let Some(whole) = &self.whole {
+            let (path, version, line) =
+                (whole.path.clone(), whole.version, whole.target()?.map(|(first, _)| first));
+            self.show_whole(&path, version, line);
+        }
         self.clamp_rail_cursor();
         self.sync_markers();
         self.derive_send_state();
@@ -311,6 +339,7 @@ impl Screen {
         if let Err(err) = self.diff.set_markers(&marks) {
             self.status = Some(format!("could not mark notes in the diff: {err:#}"));
         }
+        self.sync_whole_markers();
     }
 
     fn file(&self, path: &str) -> Option<&FilePatch> {

@@ -11,6 +11,10 @@
 //!    all of its lines, so no marker can be drawn.
 //! 4. **Outdated**: anything else. The note keeps its lines and is never dropped.
 //!
+//! A note made outside the diff (`outsideDiff`, from a whole-file view) is checked the same
+//! way, so it stays **Not in the diff** while its code reads the same, wherever the hunks
+//! are; with no recorded context, a move needs its text to read the same in one place only.
+//!
 //! Context follows the browser's record: a `null` context line was not in the patch when
 //! the note was made, so it says nothing and matches any line. The hunk's function context
 //! is compared only when both the note and the current patch have one. Lines compare with
@@ -88,8 +92,10 @@ fn resolve_lines(note: &CodeAnnotation, current: &Current<'_>) -> Resolution {
     if probe.matches(start, recorded) {
         return place(start, end);
     }
-    // A move needs the recorded context: without one, only the stored lines count.
-    if recorded.is_none() {
+    // A move needs the recorded context: without one, only the stored lines count. A note
+    // outside the diff has none by design (the browser's shape), so its text alone finds it,
+    // when that text is in exactly one place.
+    if recorded.is_none() && !note.outside_diff {
         return Resolution::Outdated;
     }
     let last_start = (file.len() as u32 + 1).saturating_sub(span);

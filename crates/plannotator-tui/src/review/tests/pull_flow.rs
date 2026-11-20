@@ -286,3 +286,42 @@ fn a_comment_on_the_whole_pr_goes_first_under_the_pr_header() {
         "a reload keeps it"
     );
 }
+
+#[test]
+fn the_whole_file_of_a_pr_is_read_from_its_commits_in_the_cache_repository() {
+    use super::whole_flow::settle_whole;
+    let pull = Pull::new("whole");
+    // No clone: the PR goes into the bare cache repository, made here first so the GitHub
+    // URL can be pointed at the local upstream for this repository only.
+    let outside = pull.dir.join("outside");
+    std::fs::create_dir_all(&outside).expect("dir");
+    let cache = pull.dir.join("cache");
+    let cache_repo = cache.join("github.com").join("o").join("app.git");
+    std::fs::create_dir_all(&cache_repo).expect("cache dir");
+    git_in(&cache_repo, &["init", "-q", "--bare"]);
+    let rewrite = format!("url.{}.insteadOf", pull.dir.join("upstream.git").display());
+    git_in(&cache_repo, &["config", &rewrite, &format!("{URL}.git")]);
+    let gh = Gh::at(pull.dir.join("gh"));
+    let (repo, capture) = Repo::pull_request(&outside, &format!("{URL}/pull/7"), &cache, &gh).expect("opens");
+    assert_eq!(capture.pull.as_ref().map(|p| p.clone.is_none()), Some(true), "fetched into the cache");
+    let merge_base = capture.pull.as_ref().map(|p| p.merge_base.clone()).expect("a PR");
+    let (wake, _ready) = std::sync::mpsc::sync_channel(1);
+    let mut screen =
+        Screen::open(repo, capture, &pull.data(), Box::new(pull.agent.clone()), wake).expect("screen");
+    settle(&mut screen);
+
+    at(&mut screen, 9);
+    keys(&mut screen, "o");
+    settle_whole(&mut screen);
+    let rows = frame(&mut screen, 120, 40);
+    assert!(rows[0].starts_with(" Whole file · new · app.py "), "{:?}", rows[0]);
+    assert!(rows.iter().any(|r| r.contains("total = a + b")), "the head's version: {rows:#?}");
+    keys(&mut screen, "o");
+    keys(&mut screen, "O");
+    settle_whole(&mut screen);
+    let rows = frame(&mut screen, 120, 40);
+    let base = format!(" Whole file · base ({}) · app.py ", &merge_base[..7]);
+    assert!(rows[0].starts_with(&base), "{:?}", rows[0]);
+    assert!(rows.iter().any(|r| r.contains("return a + b")), "the base's version: {rows:#?}");
+    assert!(!rows.iter().any(|r| r.contains("total = a + b")));
+}

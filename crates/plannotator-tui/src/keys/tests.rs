@@ -187,3 +187,15 @@ fn change_comment_is_m_in_the_code_review_and_yields_to_an_older_config() {
     let keymap = parse("reload = [\"M\"]\n").expect("an older config keeps loading");
     assert_eq!(keymap.hint(ChangeComment), "");
 }
+
+#[test]
+fn whole_file_is_o_and_whole_base_shifted_o_in_the_diff_and_yield_to_an_older_config() {
+    let keymap = Keymap::default();
+    assert_eq!(keymap.action(&press(KeyCode::Char('o'), KeyModifiers::NONE), DIFF), Some(WholeFile));
+    assert_eq!(keymap.action(&press(KeyCode::Char('O'), KeyModifiers::SHIFT), DIFF), Some(WholeBase));
+    // `o` stays open-in-editor in a document review.
+    assert_eq!(keymap.action(&press(KeyCode::Char('o'), KeyModifiers::NONE), GLOBAL), Some(OpenInEditor));
+    let keymap = parse("toggle-wrap = [\"o\"]\n").expect("an older config keeps loading");
+    assert_eq!(keymap.hint(WholeFile), "");
+    assert_eq!(keymap.hint(WholeBase), "O");
+}

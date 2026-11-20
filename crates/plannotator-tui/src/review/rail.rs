@@ -1,6 +1,7 @@
-//! The notes rail: a heading per file, a bubble per note, the outdated ones last. Bubbles
-//! are drawn like a document review's; the selected one is kept in view, and moving to a
-//! note moves the diff to it.
+//! The notes rail: a heading per file, a bubble per note, then the notes not in the diff and
+//! the outdated ones. Bubbles are drawn like a document review's; the selected one is kept in
+//! view, and moving to a note moves the diff to it. Enter on a note not in the diff shows it
+//! in the whole file.
 
 use plannotator_tui_review::{CodeAnnotation, NoteScope, Side};
 use ratatui::Frame;
@@ -10,6 +11,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
 use super::notes::{self, Row};
+use super::whole::Version;
 use super::{Focus, Screen};
 use crate::theme::palette;
 use crate::wrap::wrap_line;
@@ -61,30 +63,64 @@ impl Screen {
         self.show_selected_note();
     }
 
+    /// Enter on a note: a note not in the diff opens in the whole file at its line; any
+    /// other closes the whole file and shows the note in the diff.
+    pub(super) fn open_selected_note(&mut self) -> anyhow::Result<()> {
+        let Some(note) = self.selected_note() else { return Ok(()) };
+        if notes::is_not_in_diff(note) {
+            let (path, version, line) = (note.file_path.clone(), Version::of(note.side), note.line_start);
+            self.show_whole(&path, version, Some(line));
+            return Ok(());
+        }
+        self.close_whole()?;
+        self.show_selected_note();
+        Ok(())
+    }
+
     /// Scroll the diff to the selected note: its first line, or its file's first shown line
-    /// for a file note. An outdated note has no place to go.
+    /// for a file note. An outdated note has no place to go. With the whole file open, a note
+    /// on its lines is shown there instead.
     pub(super) fn show_selected_note(&mut self) {
         let Some(note) = self.selected_note() else { return };
         let path = note.file_path.clone();
+        let (side, line) = (note.side, note.line_start);
+        let on_lines = note.scope == NoteScope::Line && !notes::is_outdated(note);
         let place = match note.scope {
             // On no file: the rail is its only place.
             NoteScope::General => return,
-            NoteScope::Line if notes::in_diff(note) => Some((note.side, note.line_start)),
+            NoteScope::Line if notes::in_diff(note) => Ok((side, line)),
             NoteScope::Line if notes::is_outdated(note) => {
-                self.status = Some("outdated: its code is gone from the diff".into());
-                return;
+                Err("outdated: its code is gone from the diff".to_owned())
             }
-            _ => self.file(&path).and_then(|file| {
-                let new = file.lines(Side::New).next().map(|(n, _)| (Side::New, n));
-                new.or_else(|| file.lines(Side::Old).next().map(|(n, _)| (Side::Old, n)))
-            }),
+            NoteScope::Line if notes::is_not_in_diff(note) => {
+                let key = self.keys.hint(crate::keys::Action::Confirm);
+                Err(format!("not in the diff: {key} shows it in the whole file"))
+            }
+            _ => self
+                .file(&path)
+                .and_then(|file| {
+                    let new = file.lines(Side::New).next().map(|(n, _)| (Side::New, n));
+                    new.or_else(|| file.lines(Side::Old).next().map(|(n, _)| (Side::Old, n)))
+                })
+                .ok_or_else(|| "not in the diff: its lines are unchanged now".to_owned()),
         };
-        let Some((side, line)) = place else {
-            self.status = Some("not in the diff: its lines are unchanged now".into());
+        if let Some(whole) = &mut self.whole {
+            if whole.path == path
+                && whole.version.side() == side
+                && on_lines
+                && let Err(err) = whole.reveal_line(line)
+            {
+                self.status = Some(format!("{err:#}"));
+            }
             return;
-        };
-        if let Err(err) = self.diff.reveal(&path, side, line) {
-            self.status = Some(format!("{err:#}"));
+        }
+        match place {
+            Ok((side, line)) => {
+                if let Err(err) = self.diff.reveal(&path, side, line) {
+                    self.status = Some(format!("{err:#}"));
+                }
+            }
+            Err(status) => self.status = Some(status),
         }
     }
 
@@ -112,6 +148,10 @@ impl Screen {
                 }
                 Row::File(path) => Some(Piece::Heading(
                     format!(" {}", tail(path, usize::from(rail.width).saturating_sub(1))),
+                    Style::new().fg(palette().accent).bold(),
+                )),
+                Row::NotInDiff => Some(Piece::Heading(
+                    " Not in the diff".to_owned(),
                     Style::new().fg(palette().accent).bold(),
                 )),
                 Row::Outdated => {
@@ -182,10 +222,6 @@ impl Screen {
         let author = note.author_name.as_deref().filter(|n| !n.is_empty());
         if let Some(name) = author {
             tags.push(name.to_owned());
-        }
-        let off_diff = !notes::is_outdated(note) && note.scope == NoteScope::Line && !notes::in_diff(note);
-        if off_diff {
-            tags.push("not in diff".to_owned());
         }
         let sent = !self.store.is_pending(note);
         if sent {

@@ -191,3 +191,65 @@ fn lines_walk_one_side_in_order() {
     assert!(old.is_sorted(), "ascending: {old:?}");
     assert_eq!(code.lines(Side::Old).find(|(_, text)| text.contains("two")), Some((3, "    two();")));
 }
+
+/// Three lines added at the top and one removed further down, for mapping lines across.
+const SHIFTED: &str = concat!(
+    "diff --git a/m.py b/m.py\n",
+    "--- a/m.py\n",
+    "+++ b/m.py\n",
+    "@@ -1,3 +1,6 @@\n",
+    "+import os\n",
+    "+import sys\n",
+    "+\n",
+    " def a():\n",
+    "     pass\n",
+    " \n",
+    "@@ -10,4 +13,3 @@ def b():\n",
+    "     x = 1\n",
+    "-    y = 2\n",
+    "     z = 3\n",
+    "     return x\n",
+);
+
+#[test]
+fn changed_ranges_are_the_added_or_removed_runs_only() {
+    let files = parse(SHIFTED);
+    let file = file(&files, "m.py");
+    assert_eq!(file.changed_ranges(Side::New), [(1, 3)]);
+    assert_eq!(file.changed_ranges(Side::Old), [(11, 11)]);
+    let mixed = files_and(MIXED, "code.rs");
+    assert_eq!(mixed.changed_ranges(Side::New), [(3, 3), (15, 15)]);
+}
+
+#[test]
+fn a_line_maps_to_its_twin_inside_and_outside_the_hunks() {
+    let files = parse(SHIFTED);
+    let file = file(&files, "m.py");
+    // Context in the first hunk, then outside any hunk, then in the second hunk.
+    assert_eq!(file.map_line(Side::Old, 1), 4);
+    assert_eq!(file.map_line(Side::New, 4), 1);
+    assert_eq!(file.map_line(Side::Old, 7), 10, "between hunks the offset is +3");
+    assert_eq!(file.map_line(Side::New, 10), 7);
+    assert_eq!(file.map_line(Side::Old, 10), 13);
+    // The removed line sits against the new side's next line; added lines against old 1.
+    assert_eq!(file.map_line(Side::Old, 11), 14);
+    assert_eq!(file.map_line(Side::New, 2), 1);
+    // Below the last hunk: +3 for the imports, -1 for the removed line.
+    assert_eq!(file.map_line(Side::Old, 20), 22);
+    assert_eq!(file.map_line(Side::New, 22), 20);
+    assert_eq!(file.map_line(Side::New, 0), 1, "never below line 1");
+    // A replaced line maps to the line it replaced, both ways.
+    let code = files_and(MIXED, "code.rs");
+    assert_eq!((code.map_line(Side::New, 3), code.map_line(Side::Old, 3)), (3, 3));
+    assert_eq!((code.map_line(Side::New, 15), code.map_line(Side::Old, 15)), (15, 15));
+    // Three lines replaced by one: the extra removed lines sit after it.
+    let three_for_one =
+        parse("diff --git a/t b/t\n--- a/t\n+++ b/t\n@@ -1,5 +1,3 @@\n a\n-b\n-c\n-d\n+B\n e\n");
+    let t = three_for_one.first().expect("one file");
+    assert_eq!([2, 3, 4, 5].map(|n| t.map_line(Side::Old, n)), [2, 3, 3, 3]);
+    assert_eq!(t.map_line(Side::New, 2), 2);
+}
+
+fn files_and(text: &str, wanted: &str) -> FilePatch {
+    parse(text).into_iter().find(|f| f.path == wanted).expect("the file")
+}

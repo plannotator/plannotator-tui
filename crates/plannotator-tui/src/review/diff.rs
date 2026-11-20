@@ -43,6 +43,8 @@ pub(super) struct Diff {
     /// The capture's path for each engine file, in engine order, as far as files have
     /// arrived.
     paths: Vec<String>,
+    /// A whole-file view's one file, named by its capture path whatever the patch says.
+    fixed: Option<String>,
 }
 
 impl std::fmt::Debug for Diff {
@@ -62,7 +64,21 @@ impl Diff {
             ..Options::default()
         };
         let engine = Engine::open(input(capture)?, options, wake).context("opening the diff viewer")?;
-        Ok(Self { engine, paths: Vec::new() })
+        Ok(Self { engine, paths: Vec::new(), fixed: None })
+    }
+
+    /// A whole-file view: `patch` is one file as a single unchanged hunk (`super::whole`),
+    /// shown unified, its lines named by `path`.
+    pub(super) fn open_whole(bytes: &[u8], name: &str, light: bool, wake: SyncSender<()>) -> Result<Self> {
+        let options = Options {
+            appearance: if light { Appearance::Light } else { Appearance::Dark },
+            layout: engine::Layout::Unified,
+            chrome: false,
+            ..Options::default()
+        };
+        let input = input_bytes(bytes, name.to_owned())?;
+        let engine = Engine::open(input, options, wake).context("opening the whole-file view")?;
+        Ok(Self { engine, paths: Vec::new(), fixed: Some(name.to_owned()) })
     }
 
     /// Show a new capture of the same review, keeping the layout and wrapping.
@@ -80,6 +96,10 @@ impl Diff {
         if files == self.paths.len() {
             return Ok(false);
         }
+        if let Some(path) = &self.fixed {
+            self.paths = vec![path.clone(); files.min(1)];
+            return Ok(true);
+        }
         self.paths = (0..files).map(|index| self.capture_path(capture, index)).collect();
         Ok(true)
     }
@@ -95,7 +115,6 @@ impl Diff {
     }
 
     /// How many files the viewer has so far.
-    #[cfg(test)]
     pub(super) fn files_shown(&self) -> usize {
         self.paths.len()
     }
@@ -222,6 +241,10 @@ impl Diff {
 /// The patch as a stream: a temporary file, unlinked as soon as it is open, so nothing is
 /// left behind however the review ends.
 fn input(capture: &Capture) -> Result<Input> {
+    input_bytes(&capture.patch, capture.scope.title())
+}
+
+fn input_bytes(bytes: &[u8], label: String) -> Result<Input> {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let path = std::env::temp_dir().join(format!(
         "plannotator-tui-patch-{}-{}",
@@ -235,9 +258,9 @@ fn input(capture: &Capture) -> Result<Input> {
         .open(&path)
         .with_context(|| format!("creating {}", path.display()))?;
     let _ = std::fs::remove_file(&path);
-    file.write_all(&capture.patch).context("writing the patch for the viewer")?;
+    file.write_all(bytes).context("writing the patch for the viewer")?;
     file.rewind().context("rewinding the patch for the viewer")?;
-    Ok(Input::Stream { file, label: capture.scope.title() })
+    Ok(Input::Stream { file, label })
 }
 
 fn side_of(side: engine::Side) -> Side {
