@@ -21,8 +21,10 @@ use crate::theme::palette;
 use crate::wrap::{Hang, Row, clip_line, rule_row, wrap_line, wrap_line_hanging, wrap_table};
 
 mod background;
+mod worker_panic;
 
 use background::{Rest, each_in_parallel, lay_out};
+pub(crate) use worker_panic::keep_hook_off_layout_threads;
 
 /// Rows of vertical space between blocks.
 const BLOCK_GAP: usize = 1;
@@ -173,7 +175,6 @@ impl DocLayout {
     }
 
     /// Whether every block is laid out.
-    #[cfg(test)]
     pub(crate) fn is_complete(&self) -> bool {
         self.rest.is_none()
     }
@@ -188,6 +189,13 @@ impl DocLayout {
         }
         self.blocks.append(&mut blocks);
         self.place();
+    }
+
+    /// Add the background blocks if they are ready, without waiting.
+    pub(crate) fn poll(&mut self) {
+        if self.rest.as_ref().is_some_and(Rest::is_finished) {
+            self.finish();
+        }
     }
 
     /// [`DocLayout::finish`] when document row `end` lies past the rows laid out so far.

@@ -603,6 +603,7 @@ pub(crate) fn with_terminal<T>(
         &config.colors,
     );
     let mut terminal = ratatui::init();
+    crate::layout::keep_hook_off_layout_threads();
     #[cfg(unix)]
     crate::hangup::watch();
     execute!(stdout(), EnableMouseCapture)?;
@@ -673,6 +674,8 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<O
             app.editor_returned(&request, outcome);
             dirty = true;
         }
+        // Merges the background layout when it is done; a panic there ends the app here.
+        app.poll_layout();
         dirty |= app.poll_file_search();
         dirty |= app.poll_disk();
         dirty |= app.poll_pi();
@@ -682,7 +685,7 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<O
             app.record_frame(started.elapsed().as_secs_f64() * 1000.0);
             dirty = false;
         }
-        let wait_ms = if app.file_search_scanning() { 25 } else { 250 };
+        let wait_ms = if app.file_search_scanning() || app.layout_pending() { 25 } else { 250 };
         if event::poll(Duration::from_millis(wait_ms))? {
             app.handle_event(&event::read()?)?;
             dirty = true;

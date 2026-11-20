@@ -79,6 +79,7 @@ impl App {
         .areas(body);
         let old_height = self.geometry.doc.height;
         self.geometry = Geometry { tree, doc, ..Geometry::default() };
+        self.settle_layout_for_view();
 
         // A layout is at least one column wide, so an empty pane must not count as a resize.
         let layout_width = usize::from(doc.width).max(1);
@@ -92,9 +93,6 @@ impl App {
         if doc.height < old_height {
             self.keep_focus_in_view(old_height);
         }
-        // A long document is laid out below the first screens in the background; wait for
-        // it only when the view reaches past what is ready.
-        self.open.layout.finish_through(self.scroll + usize::from(doc.height));
 
         self.draw_header(frame, header);
         if show_tree {
@@ -495,6 +493,7 @@ impl App {
                     let chars = self.open.doc.source.get(p.range.clone()).map_or(0, |s| s.chars().count());
                     format!("selected {chars} chars")
                 }
+                None if self.open.doc.blocks.is_empty() => "empty document".to_owned(),
                 None => format!("block {}/{}", self.selected + 1, self.open.doc.blocks.len()),
             },
         ]);

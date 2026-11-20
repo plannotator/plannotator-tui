@@ -4,6 +4,8 @@
 mod approve;
 mod archive_view;
 mod disk;
+#[cfg(test)]
+mod doc_size_tests;
 mod draw;
 mod editor;
 mod feedback;
@@ -11,8 +13,6 @@ mod file_search;
 mod header;
 mod images;
 mod input;
-#[cfg(test)]
-mod long_doc_tests;
 mod menu;
 mod pi_target;
 mod pick;
@@ -601,6 +601,28 @@ impl App {
         }
     }
 
+    /// Wait for the background layout when the view, the cursor, the selected block or a
+    /// pending selection lies past the rows laid out so far, as after a reload deep in a long
+    /// document. A view near the top, as every document opens, does not wait.
+    fn settle_layout_for_view(&mut self) {
+        let height = usize::from(self.geometry.doc.height.max(1));
+        let pending = self.pending.as_ref().map_or(0, |p| p.at.0 + 1);
+        self.open.layout.finish_through((self.scroll + height).max(self.cursor.0 + 1).max(pending));
+        if self.selected >= self.open.layout.blocks.len() {
+            self.open.layout.finish();
+        }
+    }
+
+    /// Add the background layout once it is ready, without waiting for it.
+    pub(crate) fn poll_layout(&mut self) {
+        self.open.layout.poll();
+    }
+
+    /// Whether part of the open document is still being laid out in the background.
+    pub(crate) fn layout_pending(&self) -> bool {
+        !self.open.layout.is_complete()
+    }
+
     /// The footer took rows from a document `old_height` tall: scroll just enough to keep what
     /// the keys act on in view. Anything already off screen stays there, so a reader who
     /// scrolled away is not pulled back.
@@ -621,6 +643,9 @@ impl App {
 
     fn scroll_by(&mut self, delta: i64) {
         let height = usize::from(self.geometry.doc.height.max(1));
+        // The clamp needs the document's real end, not the end of the rows ready so far.
+        let wanted = (self.scroll as i64 + delta).max(0) as usize;
+        self.open.layout.finish_through(wanted + height);
         let max = self.open.layout.total_rows.saturating_sub(height);
         self.scroll = (self.scroll as i64 + delta).clamp(0, max as i64) as usize;
     }
