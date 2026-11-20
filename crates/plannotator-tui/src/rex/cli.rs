@@ -1,5 +1,5 @@
 //! `plannotator-tui rex …`: the launchers a Rex action or an agent runs, and `rex pane`, the
-//! entry point of the split they open.
+//! entry point of the pane they open.
 
 #![allow(clippy::print_stdout, reason = "`--print` is a stdout contract")]
 
@@ -13,13 +13,13 @@ use crate::cli::{USAGE, gated_pane, interactive, last_command, lines_value, revi
 use crate::config::RexPlacement;
 use crate::gate::{self, GateError};
 
-/// `plannotator-tui rex open|last|terminal|find|review`: open a review beside a block (a split)
-/// or over it (`--placement popup`, or `[rex] placement`). The block defaults to `REX_BLOCK`, so
-/// an agent running this from its own block reviews itself. `rex install` writes the Rex
-/// Annotate module.
-/// `--paste` leaves the feedback in the agent's prompt instead of sending it; `open --gate`
-/// adds Approve, as `herdr open --gate` does. `rex pane` is what the split runs. A gated open
-/// with a result file fails as a [`GateError`], like the direct gate.
+/// `plannotator-tui rex open|last|terminal|find|review`: open a review full size in a tab of
+/// its own (`tab`, the default), beside a block (`split`) or over it (`popup`), as
+/// `--placement` or `[rex] placement` says. The block defaults to `REX_BLOCK`, so an agent
+/// running this from its own block reviews itself. `rex install` writes the Rex Annotate
+/// module. `--paste` leaves the feedback in the agent's prompt instead of sending it;
+/// `open --gate` adds Approve, as `herdr open --gate` does. `rex pane` is what the review pane
+/// runs. A gated open with a result file fails as a [`GateError`], like the direct gate.
 pub(crate) fn run(args: &[String]) -> Result<()> {
     let strict = args.first().is_some_and(|sub| sub == "open") && gate::is_strict(args);
     launch_review(args).map_err(|err| if strict { GateError(err).into() } else { err })
@@ -50,7 +50,7 @@ fn launch_review(args: &[String]) -> Result<()> {
             ("--session", _) => session = Some(rest.next().context("--session needs a value")?.clone()),
             ("--paste", _) => handoff = Handoff::Paste,
             ("--placement", _) => {
-                let value = rest.next().context("--placement needs split or popup")?;
+                let value = rest.next().context("--placement needs split, popup or tab")?;
                 placement = Some(value.parse::<RexPlacement>()?);
             }
             ("--newest", Review::Last { newest }) => *newest = true,
@@ -132,7 +132,7 @@ fn review_block(args: &[String]) -> Result<()> {
             "--session" => session = Some(rest.next().context("--session needs a value")?.clone()),
             "--paste" => handoff = Handoff::Paste,
             "--placement" => {
-                let value = rest.next().context("--placement needs split or popup")?;
+                let value = rest.next().context("--placement needs split, popup or tab")?;
                 placement = Some(value.parse::<RexPlacement>()?);
             }
             _ => scope.push(arg.clone()),
@@ -149,8 +149,9 @@ fn review_block(args: &[String]) -> Result<()> {
     launch::open(&rex, &block, &fg, &review, handoff, configured(placement)?)
 }
 
-/// The split's entry point. Rex closes the split when this exits, so an error waits for
-/// Enter rather than flash by unread.
+/// The review pane's entry point. Rex closes the pane when this exits, so an error waits for
+/// Enter rather than flash by unread. A review in a tab of its own then shows the pane it was
+/// opened from again.
 fn pane(args: &[String]) -> Result<()> {
     let result = match args.first().map(String::as_str) {
         Some("last") => last_command(args.get(1..).unwrap_or_default()),
@@ -173,6 +174,12 @@ fn pane(args: &[String]) -> Result<()> {
     };
     if let Err(err) = &result {
         wait_on_error(err);
+    }
+    if let Some(back) = std::env::var(launch::RETURN_VAR).ok().filter(|b| !b.is_empty())
+        && let Some(own) = std::env::var("REX_BLOCK").ok().filter(|b| !b.is_empty())
+        && let Ok(rex) = Rex::from_lookup(|k| std::env::var(k).ok(), None)
+    {
+        super::place::show_again(&rex, &own, &back);
     }
     result
 }
@@ -216,9 +223,9 @@ mod tests {
     }
 
     #[test]
-    fn a_placement_is_split_or_popup_and_named_when_wrong() {
+    fn a_placement_is_split_popup_or_tab_and_named_when_wrong() {
         let err = run(&args(&["open", "--placement", "overlay"])).expect_err("refused").to_string();
-        assert!(err.contains("\"overlay\"") && err.contains("split or popup"), "{err}");
+        assert!(err.contains("\"overlay\"") && err.contains("split, popup or tab"), "{err}");
     }
 
     #[cfg(unix)]
@@ -234,7 +241,7 @@ mod tests {
             err(&["review", "--staged", "--commit", "HEAD"]),
             "pick one of --staged, --base, --commit and a pull request"
         );
-        assert!(err(&["review", "--placement", "overlay"]).contains("split or popup"));
+        assert!(err(&["review", "--placement", "overlay"]).contains("split, popup or tab"));
     }
 
     #[cfg(not(unix))]

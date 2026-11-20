@@ -163,15 +163,19 @@ pub(crate) struct RexConfig {
     pub(crate) placement: RexPlacement,
 }
 
-/// Where a Rex review opens. Rex has no overlay; a popup is a floating layer.
+/// Where a Rex review opens. Rex has no overlay; a popup is a floating layer, and a tab is a
+/// Rex window of its own (the Mac app shows a session's windows as tabs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum RexPlacement {
     /// A split to the right of the agent's block, so the agent stays in view.
-    #[default]
     Split,
     /// A floating layer over the agent's window.
     Popup,
+    /// A new tab holding only the review, at full size, as Herdr's overlay is. Closing the
+    /// review closes the tab and shows the agent's pane again.
+    #[default]
+    Tab,
 }
 
 impl FromStr for RexPlacement {
@@ -181,7 +185,8 @@ impl FromStr for RexPlacement {
         match s {
             "split" => Ok(Self::Split),
             "popup" => Ok(Self::Popup),
-            other => anyhow::bail!("unknown Rex placement {other:?}; expected split or popup"),
+            "tab" => Ok(Self::Tab),
+            other => anyhow::bail!("unknown Rex placement {other:?}; expected split, popup or tab"),
         }
     }
 }
@@ -272,14 +277,29 @@ mod tests {
     }
 
     #[test]
-    fn rex_opens_in_a_split_unless_a_popup_is_asked_for_and_has_no_overlay() {
-        assert_eq!(Config::default().rex.placement, RexPlacement::Split);
+    fn rex_opens_in_a_tab_unless_a_split_or_popup_is_asked_for_and_has_no_overlay() {
+        assert_eq!(Config::default().rex.placement, RexPlacement::Tab);
+        let split = Config::parse("[rex]\nplacement = \"split\"\n").expect("parses");
+        assert_eq!(
+            split.rex.placement,
+            RexPlacement::Split,
+            "a setting written for the old default still holds"
+        );
         let popup = Config::parse("[rex]\nplacement = \"popup\"\n").expect("parses");
         assert_eq!(popup.rex.placement, RexPlacement::Popup);
         assert_eq!(popup.herdr, HerdrConfig::default());
         let err = Config::parse("[rex]\nplacement = \"overlay\"\n").expect_err("rejected");
         assert!(err.to_string().contains("overlay"), "{err}");
         assert!("overlay".parse::<RexPlacement>().is_err());
+    }
+
+    #[test]
+    fn rex_opens_full_size_in_a_tab_of_its_own_when_asked() {
+        let tab = Config::parse("[rex]\nplacement = \"tab\"\n").expect("parses");
+        assert_eq!(tab.rex.placement, RexPlacement::Tab);
+        assert_eq!("tab".parse::<RexPlacement>().ok(), Some(RexPlacement::Tab));
+        let err = "full".parse::<RexPlacement>().expect_err("rejected").to_string();
+        assert_eq!(err, "unknown Rex placement \"full\"; expected split, popup or tab");
     }
 
     #[test]

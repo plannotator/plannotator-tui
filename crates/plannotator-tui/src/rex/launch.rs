@@ -1,6 +1,7 @@
 //! `plannotator-tui rex last|open|terminal|find|review`: find the agent in a Rex block and open
-//! plannotator-tui beside it (a split) or over it (a popup), wired to send feedback back to
-//! the block. Either is an ordinary pane, so it keeps Rex's frame and theme. `foreground`,
+//! plannotator-tui in a tab of its own, beside the block (a split) or over it (a popup), wired
+//! to send feedback back to the block. Each is an ordinary pane, so it keeps Rex's frame and
+//! theme. `foreground`,
 //! `reported_host` and `argv` are pure; only `run` touches Rex.
 
 use std::path::{Path, PathBuf};
@@ -181,12 +182,40 @@ pub(crate) fn open(
     placement: RexPlacement,
 ) -> Result<()> {
     let exe = std::env::current_exe().context("finding the plannotator-tui binary")?;
-    let args = argv(&exe, block, fg, review, handoff)?;
+    let mut args = argv(&exe, block, fg, review, handoff)?;
+    if placement == RexPlacement::Tab {
+        returning_to(&mut args, block);
+    }
     let cwd = match review {
         Review::Code { repo, .. } => Some(repo.as_path()),
         _ => fg.cwd.as_deref(),
     };
-    super::place::open(rex, block, placement, cwd, &args)
+    super::place::open(rex, block, placement, cwd, &args, &tab_label(fg, review))
+}
+
+/// The block a review in a tab of its own shows again when it ends: when a tab closes, Rex
+/// shows a neighbouring tab, which need not be the agent's.
+pub(crate) const RETURN_VAR: &str = "PLANNOTATOR_TUI_REX_RETURN";
+
+/// Have the pane `args` runs (`/usr/bin/env …`) show `block` again when the review ends.
+fn returning_to(args: &mut Vec<String>, block: &str) {
+    args.insert(1, format!("{RETURN_VAR}={block}"));
+}
+
+/// A tab's label: `Annotate · ` and the file or folder an `open` reviews, else the agent,
+/// else the block's folder.
+fn tab_label(fg: &Foreground, review: &Review) -> String {
+    let name = |path: &Path| path.file_name().map(|n| n.to_string_lossy().into_owned());
+    let what = match review {
+        Review::Open(path, _) => path.as_deref().or(fg.cwd.as_deref()).and_then(name),
+        Review::Code { repo, .. } => fg.host.map(str::to_owned).or_else(|| name(repo)),
+        _ => fg.host.map(str::to_owned).or_else(|| fg.cwd.as_deref().and_then(name)),
+    };
+    // Rex takes a window label of up to 128 characters.
+    what.map_or_else(
+        || "Annotate".to_owned(),
+        |what| format!("Annotate · {what}").chars().take(128).collect(),
+    )
 }
 
 #[cfg(test)]
@@ -354,5 +383,33 @@ mod tests {
             args,
             ["/usr/bin/env", "/bin/pt", "rex", "pane", "terminal", "--block", "block:b", "--lines", "80"]
         );
+    }
+
+    #[test]
+    fn a_review_in_a_tab_knows_the_block_to_show_again_when_it_ends() {
+        let review = Review::Open(Some(PathBuf::from("/Users/me/project/plan.md")), Some(Gate::default()));
+        let mut args =
+            argv(Path::new("/bin/pt"), "block:b", &parse(CLAUDE), &review, Handoff::Send).expect("argv");
+        returning_to(&mut args, "block:b");
+        assert_eq!(
+            args.get(..3),
+            Some(
+                &["/usr/bin/env", "PLANNOTATOR_TUI_REX_RETURN=block:b", "PLANNOTATOR_TUI_REX_BLOCK=block:b"]
+                    .map(String::from)[..]
+            )
+        );
+        assert_eq!(args.iter().rev().take(2).collect::<Vec<_>>(), ["--gate", "/Users/me/project/plan.md"]);
+    }
+
+    #[test]
+    fn a_tab_is_named_for_the_file_it_opens_else_the_agent_else_the_folder() {
+        let open = |path: Option<&str>| Review::Open(path.map(PathBuf::from), None);
+        assert_eq!(tab_label(&parse(CLAUDE), &open(Some("/Users/me/project/plan.md"))), "Annotate · plan.md");
+        assert_eq!(tab_label(&parse(CLAUDE), &open(None)), "Annotate · project");
+        assert_eq!(tab_label(&parse(CLAUDE), &Review::Last { newest: false }), "Annotate · claude");
+        let code = Review::Code { scope: "uncommitted".to_owned(), repo: PathBuf::from("/p/repo") };
+        assert_eq!(tab_label(&parse(CLAUDE), &code), "Annotate · claude");
+        assert_eq!(tab_label(&parse(SHELL), &code), "Annotate · repo");
+        assert_eq!(tab_label(&parse(SHELL), &Review::Terminal { lines: 80 }), "Annotate · me");
     }
 }

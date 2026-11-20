@@ -474,20 +474,27 @@ Rex for Mac binds none of these keys by default. Change or add keys, or bind non
 
 ```lua
 require("plannotator.annotate").setup{
-  placement = "popup",                       -- default: [rex] placement, else split
+  placement = "split",                       -- tab | split | popup; default: [rex] placement, else tab
   keys = { annotate_gate = "ctrl+cmd+a", annotate_last = false },
   -- keys = false binds none; the actions stay in the palette
 }
 ```
 
-A review opens in a split to the right of the pane, so the agent stays in view, or in a
-floating popup over the pane's window:
+A review opens full size in a tab of its own, as Herdr's overlay does. It can open instead in
+a split to the right of the pane, so the agent stays in view, or in a floating popup over the
+pane's window:
 
 ```toml
 # ~/.config/plannotator-tui/config.toml
 [rex]
-placement = "split"   # split (default) | popup
+placement = "tab"   # tab (full size, default) | split | popup
 ```
+
+The tab is a new tab (a Rex window) in the agent's session, named `Annotate · ` and the file,
+agent or folder it reviews. Send and `P` work as in a split. When the review ends, Rex closes
+its tab and plannotator-tui shows the pane it was opened from again, unless you have moved to
+another tab by then. Earlier releases opened a split by default; set `placement = "split"` to
+keep that.
 
 Everything goes through the Rex server, so the app's Remote Control setting can stay off.
 
@@ -504,7 +511,7 @@ plannotator-tui rex review [--staged | --base REF | --commit SHA | PR] # a code 
 ```
 
 The pane is `--block <id>`, else `REX_BLOCK`, so an agent that runs a launcher in its own
-shell reviews itself; that is how it hands you a plan. `--placement split|popup` overrides the
+shell reviews itself; that is how it hands you a plan. `--placement split|popup|tab` overrides the
 config. `--paste` puts the feedback in the agent's prompt without pressing Enter and focuses the
 agent's pane, so you can edit it first; the header says `claude prompt in a1d6db`.
 `rex open --gate [--result-file <path>]` adds Approve for a sign-off, as `herdr open --gate` does.
