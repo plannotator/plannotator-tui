@@ -115,7 +115,7 @@ fn notes_outside_the_diff_close_the_body_quoted_and_linked_never_inline() {
     let general = note(json!({"id": "g", "scope": "general", "filePath": "", "lineStart": 0, "lineEnd": 0,
         "text": "overall fine"}));
     let plan = plan(&[outside, general]);
-    assert!(plan.comments.is_empty(), "{:?}", plan.comments);
+    assert_eq!(plan.comments, [], "never inline");
     assert_eq!(
         plan.body,
         format!(
@@ -146,7 +146,7 @@ fn outdated_notes_and_notes_off_the_diff_go_in_the_body_with_their_code() {
     let gone = note(json!({"id": "z", "type": "suggestion", "lineStart": 40, "lineEnd": 41,
         "suggestedCode": "fixed()"}));
     let plan = plan(&[outdated, off, gone]);
-    assert!(plan.comments.is_empty());
+    assert_eq!(plan.comments, []);
     assert_eq!(
         plan.body,
         format!(
@@ -172,7 +172,7 @@ fn posted_notes_are_left_out_and_edited_ones_post_again_as_new() {
     assert_eq!(plan.reposted, ["b"]);
     assert_eq!(plan.ids(), ["b", "c"]);
     let all_posted = plan_with(&notes, |_| Posting::Posted);
-    assert!(all_posted.is_empty());
+    assert_eq!((all_posted.comments.len(), all_posted.body.as_str()), (0, ""), "nothing to post");
     assert_eq!(all_posted.count_skipped(Skip::AlreadyPosted), 3);
 }
 

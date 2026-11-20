@@ -222,7 +222,7 @@ fn a_refused_post_posts_nothing_and_names_the_comments() {
     );
     let rows = frame(&mut screen, 120, 40);
     row_with(&rows, "Nothing was posted");
-    assert!(screen.store.posts().is_empty());
+    assert_eq!(screen.store.posts(), []);
     assert!(screen.store.annotations().iter().all(|n| !screen.store.is_posted(n)));
     assert_eq!(screen.status.as_deref(), Some("nothing posted to GitHub: GitHub refused a comment's place"));
 }
@@ -253,7 +253,7 @@ fn gh_errors_are_named_and_post_nothing() {
         let Mode::Post(confirm) = &screen.mode else { panic!("the summary stays open") };
         let failed = confirm.failed.clone().unwrap_or_default();
         assert!(failed.starts_with(&format!("Nothing was posted: {says}")), "{failed}");
-        assert!(screen.store.posts().is_empty());
+        assert_eq!(screen.store.posts(), []);
     }
 }
 
