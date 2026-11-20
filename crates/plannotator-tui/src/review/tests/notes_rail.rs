@@ -153,3 +153,28 @@ fn the_help_names_the_key() {
     let help = frame(&mut screen, 120, 40);
     assert!(row_with(&help, "hide the notes").contains('z'), "{}", help.join("\n"));
 }
+
+#[test]
+fn the_whole_file_view_keeps_the_rail_as_the_person_left_it_and_z_works_there() {
+    let fixture = Fixture::new("rail-whole");
+    let mut screen = noted(&fixture);
+    keys(&mut screen, "z");
+    at(&mut screen, 9);
+    keys(&mut screen, "o");
+    whole_flow::settle_whole(&mut screen);
+    let rows = frame(&mut screen, 120, 40);
+    assert!(!rows.iter().any(|r| r.contains("name the total")), "still closed in the view");
+    assert_eq!(screen.geometry.diff.width, 120, "the whole file takes the rail's columns");
+    assert!(row_with(&rows, "notes hidden: z shows them").contains("2 notes"));
+
+    keys(&mut screen, "z");
+    let rows = frame(&mut screen, 120, 40);
+    assert!(row_with(&rows, "name the total").contains('\u{2502}'), "z opens it in the view");
+    assert_eq!(screen.geometry.diff.width, 120 - 1 - rail(120));
+    keys(&mut screen, "z");
+    keys(&mut screen, "o");
+    assert!(screen.whole.is_none(), "back in the diff");
+    let rows = frame(&mut screen, 120, 40);
+    assert!(!rows.iter().any(|r| r.contains("name the total")), "and still closed there");
+    assert_eq!(screen.geometry.diff.width, 120);
+}
