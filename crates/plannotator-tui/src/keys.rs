@@ -97,6 +97,11 @@ pub(crate) enum Action {
     WholeBase,
     /// Hide the notes rail, or show it again, in the document and in the code review.
     ToggleNotes,
+    /// Find text in the open document.
+    Search,
+    /// The next or previous match of the last search, wrapping at either end.
+    NextMatch,
+    PreviousMatch,
 }
 
 use Action::{
@@ -107,8 +112,9 @@ use Action::{
     Up, Visual, VisualLine, WordBack, WordEnd, WordForward, Yes,
 };
 use Action::{
-    ChangeComment, FileComment, Help, NextFile, NextHunk, NextUnviewed, PreviousFile, PreviousHunk,
-    PreviousUnviewed, Suggest, ToggleFiles, ToggleLayout, ToggleViewed, ToggleWrap, WholeBase, WholeFile,
+    ChangeComment, FileComment, Help, NextFile, NextHunk, NextMatch, NextUnviewed, PreviousFile,
+    PreviousHunk, PreviousMatch, PreviousUnviewed, Search, Suggest, ToggleFiles, ToggleLayout, ToggleViewed,
+    ToggleWrap, WholeBase, WholeFile,
 };
 use Action::{NarrowColumn, ToggleNotes, WidenColumn};
 
@@ -157,6 +163,9 @@ pub(crate) const DOCUMENT: &[Action] = &[
     RemoveImage,
     NarrowColumn,
     WidenColumn,
+    Search,
+    NextMatch,
+    PreviousMatch,
 ];
 /// Marking the selected block, tried only when no `DOCUMENT` action claims the key. They sit
 /// outside `SHARED` so a config that gave `a` or `d` to a document action keeps loading.
@@ -430,11 +439,14 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (WholeFile, &[ch('o')]),
     (WholeBase, &[ch('O')]),
     (ToggleNotes, &[ch('z')]),
+    (Search, &[ch('/')]),
+    (NextMatch, &[ch('n')]),
+    (PreviousMatch, &[ch('N')]),
 ];
 
 /// Actions added after configs were written: `approve` (live only in a gated review), `copy`
 /// (on a waiting selection), `word-end`, `visual-line`, the code review's own, the reading
-/// column's and `toggle-notes`.
+/// column's, `toggle-notes` and search.
 const LATE: &[Action] = &[
     Approve,
     CopySelection,
@@ -459,6 +471,9 @@ const LATE: &[Action] = &[
     WholeFile,
     WholeBase,
     ToggleNotes,
+    Search,
+    NextMatch,
+    PreviousMatch,
 ];
 
 /// The keys bound to each action. A `[keys]` entry replaces that action's keys and leaves the
@@ -620,6 +635,9 @@ impl Action {
             Self::WholeFile => "whole-file",
             Self::WholeBase => "whole-base",
             Self::ToggleNotes => "toggle-notes",
+            Self::Search => "search",
+            Self::NextMatch => "next-match",
+            Self::PreviousMatch => "previous-match",
         }
     }
 }

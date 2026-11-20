@@ -199,3 +199,28 @@ fn whole_file_is_o_and_whole_base_shifted_o_in_the_diff_and_yield_to_an_older_co
     assert_eq!(keymap.hint(WholeFile), "");
     assert_eq!(keymap.hint(WholeBase), "O");
 }
+
+#[test]
+fn search_is_slash_and_n_and_shift_n_step_without_taking_them_from_other_screens() {
+    let keymap = Keymap::default();
+    let n = press(KeyCode::Char('n'), KeyModifiers::NONE);
+    let shift_n = press(KeyCode::Char('N'), KeyModifiers::SHIFT);
+    assert_eq!(keymap.action(&press(KeyCode::Char('/'), KeyModifiers::NONE), DOCUMENT), Some(Search));
+    assert_eq!(keymap.action(&n, DOCUMENT), Some(NextMatch));
+    assert_eq!(keymap.action(&shift_n, DOCUMENT), Some(PreviousMatch));
+    // The quit question and the code review keep their own meaning for the same keys.
+    assert_eq!(keymap.action(&n, CONFIRM_QUIT), Some(No));
+    assert_eq!(keymap.action(&n, DIFF), Some(NextFile));
+    assert_eq!(keymap.action(&shift_n, DIFF), Some(PreviousFile));
+}
+
+#[test]
+fn the_search_keys_yield_to_an_older_config_that_gave_them_away() {
+    // The example at the top of this module: `n` moves down, so next-match is left unbound.
+    let keymap = parse("down = [\"n\", \"Down\"]\n").expect("an older config keeps loading");
+    assert_eq!(keymap.action(&press(KeyCode::Char('n'), KeyModifiers::NONE), DOCUMENT), Some(Down));
+    assert_eq!(keymap.hint(NextMatch), "");
+    assert_eq!(keymap.hint(PreviousMatch), "N");
+    assert_eq!(parse("comment = [\"/\"]\n").expect("loads").hint(Search), "");
+    assert_eq!(parse("search = [\"ctrl+f\"]\n").expect("rebinds").hint(Search), "ctrl+f");
+}

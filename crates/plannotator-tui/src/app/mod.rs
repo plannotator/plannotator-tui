@@ -4,6 +4,7 @@
 mod approve;
 mod archive_view;
 mod disk;
+mod doc_search;
 #[cfg(test)]
 mod doc_size_tests;
 mod draw;
@@ -75,6 +76,8 @@ enum Mode {
     Pick,
     /// Quick Open: finding a file in the folder by name.
     FileSearch,
+    /// Typing a search of the open document in the footer.
+    Search,
     /// Restoring annotations from finished file reviews.
     Archive,
     /// The header's Review menu is open over a file or folder review.
@@ -145,6 +148,10 @@ struct Open {
     disk: Option<disk::DiskStamp>,
     /// The last change on disk the footer already reported, so it is said once.
     disk_noticed: Option<disk::DiskStamp>,
+    /// The rendered text, indexed the first time `/` is pressed on this document.
+    search_index: Option<crate::doc_search::Index>,
+    /// The search the document shows; it belongs to this document alone.
+    search: Option<doc_search::Search>,
 }
 
 impl Open {
@@ -158,7 +165,7 @@ impl Open {
             }
             _ => Store::transient(),
         };
-        Ok(Self { source, doc, layout, store, disk, disk_noticed: None })
+        Ok(Self { source, doc, layout, store, disk, disk_noticed: None, search_index: None, search: None })
     }
 }
 
@@ -174,6 +181,8 @@ pub(crate) struct App {
     tree: Option<Tree>,
     /// Present while Quick Open is showing.
     file_search: Option<file_search::FileSearch>,
+    /// Present while the search prompt is open.
+    search_prompt: Option<doc_search::Prompt>,
     tree_cursor: usize,
     /// First tree row drawn; follows `tree_cursor` so the selected row stays visible.
     tree_scroll: usize,
@@ -287,6 +296,7 @@ impl App {
             project,
             tree: None,
             file_search: None,
+            search_prompt: None,
             tree_cursor: 0,
             tree_scroll: 0,
             tree_visible: None,
@@ -735,6 +745,8 @@ impl App {
         self.open.disk_noticed = None;
         self.open.doc = Document::parse(self.open.source.content.clone());
         self.open.layout = DocLayout::start(&self.open.doc, self.open.layout.width);
+        self.open.search_index = None;
+        self.open.search = None;
         self.open.store =
             Store::load(&Location::for_file(&self.data_dir, &self.project, &path), &self.open.doc)?;
         self.refresh_review_counts();

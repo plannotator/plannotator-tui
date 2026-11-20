@@ -120,7 +120,7 @@ impl App {
             Mode::Archive => self.draw_archive(frame),
             Mode::ReviewMenu => self.draw_review_menu(frame),
             Mode::PickTarget => self.draw_pi_picker(frame),
-            Mode::Browse | Mode::ConfirmQuit | Mode::ConfirmClearAll => {}
+            Mode::Browse | Mode::ConfirmQuit | Mode::ConfirmClearAll | Mode::Search => {}
         }
     }
 
@@ -216,6 +216,19 @@ impl App {
                     }
                 };
                 buf.set_style(Rect { x: doc.x + col as u16, y: screen_y, width: 1, height: 1 }, style);
+            }
+
+            // Search matches paint over the annotation tints, in a colour of their own, and
+            // under the selection and the cursor.
+            if let Some(styles) = self.search_styles(&row.cells) {
+                for (col, style) in styles.iter().enumerate().take(usize::from(doc.width)) {
+                    if let Some(style) = style {
+                        buf.set_style(
+                            Rect { x: doc.x + col as u16, y: screen_y, width: 1, height: 1 },
+                            *style,
+                        );
+                    }
+                }
             }
 
             if let Some(cols) = self.selection.and_then(|s| s.columns_on(row_index, row.cells.len().max(1))) {
@@ -425,6 +438,10 @@ impl App {
             frame.render_widget(Paragraph::new(Line::from(Span::raw(question).bold())), area);
             return;
         }
+        if self.mode == Mode::Search {
+            self.draw_search_prompt(frame, area);
+            return;
+        }
         if self.mode == Mode::ConfirmClearAll {
             let answers = [(Action::Yes, "clear"), (Action::No, "cancel")]
                 .into_iter()
@@ -467,7 +484,7 @@ impl App {
 
     /// The footer's rows at `width`; the questions that take it over need one.
     fn footer_height(&self, width: u16) -> u16 {
-        if matches!(self.mode, Mode::ConfirmQuit | Mode::ConfirmClearAll) {
+        if matches!(self.mode, Mode::ConfirmQuit | Mode::ConfirmClearAll | Mode::Search) {
             return 1;
         }
         self.footer_text(width).1.len() as u16
@@ -488,6 +505,7 @@ impl App {
         // The status leads: it is the transient half of the line, and the name and counters
         // it pushes right are on screen for the whole session anyway.
         let mut parts: Vec<String> = self.status.iter().cloned().collect();
+        parts.extend(self.search_label());
         parts.extend([
             self.open.source.name.clone(),
             format!(
@@ -556,6 +574,19 @@ impl App {
             .collect::<Vec<_>>()
             .join("/");
         let marks = bare(marks).map(|keys| format!("{keys} mark"));
+        // While a search is shown its steps lead, and its Esc clears it; `/` starts one
+        // otherwise.
+        let search_steps = self.has_search().then(|| {
+            let keys = [Action::NextMatch, Action::PreviousMatch]
+                .map(|action| self.keys.hint(action))
+                .into_iter()
+                .filter(|hint| !hint.is_empty())
+                .collect::<Vec<_>>()
+                .join("/");
+            bare(keys).map(|keys| format!("{keys} match"))
+        });
+        let search_steps = search_steps.flatten();
+        let clear_search = self.has_search().then(|| key(Action::Back, "clear search")).flatten();
         let help: Vec<Option<String>> = match self.focus {
             _ if self.pending.is_some() => vec![
                 key(Action::LooksGood, "looks good"),
@@ -595,6 +626,8 @@ impl App {
             .chain(quit)
             .collect(),
             Focus::Document => [
+                search_steps,
+                clear_search,
                 key(Action::MoveCursor, "move"),
                 key(Action::Visual, "select"),
                 key(Action::Comment, "comment"),
@@ -603,6 +636,7 @@ impl App {
                 remove_image,
                 key(Action::Send, "send"),
                 approve,
+                (!self.has_search()).then(|| key(Action::Search, "search")).flatten(),
                 tab,
             ]
             .into_iter()

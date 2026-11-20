@@ -132,6 +132,10 @@ pub(crate) struct Palette {
     pub(crate) code_type: Color,
     /// Comments in code, drawn italic as well.
     pub(crate) code_comment: Color,
+    /// Every match of the document search.
+    pub(crate) search: Style,
+    /// The match the cursor is on.
+    pub(crate) search_current: Style,
 }
 
 /// The palette this app has always had. Dark terminals must see no change at all.
@@ -156,6 +160,9 @@ pub(crate) static DARK: Palette = Palette {
     code_function: Color::Blue,
     code_type: Color::Cyan,
     code_comment: Color::DarkGray,
+    // Blue and orange: no annotation tint, the block bar or the cursor uses either hue.
+    search: Style::new().bg(Color::Indexed(24)),
+    search_current: Style::new().bg(Color::Indexed(208)).fg(Color::Black),
 };
 
 /// The same roles, light. The greys mirror the dark ones about the middle of the ramp, so
@@ -188,6 +195,8 @@ pub(crate) static LIGHT: Palette = Palette {
     code_function: DARK.code_function,
     code_type: Color::Indexed(30),
     code_comment: DARK.code_comment,
+    search: Style::new().bg(Color::Indexed(117)),
+    search_current: Style::new().bg(Color::Indexed(214)).fg(Color::Black),
 };
 
 /// A colour as `[colors]` writes it: a name (`yellow`, `light-cyan`), a 256-colour index
@@ -274,7 +283,7 @@ impl<'de> Deserialize<'de> for ColorValue {
 }
 
 /// `[colors]`: per-role replacements for the palette in force. A role left out keeps the
-/// light or dark value; `cursor` and `selection` become plain backgrounds.
+/// light or dark value; `cursor`, `selection` and the search roles become plain backgrounds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default, rename_all = "kebab-case")]
 pub(crate) struct Colors {
@@ -315,6 +324,12 @@ pub(crate) struct Colors {
     pub(crate) code_type: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) code_comment: Option<ColorValue>,
+    /// Every match of the document search.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) search: Option<ColorValue>,
+    /// The match the cursor is on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) search_current: Option<ColorValue>,
 }
 
 impl Palette {
@@ -347,6 +362,12 @@ impl Palette {
         }
         if let Some(ColorValue(color)) = colors.selection {
             self.selection = Style::new().bg(color);
+        }
+        if let Some(ColorValue(color)) = colors.search {
+            self.search = Style::new().bg(color);
+        }
+        if let Some(ColorValue(color)) = colors.search_current {
+            self.search_current = Style::new().bg(color);
         }
         self
     }
@@ -518,6 +539,42 @@ mod tests {
         assert_ne!(LIGHT.approve_bg, DARK.approve_bg);
         assert_ne!(LIGHT.cursor, DARK.cursor);
         assert_ne!(LIGHT.selection, DARK.selection);
+        assert_ne!(LIGHT.search, DARK.search);
+        assert_ne!(LIGHT.search_current, DARK.search_current);
+    }
+
+    /// A search match must never read as a note: its background is none of the tints the
+    /// annotations, the focused block or the cursor paint, in either palette.
+    #[test]
+    fn search_highlights_share_no_background_with_annotations() {
+        for palette in [&DARK, &LIGHT] {
+            let taken = [
+                Some(palette.comment_bg),
+                Some(palette.approve_bg),
+                Some(palette.block_bg),
+                palette.cursor.bg,
+            ];
+            for role in [palette.search, palette.search_current] {
+                assert_ne!(role.bg, None);
+                assert!(!taken.contains(&role.bg), "{role:?}");
+            }
+            assert_ne!(palette.search, palette.search_current);
+        }
+    }
+
+    #[test]
+    fn the_search_roles_are_configurable_like_the_others() {
+        let colors = Colors {
+            search: Some(ColorValue(Color::Indexed(5))),
+            search_current: Some(ColorValue(Color::Indexed(6))),
+            ..Colors::default()
+        };
+        let palette = DARK.with(&colors);
+        assert_eq!(
+            (palette.search, palette.search_current),
+            (Style::new().bg(Color::Indexed(5)), Style::new().bg(Color::Indexed(6)))
+        );
+        assert_eq!(Palette { search: DARK.search, search_current: DARK.search_current, ..palette }, DARK);
     }
 
     /// `REVERSED` is what made a selection unreadable on a light terminal; the light
