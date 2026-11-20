@@ -259,3 +259,30 @@ fn a_pr_review_from_one_rex_agent_can_go_to_another_picked_in_rex() {
     assert!(pastes.contains("# PR Review: o/app#7") && pastes.contains("name the total"), "{pastes}");
     assert_eq!(screen.status.as_deref(), Some("sent 1 note(s) → codex in 31496a"));
 }
+
+#[test]
+fn a_comment_on_the_whole_pr_goes_first_under_the_pr_header() {
+    let pull = Pull::new("change-note");
+    let mut screen = pull.open();
+    keys(&mut screen, "M");
+    type_and_save(&mut screen, "please add a test");
+    at(&mut screen, 9);
+    keys(&mut screen, "c");
+    type_and_save(&mut screen, "name the total");
+    keys(&mut screen, "E");
+    let sent = pull.agent.sent.borrow().clone();
+    let [text] = sent.as_slice() else { panic!("one send: {sent:?}") };
+    let expected = format!(
+        "{URL}/pull/7\n\n## Global comments\n\nplease add a test\n\n## app.py\n\n### Line 9 (new)\nname the total\n"
+    );
+    assert!(text.contains(&expected), "{text}");
+    pull.push_head(&format!("# greeter\n{AFTER}"));
+    keys(&mut screen, "r");
+    settle(&mut screen);
+    let general = screen.store.annotations().iter().find(|n| n.text.as_deref() == Some("please add a test"));
+    assert_eq!(
+        general.map(plannotator_tui_review::CodeAnnotation::status),
+        Some(Some(Status::StillThere)),
+        "a reload keeps it"
+    );
+}

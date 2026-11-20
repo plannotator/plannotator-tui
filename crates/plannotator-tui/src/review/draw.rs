@@ -258,6 +258,7 @@ impl Screen {
                 format!("suggest code for {}", lines_label(lines))
             }
             Draft::File(path) => format!("note on {path}"),
+            Draft::Change => "comment on the whole change".to_owned(),
             Draft::Edit(_) => "edit".to_owned(),
         };
         let title = self.compose.heading(&verb, self.shift_enter, &self.keys);

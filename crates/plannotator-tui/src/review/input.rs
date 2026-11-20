@@ -15,16 +15,19 @@ use crate::ui::compose::{self, ComposeAction};
 /// The Review menu's rows, in display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MenuRow {
+    ChangeComment,
     ResendAll,
     Finish,
     Undo,
 }
 
-pub(super) const MENU: [MenuRow; 3] = [MenuRow::ResendAll, MenuRow::Finish, MenuRow::Undo];
+pub(super) const MENU: [MenuRow; 4] =
+    [MenuRow::ChangeComment, MenuRow::ResendAll, MenuRow::Finish, MenuRow::Undo];
 
 impl MenuRow {
     pub(super) fn binding(self) -> Action {
         match self {
+            Self::ChangeComment => Action::ChangeComment,
             Self::ResendAll => Action::ResendAll,
             Self::Finish => Action::FinishReview,
             Self::Undo => Action::UndoFinish,
@@ -140,6 +143,7 @@ impl Screen {
             Some(Action::ResendAll) => return self.run_menu(MenuRow::ResendAll),
             Some(Action::FinishReview) => return self.run_menu(MenuRow::Finish),
             Some(Action::UndoFinish) => return self.run_menu(MenuRow::Undo),
+            Some(Action::ChangeComment) => return self.run_menu(MenuRow::ChangeComment),
             Some(Action::Reload) => return self.reload(),
             Some(Action::PickTarget) => {
                 self.picker = AgentPicker::open(&self.reach, &self.real_root());
@@ -239,6 +243,7 @@ impl Screen {
     fn run_menu(&mut self, row: MenuRow) -> Result<()> {
         self.mode = Mode::Browse;
         match row {
+            MenuRow::ChangeComment => self.start_change_comment(),
             MenuRow::ResendAll => self.send(true),
             MenuRow::Finish => self.finish(),
             MenuRow::Undo => return self.undo_finish(),

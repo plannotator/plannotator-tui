@@ -71,6 +71,8 @@ pub(crate) enum Action {
     Suggest,
     /// Comment on the whole file under the cursor.
     FileComment,
+    /// Comment on the whole change: a review-level note on no file.
+    ChangeComment,
     NextHunk,
     PreviousHunk,
     NextFile,
@@ -96,8 +98,8 @@ use Action::{
     Up, Visual, VisualLine, WordBack, WordEnd, WordForward, Yes,
 };
 use Action::{
-    FileComment, Help, NextFile, NextHunk, NextUnviewed, PreviousFile, PreviousHunk, PreviousUnviewed,
-    Suggest, ToggleFiles, ToggleLayout, ToggleViewed, ToggleWrap,
+    ChangeComment, FileComment, Help, NextFile, NextHunk, NextUnviewed, PreviousFile, PreviousHunk,
+    PreviousUnviewed, Suggest, ToggleFiles, ToggleLayout, ToggleViewed, ToggleWrap,
 };
 
 /// Browsing, before the focused pane gets the key.
@@ -175,6 +177,7 @@ pub(crate) const REVIEW_GLOBAL: &[Action] = &[
     ResendAll,
     FinishReview,
     UndoFinish,
+    ChangeComment,
     Reload,
     PickTarget,
     Help,
@@ -210,7 +213,7 @@ pub(crate) const DIFF: &[Action] = &[
 /// The code review's notes rail.
 pub(crate) const NOTES: &[Action] = &[Down, Up, Confirm, Edit, Remove, Back];
 pub(crate) const REVIEW_MENU: &[Action] =
-    &[Down, Up, Confirm, Back, ReviewMenu, Interrupt, ResendAll, FinishReview, UndoFinish];
+    &[Down, Up, Confirm, Back, ReviewMenu, Interrupt, ChangeComment, ResendAll, FinishReview, UndoFinish];
 pub(crate) const HELP: &[Action] = &[Back, Help, Quit, Interrupt];
 
 /// Contexts that read the same keypress: the global keys come first while browsing, and
@@ -392,6 +395,7 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (No, &[ch('n'), ch('N')]),
     (Suggest, &[ch('s')]),
     (FileComment, &[ch('C')]),
+    (ChangeComment, &[ch('M')]),
     (NextHunk, &[ch(']')]),
     (PreviousHunk, &[ch('[')]),
     (NextFile, &[ch('n')]),
@@ -427,6 +431,7 @@ const LATE: &[Action] = &[
     NextUnviewed,
     PreviousUnviewed,
     Help,
+    ChangeComment,
 ];
 
 /// The keys bound to each action. A `[keys]` entry replaces that action's keys and leaves the
@@ -571,6 +576,7 @@ impl Action {
             Self::No => "no",
             Self::Suggest => "suggest",
             Self::FileComment => "file-comment",
+            Self::ChangeComment => "change-comment",
             Self::NextHunk => "next-hunk",
             Self::PreviousHunk => "previous-hunk",
             Self::NextFile => "next-file",

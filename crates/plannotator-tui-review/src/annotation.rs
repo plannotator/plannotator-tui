@@ -191,16 +191,40 @@ impl CodeAnnotation {
         note
     }
 
+    /// A comment on the whole change: the browser's review-level ("Global") comment, in its
+    /// shape (`createGeneralReviewComment`): no file, lines 0, the new side. The feedback lists
+    /// it under [`crate::GLOBAL_COMMENTS_HEADING`], ahead of the files.
+    pub fn general_comment(text: String, patch_key: &str) -> Self {
+        let mut note = Self::unplaced(String::new(), None, NoteType::Comment, NoteScope::General, patch_key);
+        note.line_start = 0;
+        note.line_end = 0;
+        note.text = Some(text);
+        note
+    }
+
     fn blank(file: &FilePatch, kind: NoteType, scope: NoteScope, side: Side, patch_key: &str) -> Self {
+        let mut note = Self::unplaced(file.path.clone(), file.old_path.clone(), kind, scope, patch_key);
+        note.side = side;
+        note
+    }
+
+    /// A note on `file_path` (empty for the whole change) at the file-comment sentinels.
+    fn unplaced(
+        file_path: String,
+        old_path: Option<String>,
+        kind: NoteType,
+        scope: NoteScope,
+        patch_key: &str,
+    ) -> Self {
         let now = now_millis();
         Self {
             id: local_id(),
             kind,
             scope,
-            file_path: file.path.clone(),
+            file_path,
             line_start: 1,
             line_end: 1,
-            side,
+            side: Side::New,
             text: None,
             suggested_code: None,
             original_code: None,
@@ -212,7 +236,7 @@ impl CodeAnnotation {
             author_name: None,
             plannotator_tui: Extras {
                 patch_key: Some(patch_key.to_owned()),
-                old_path: file.old_path.clone(),
+                old_path,
                 updated_at: Some(now),
                 resolution: Some(Status::StillThere),
                 other: BTreeMap::new(),
@@ -286,6 +310,20 @@ mod tests {
         assert!(note.plannotator_tui.is_empty());
         let back = serde_json::to_value(&note).expect("serializes");
         assert_eq!(back, serde_json::from_str::<Value>(BROWSER_NOTE).expect("JSON"));
+    }
+
+    #[test]
+    fn a_whole_change_note_has_the_browsers_general_comment_shape() {
+        let note = CodeAnnotation::general_comment("Split this PR in two.".into(), "0123456789abcdef");
+        let json = serde_json::to_value(&note).expect("serializes");
+        assert_eq!(json["type"], "comment");
+        assert_eq!(json["scope"], "general");
+        assert_eq!(json["filePath"], "");
+        assert_eq!((json["lineStart"].as_u64(), json["lineEnd"].as_u64()), (Some(0), Some(0)));
+        assert_eq!(json["side"], "new");
+        assert_eq!(json["text"], "Split this PR in two.");
+        assert_eq!(json["plannotator_tui"]["patchKey"], "0123456789abcdef");
+        assert!(json["plannotator_tui"].get("oldPath").is_none());
     }
 
     #[test]
