@@ -7,6 +7,7 @@ mod pi_notes;
 #[cfg(unix)]
 mod pull_flow;
 mod send_flow;
+mod viewed_flow;
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};

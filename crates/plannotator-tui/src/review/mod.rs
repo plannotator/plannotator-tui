@@ -34,12 +34,13 @@ pub(crate) mod scope;
 mod send;
 #[cfg(test)]
 mod tests;
+mod viewed;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::SyncSender;
 
 use anyhow::{Context as _, Result};
-use plannotator_tui_review::{Capture, FilePatch, Repo, ReviewStore, Status};
+use plannotator_tui_review::{Capture, FilePatch, Progress, Repo, ReviewStore, Status};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 
@@ -103,6 +104,8 @@ pub(crate) struct Screen {
     capture: Capture,
     diff: Diff,
     store: ReviewStore,
+    /// Viewed marks, shared with the browser app (`viewed`).
+    progress: Progress,
     data_dir: PathBuf,
     project: String,
     delivery: Box<dyn Delivery>,
@@ -157,11 +160,13 @@ impl Screen {
         let store = ReviewStore::load(data_dir, &project, &owner, &capture.scope)?;
         let light = crate::theme::theme() == crate::theme::Theme::Light;
         let diff = Diff::open(&capture, light, wake)?;
+        let progress = Progress::open(&capture, data_dir, viewed::saving(data_dir));
         let mut screen = Self {
             repo,
             capture,
             diff,
             store,
+            progress,
             data_dir: data_dir.to_path_buf(),
             project,
             delivery,
@@ -251,6 +256,7 @@ impl Screen {
             }
         };
         self.diff.replace(&capture)?;
+        self.progress = self.progress.reopen(&capture, &self.data_dir);
         self.capture = capture;
         let placed = self.place_notes()?;
         self.clamp_rail_cursor();

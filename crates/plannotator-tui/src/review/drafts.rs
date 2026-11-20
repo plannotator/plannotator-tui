@@ -48,20 +48,7 @@ impl Screen {
 
     /// `C`: comment on the whole file under the cursor.
     pub(super) fn start_file_comment(&mut self) -> Result<()> {
-        let mut path = match self.diff.selection() {
-            Some(lines) => Some(lines.path),
-            None => self.diff.cursor()?.map(|lines| lines.path),
-        };
-        // On a file or hunk heading, which the viewer does not tie to a file for us: the
-        // first line below the headings belongs to the file they are for.
-        for _ in 0..3 {
-            if path.is_some() {
-                break;
-            }
-            self.diff.run(diffs_rs::engine::Command::Down)?;
-            path = self.diff.cursor()?.map(|lines| lines.path);
-        }
-        let Some(path) = path else {
+        let Some(path) = self.file_under_cursor()? else {
             self.status = Some("move the cursor onto a line of the file first".into());
             return Ok(());
         };

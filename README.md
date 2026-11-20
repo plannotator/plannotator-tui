@@ -106,7 +106,7 @@ dimmed. The keys also work without opening the menu.
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
-| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `]`/`[` hunk; `n`/`N` file; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `r` read the diff again; `?` keys |
+| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `r` read the diff again; `?` keys |
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
 
@@ -194,6 +194,13 @@ clipboard, or the agent you choose when nothing named one; see [Choosing the age
 A note whose lines changed goes to the **Outdated** group at the end of the rail; it is
 still sent, marked as outdated. `u` switches between split and unified view, `w` wraps
 long lines, `f` lists the changed files and `?` shows every key.
+
+`x` marks the file under the cursor viewed, and `x` again unmarks it. The header counts
+them (`3/12 viewed`) and `ctrl+n` goes to the next file you have not viewed. Marks are
+saved in the browser app's own format under the data folder (`review-progress/`), so a
+review started in the browser continues here and the other way round. A mark stops
+counting once its file changes. Set `PLANNOTATOR_REVIEW_PROGRESS=0` to keep marks for the
+session only. See [docs/spec-review-progress.md](docs/spec-review-progress.md).
 
 ### Pull requests
 
@@ -392,6 +399,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `suggest` `file-comment` | `s` `C` | code review: suggest code for the lines; a note on the whole file |
 | `next-hunk` `previous-hunk` `next-file` `previous-file` | `]` `[` `n` `N` | code review: move by hunk or file |
 | `toggle-layout` `toggle-wrap` `toggle-files` | `u` `w` `f` | code review: split or unified view; wrap; the file list |
+| `toggle-viewed` `next-unviewed` `previous-unviewed` | `x` `ctrl+n`, none | code review: mark the file viewed; the next or previous file not viewed |
 | `help` | `?` | code review: every key |
 
 Actions forwarded by Herdr Mirror default to a split beside the invoking remote

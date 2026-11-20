@@ -92,6 +92,11 @@ impl Screen {
                     (key(&[Action::Down, Action::Up]), "line"),
                     (key(&[Action::NextHunk, Action::PreviousHunk]), "hunk"),
                     (key(&[Action::NextFile, Action::PreviousFile]), "file"),
+                    (key(&[Action::ToggleViewed]), "mark the file viewed, or not (shared with the browser)"),
+                    (
+                        key(&[Action::NextUnviewed, Action::PreviousUnviewed]),
+                        "next / previous file not viewed",
+                    ),
                     (key(&[Action::Top, Action::Bottom]), "first / last"),
                     (key(&[Action::Left, Action::Right]), "old / new side"),
                     (key(&[Action::Visual]), "select lines (again to finish); shift-click too"),

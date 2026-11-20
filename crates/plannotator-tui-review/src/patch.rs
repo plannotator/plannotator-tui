@@ -104,6 +104,27 @@ pub fn parse(patch: &str) -> Vec<FilePatch> {
     split_files(patch).filter_map(parse_file).collect()
 }
 
+/// Every file in `patch` by path, with the new-side object id its `index <old>..<new>` line
+/// names, abbreviated as git printed it; `None` for a file with no index line (a mode-only
+/// change, a pure rename). Viewed marks check a working-tree hash against it
+/// ([`crate::progress`]), as the browser checks against its own patch.
+pub(crate) fn new_side_ids(patch: &str) -> BTreeMap<String, Option<String>> {
+    split_files(patch)
+        .filter_map(|chunk| {
+            let lines: Vec<&str> = chunk.split('\n').collect();
+            let (file_old, file_new) = file_line_paths(&lines);
+            let (_, meta_new) = metadata_paths(&lines);
+            let (_, head_new) = git_header_paths(lines.first().copied().unwrap_or(""));
+            let file_path = file_new.or(file_old).or(meta_new).or(head_new)?;
+            let id = header_lines(&lines)
+                .find_map(|l| l.strip_prefix("index "))
+                .and_then(|range| range.split_once(".."))
+                .map(|(_, new)| new.split(' ').next().unwrap_or_default().trim_end_matches('\r').to_owned());
+            Some((file_path, id))
+        })
+        .collect()
+}
+
 /// Sections starting at each `diff --git ` line.
 fn split_files(patch: &str) -> impl Iterator<Item = &str> {
     let mut starts: Vec<usize> = Vec::new();
