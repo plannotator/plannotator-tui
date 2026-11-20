@@ -1,5 +1,5 @@
-//! Making and changing notes: what `c`, `s`, `C` and the rail's `e` and `x` do, and saving
-//! what the comment box holds.
+//! Making and changing notes: what `c`, `s`, `C`, `M` and the rail's `e` and `x` do, and
+//! saving what the comment box holds.
 
 use anyhow::Result;
 use plannotator_tui_review::{CodeAnnotation, NoteType, Side};
@@ -57,6 +57,13 @@ impl Screen {
         Ok(())
     }
 
+    /// `M`, or the Review menu's first row: comment on the whole change, on no file. It sits
+    /// first in the rail and first in the feedback, as the browser's global comment does.
+    pub(super) fn start_change_comment(&mut self) {
+        self.compose = Compose::default();
+        self.mode = Mode::Compose(Draft::Change);
+    }
+
     /// `e` in the rail: the comment box with the note's comment, or its code for a
     /// suggestion.
     pub(super) fn start_edit(&mut self) {
@@ -90,6 +97,7 @@ impl Screen {
                 .file(&lines.path)
                 .map(|file| CodeAnnotation::suggestion(file, lines.first, lines.last, code, None, &key)),
             Draft::File(path) => self.file(path).map(|file| CodeAnnotation::file_comment(file, text, &key)),
+            Draft::Change => Some(CodeAnnotation::general_comment(text, &key)),
             Draft::Edit(id) => {
                 let changed = self.store.edit(id, |note| {
                     let field = match note.kind {

@@ -176,3 +176,14 @@ fn shift_with_a_lowercase_letter_counts_as_the_capital() {
     assert!(keymap.is(Bottom, &press(KeyCode::Char('g'), KeyModifiers::SHIFT)));
     assert!(!keymap.is(Bottom, &press(KeyCode::Char('g'), KeyModifiers::NONE)));
 }
+
+#[test]
+fn change_comment_is_m_in_the_code_review_and_yields_to_an_older_config() {
+    let keymap = Keymap::default();
+    let shifted_m = press(KeyCode::Char('M'), KeyModifiers::SHIFT);
+    assert_eq!(keymap.action(&shifted_m, REVIEW_GLOBAL), Some(ChangeComment));
+    assert_eq!(keymap.action(&shifted_m, REVIEW_MENU), Some(ChangeComment));
+    // Written before `change-comment` existed: `M` is the user's, and it is left unbound.
+    let keymap = parse("reload = [\"M\"]\n").expect("an older config keeps loading");
+    assert_eq!(keymap.hint(ChangeComment), "");
+}

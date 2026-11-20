@@ -61,6 +61,8 @@ enum Draft {
     Suggestion(Lines),
     /// A comment on a whole file.
     File(String),
+    /// A comment on the whole change, on no file.
+    Change,
     /// A new body for an existing note, by id.
     Edit(String),
 }

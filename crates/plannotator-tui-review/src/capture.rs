@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::annotation::{CodeAnnotation, Side};
+use crate::annotation::{CodeAnnotation, NoteScope, Side};
 use crate::error::{Error, Result};
 use crate::git::{self, TempIndex};
 use crate::github::{Gh, PrRepo, PrSpec, PrView};
@@ -484,6 +484,13 @@ impl Capture {
         let mut contents: HashMap<(Side, String), Option<String>> = HashMap::new();
         let mut out = Vec::with_capacity(notes.len());
         for note in notes {
+            // A note on the whole change has no file to read (its path is empty, which would
+            // read the work tree's folder or a commit's tree).
+            if note.scope == NoteScope::General {
+                let current = Current { content: None, patch: None, patch_key: &self.patch_key };
+                out.push(resolve::resolve(note, &current));
+                continue;
+            }
             let patch = self.file(&note.file_path);
             // A file renamed in this diff is read from its old path on the old side.
             let file_on_side = match (note.side, patch.and_then(|p| p.old_path.as_deref())) {

@@ -21,6 +21,7 @@ impl Screen {
             .iter()
             .map(|row| {
                 let label = match row {
+                    MenuRow::ChangeComment => "Comment on the whole change".to_owned(),
                     MenuRow::ResendAll => {
                         format!("Resend all \u{b7} {} notes", self.store.annotations().len())
                     }
@@ -80,7 +81,11 @@ impl Screen {
                     (key(&[Action::CycleFocus]), "diff / notes"),
                     (key(&[Action::Send]), "send new and edited notes"),
                     (key(&[Action::SendAndClose]), "send and close"),
-                    (key(&[Action::ReviewMenu]), "review menu: resend all, finish, undo"),
+                    (key(&[Action::ChangeComment]), "comment on the whole change"),
+                    (
+                        key(&[Action::ReviewMenu]),
+                        "review menu: whole-change comment, resend all, finish, undo",
+                    ),
                     (key(&[Action::PickTarget]), "choose the agent Send goes to"),
                     (key(&[Action::Reload]), "reload the diff; notes follow their lines"),
                     (key(&[Action::Quit]), "quit"),

@@ -106,7 +106,7 @@ dimmed. The keys also work without opening the menu.
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
-| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `r` read the diff again; `?` keys |
+| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `M` note on the whole change; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `r` read the diff again; `?` keys |
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
 
@@ -180,6 +180,9 @@ plannotator-tui review https://github.com/owner/repo/pull/123
 - `c` writes a comment on the lines.
 - `s` writes a suggestion: the box opens with the new lines, so you edit the code you want.
 - `C` writes a note on the whole file.
+- `M` writes a note on the whole change (also the first row of the Review menu). It sits
+  at the top of the rail under **Whole change**, and the agent gets it first, under
+  `## Global comments`, as the browser sends its global comments.
 
 Notes appear in the rail on the right, grouped by file, and a mark in the diff shows their
 lines. Sent notes get a dimmer mark. `Tab` moves to the rail; `j`/`k` there moves to a
@@ -188,7 +191,8 @@ note and the diff moves with it; `e` edits and `x` removes it.
 `E` sends the new notes, `S` sends them and closes, and `P` picks the agent to send
 to. Sends go to the same place a document review's do (Herdr pane, Rex, Pi or the
 clipboard, or the agent you choose when nothing named one; see [Choosing the agent](#choosing-the-agent)), and are kept in the feedback archive. `q` asks first when notes are unsent.
-`m` opens the Review menu: `R` resend all, `F` finish review, `U` undo.
+`m` opens the Review menu: `M` comment on the whole change, `R` resend all, `F` finish
+review, `U` undo.
 
 `r` reads the diff again after you or the agent change files. Notes follow their lines.
 A note whose lines changed goes to the **Outdated** group at the end of the rail; it is
@@ -397,6 +401,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `copy` | `y` | copy the selection waiting in the toolbar |
 | `yes` `no` | `y` `n`, `Y` `N` | the send-before-quitting and clear-all questions |
 | `suggest` `file-comment` | `s` `C` | code review: suggest code for the lines; a note on the whole file |
+| `change-comment` | `M` | code review: a note on the whole change |
 | `next-hunk` `previous-hunk` `next-file` `previous-file` | `]` `[` `n` `N` | code review: move by hunk or file |
 | `toggle-layout` `toggle-wrap` `toggle-files` | `u` `w` `f` | code review: split or unified view; wrap; the file list |
 | `toggle-viewed` `next-unviewed` `previous-unviewed` | `x` `ctrl+n`, none | code review: mark the file viewed; the next or previous file not viewed |
