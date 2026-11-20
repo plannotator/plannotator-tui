@@ -1,0 +1,165 @@
+{
+  "revision": 12,
+  "session_id": "session:01a1f658-7c0a-71ad-8ff6-a1bcbc31504f",
+  "label": "work",
+  "active_window_id": "window:01a1f658-7c1d-7a68-ab98-20d5c8f61312",
+  "windows": [
+    {
+      "window_id": "window:01a1f658-7c1d-7a68-ab98-20d5c8f61312",
+      "label": "api",
+      "focused_block_id": "block:01a1f658-7c0b-702a-a296-443d917d7f85",
+      "layers": [
+        {
+          "layer_id": "layer:01a1f658-7c1d-7a6f-8bc4-1d8d78d1b3f8",
+          "kind": "tiled",
+          "bounds": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "layout": {
+            "rect": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "split": {
+              "split_id": "split:01a1f658-9989-788f-b437-6b256b8d5005",
+              "direction": "horizontal",
+              "ratio": 0.5,
+              "before": {
+                "rect": [
+                  0,
+                  0,
+                  0.5,
+                  1
+                ],
+                "block_id": "block:01a1f658-7c0b-702a-a296-443d917d7f85"
+              },
+              "after": {
+                "rect": [
+                  0.5,
+                  0,
+                  0.5,
+                  1
+                ],
+                "split": {
+                  "split_id": "split:01a1f658-99be-7514-be1f-1f0084ce7e45",
+                  "direction": "vertical",
+                  "ratio": 0.5,
+                  "before": {
+                    "rect": [
+                      0.5,
+                      0,
+                      0.5,
+                      0.5
+                    ],
+                    "block_id": "block:01a1f658-997c-79c0-ae26-1bf77b9ba798"
+                  },
+                  "after": {
+                    "rect": [
+                      0.5,
+                      0.5,
+                      0.5,
+                      0.5
+                    ],
+                    "block_id": "block:01a1f658-99b3-7134-b64a-0b9d9d31496a"
+                  }
+                }
+              }
+            }
+          },
+          "blocks": [
+            {
+              "block_id": "block:01a1f658-7c0b-702a-a296-443d917d7f85",
+              "label": "shell",
+              "creator_name": "com.superlogical.terminal",
+              "flavor": "com.superlogical.terminal.shell",
+              "host_id": "08be673c-a3f7-4b0b-ac08-30e0fbd6ac5a"
+            },
+            {
+              "block_id": "block:01a1f658-997c-79c0-ae26-1bf77b9ba798",
+              "label": "shell",
+              "creator_name": "com.superlogical.terminal",
+              "flavor": "com.superlogical.terminal.shell",
+              "host_id": "08be673c-a3f7-4b0b-ac08-30e0fbd6ac5a"
+            },
+            {
+              "block_id": "block:01a1f658-99b3-7134-b64a-0b9d9d31496a",
+              "label": "shell",
+              "creator_name": "com.superlogical.terminal",
+              "flavor": "com.superlogical.terminal.shell",
+              "host_id": "08be673c-a3f7-4b0b-ac08-30e0fbd6ac5a"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "window_id": "window:01a1f658-99dd-721b-9487-4b57b2db0f40",
+      "label": "web",
+      "focused_block_id": "block:01a1f658-99d2-7340-9e15-3a5fca63239c",
+      "layers": [
+        {
+          "layer_id": "layer:01a1f658-99dd-721e-8a31-1b0fcfedaf3c",
+          "kind": "tiled",
+          "bounds": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "layout": {
+            "rect": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "split": {
+              "split_id": "split:01a1f658-9a18-7330-9332-03cde1fe0947",
+              "direction": "horizontal",
+              "ratio": 0.5,
+              "before": {
+                "rect": [
+                  0,
+                  0,
+                  0.5,
+                  1
+                ],
+                "block_id": "block:01a1f658-99d2-7340-9e15-3a5fca63239c"
+              },
+              "after": {
+                "rect": [
+                  0.5,
+                  0,
+                  0.5,
+                  1
+                ],
+                "block_id": "block:01a1f658-9a0c-787b-86a3-99ceb5eda7cc"
+              }
+            }
+          },
+          "blocks": [
+            {
+              "block_id": "block:01a1f658-99d2-7340-9e15-3a5fca63239c",
+              "label": "shell",
+              "creator_name": "com.superlogical.terminal",
+              "flavor": "com.superlogical.terminal.shell",
+              "host_id": "08be673c-a3f7-4b0b-ac08-30e0fbd6ac5a"
+            },
+            {
+              "block_id": "block:01a1f658-9a0c-787b-86a3-99ceb5eda7cc",
+              "label": "shell",
+              "creator_name": "com.superlogical.terminal",
+              "flavor": "com.superlogical.terminal.shell",
+              "host_id": "08be673c-a3f7-4b0b-ac08-30e0fbd6ac5a"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

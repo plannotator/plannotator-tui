@@ -41,7 +41,7 @@ pub(crate) enum Action {
     OpenInEditor,
     PickMessage,
     QuickOpen,
-    /// Choose which running Pi session Send goes to (`docs/spec-pi-link.md`).
+    /// Choose which agent Send goes to: a Pi session or a Herdr agent (`docs/spec-pi-link.md`).
     PickTarget,
     ReviewMenu,
     ResendAll,
@@ -71,6 +71,8 @@ pub(crate) enum Action {
     Suggest,
     /// Comment on the whole file under the cursor.
     FileComment,
+    /// Comment on the whole change: a review-level note on no file.
+    ChangeComment,
     NextHunk,
     PreviousHunk,
     NextFile,
@@ -80,7 +82,15 @@ pub(crate) enum Action {
     ToggleWrap,
     /// Show or hide the diff's file list.
     ToggleFiles,
+    /// Mark the file under the cursor viewed, or not (`docs/spec-review-progress.md`).
+    ToggleViewed,
+    /// The next or previous file not marked viewed, wrapping around.
+    NextUnviewed,
+    PreviousUnviewed,
     Help,
+    /// The reading column, by eight columns.
+    NarrowColumn,
+    WidenColumn,
 }
 
 use Action::{
@@ -91,9 +101,10 @@ use Action::{
     Up, Visual, VisualLine, WordBack, WordEnd, WordForward, Yes,
 };
 use Action::{
-    FileComment, Help, NextFile, NextHunk, PreviousFile, PreviousHunk, Suggest, ToggleFiles, ToggleLayout,
-    ToggleWrap,
+    ChangeComment, FileComment, Help, NextFile, NextHunk, NextUnviewed, PreviousFile, PreviousHunk,
+    PreviousUnviewed, Suggest, ToggleFiles, ToggleLayout, ToggleViewed, ToggleWrap,
 };
+use Action::{NarrowColumn, WidenColumn};
 
 /// Browsing, before the focused pane gets the key.
 pub(crate) const GLOBAL: &[Action] = &[
@@ -137,6 +148,8 @@ pub(crate) const DOCUMENT: &[Action] = &[
     ClearAll,
     AttachImage,
     RemoveImage,
+    NarrowColumn,
+    WidenColumn,
 ];
 /// Marking the selected block, tried only when no `DOCUMENT` action claims the key. They sit
 /// outside `SHARED` so a config that gave `a` or `d` to a document action keeps loading.
@@ -155,7 +168,7 @@ pub(crate) const CONFIRM_CLEAR: &[Action] = &[Yes, No, Back];
 pub(crate) const MENU: &[Action] =
     &[Down, Up, Confirm, Back, ReviewMenu, Interrupt, ResendAll, FinishReview, UndoFinish, Archive];
 pub(crate) const PICK: &[Action] = &[Down, Up, PageDown, PageUp, Top, Bottom, Confirm, Back, Quit];
-/// The Pi picker: up and down as in the message picker; `pick-target` again closes it.
+/// The agent picker: up and down as in the message picker; `pick-target` again closes it.
 pub(crate) const PICK_TARGET: &[Action] = &[Down, Up, Confirm, Back, PickTarget, Interrupt];
 pub(crate) const ARCHIVE: &[Action] = &[Down, Up, Confirm, Back, Archive, Quit, Interrupt];
 
@@ -170,6 +183,7 @@ pub(crate) const REVIEW_GLOBAL: &[Action] = &[
     ResendAll,
     FinishReview,
     UndoFinish,
+    ChangeComment,
     Reload,
     PickTarget,
     Help,
@@ -197,12 +211,15 @@ pub(crate) const DIFF: &[Action] = &[
     ToggleLayout,
     ToggleWrap,
     ToggleFiles,
+    ToggleViewed,
+    NextUnviewed,
+    PreviousUnviewed,
     Confirm,
 ];
 /// The code review's notes rail.
 pub(crate) const NOTES: &[Action] = &[Down, Up, Confirm, Edit, Remove, Back];
 pub(crate) const REVIEW_MENU: &[Action] =
-    &[Down, Up, Confirm, Back, ReviewMenu, Interrupt, ResendAll, FinishReview, UndoFinish];
+    &[Down, Up, Confirm, Back, ReviewMenu, Interrupt, ChangeComment, ResendAll, FinishReview, UndoFinish];
 pub(crate) const HELP: &[Action] = &[Back, Help, Quit, Interrupt];
 
 /// Contexts that read the same keypress: the global keys come first while browsing, and
@@ -384,6 +401,7 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (No, &[ch('n'), ch('N')]),
     (Suggest, &[ch('s')]),
     (FileComment, &[ch('C')]),
+    (ChangeComment, &[ch('M')]),
     (NextHunk, &[ch(']')]),
     (PreviousHunk, &[ch('[')]),
     (NextFile, &[ch('n')]),
@@ -391,7 +409,14 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (ToggleLayout, &[ch('u')]),
     (ToggleWrap, &[ch('w')]),
     (ToggleFiles, &[ch('f')]),
+    (ToggleViewed, &[ch('x')]),
+    // `n` with Ctrl: the next file, skipping viewed ones. Ctrl+Shift+N reaches most
+    // terminals as Ctrl+N, so the backward jump has no default key.
+    (NextUnviewed, &[ctrl('n')]),
+    (PreviousUnviewed, &[]),
     (Help, &[ch('?')]),
+    (NarrowColumn, &[ch('<')]),
+    (WidenColumn, &[ch('>')]),
 ];
 
 /// Actions added after configs were written: `approve` (live only in a gated review), `copy`
@@ -410,7 +435,13 @@ const LATE: &[Action] = &[
     ToggleLayout,
     ToggleWrap,
     ToggleFiles,
+    ToggleViewed,
+    NextUnviewed,
+    PreviousUnviewed,
     Help,
+    ChangeComment,
+    NarrowColumn,
+    WidenColumn,
 ];
 
 /// The keys bound to each action. A `[keys]` entry replaces that action's keys and leaves the
@@ -555,6 +586,7 @@ impl Action {
             Self::No => "no",
             Self::Suggest => "suggest",
             Self::FileComment => "file-comment",
+            Self::ChangeComment => "change-comment",
             Self::NextHunk => "next-hunk",
             Self::PreviousHunk => "previous-hunk",
             Self::NextFile => "next-file",
@@ -562,7 +594,12 @@ impl Action {
             Self::ToggleLayout => "toggle-layout",
             Self::ToggleWrap => "toggle-wrap",
             Self::ToggleFiles => "toggle-files",
+            Self::ToggleViewed => "toggle-viewed",
+            Self::NextUnviewed => "next-unviewed",
+            Self::PreviousUnviewed => "previous-unviewed",
             Self::Help => "help",
+            Self::NarrowColumn => "narrow-column",
+            Self::WidenColumn => "widen-column",
         }
     }
 }

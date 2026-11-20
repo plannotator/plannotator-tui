@@ -67,6 +67,8 @@ impl Screen {
         let Some(note) = self.selected_note() else { return };
         let path = note.file_path.clone();
         let place = match note.scope {
+            // On no file: the rail is its only place.
+            NoteScope::General => return,
             NoteScope::Line if notes::in_diff(note) => Some((note.side, note.line_start)),
             NoteScope::Line if notes::is_outdated(note) => {
                 self.status = Some("outdated: its code is gone from the diff".into());
@@ -105,6 +107,9 @@ impl Screen {
         let pieces: Vec<Piece> = notes::rows(notes)
             .into_iter()
             .filter_map(|row| match row {
+                Row::Change => {
+                    Some(Piece::Heading(" Whole change".to_owned(), Style::new().fg(palette().accent).bold()))
+                }
                 Row::File(path) => Some(Piece::Heading(
                     format!(" {}", tail(path, usize::from(rail.width).saturating_sub(1))),
                     Style::new().fg(palette().accent).bold(),

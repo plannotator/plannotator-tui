@@ -1,5 +1,5 @@
-//! `plannotator-tui review [--staged | --base REF | --commit SHA] [DIR]`, and the event
-//! loop that hosts the diff viewer.
+//! `plannotator-tui review [--staged | --base REF | --commit SHA | PR] [DIR]`, and the event
+//! loop that hosts the diff viewer. `PR` is a GitHub PR link, `N` or `#N` (also `--pr PR`).
 //!
 //! The viewer works on its own threads and says so on a wake channel; keys arrive on a
 //! reader thread that pokes the same channel. The loop waits on it, with a 100 ms tick so
@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
-use plannotator_tui_review::Request;
+use plannotator_tui_review::{PrSpec, Request};
 use ratatui::crossterm::event::{self, Event};
 
 use super::Screen;
@@ -32,7 +32,7 @@ impl ReviewArgs {
         let mut dir = None;
         let mut rest = args.iter();
         let set = |next: Request, request: &mut Option<Request>| {
-            anyhow::ensure!(request.is_none(), "pick one of --staged, --base and --commit");
+            anyhow::ensure!(request.is_none(), "pick one of --staged, --base, --commit and a pull request");
             *request = Some(next);
             Ok(())
         };
@@ -48,7 +48,23 @@ impl ReviewArgs {
                         rest.next().filter(|v| !v.starts_with("--")).context("--commit needs a commit")?;
                     set(Request::Commit { rev: rev.clone() }, &mut request)?;
                 }
+                "--pr" => {
+                    let pr = rest
+                        .next()
+                        .filter(|v| !v.starts_with("--"))
+                        .context("--pr needs a PR link or number")?;
+                    anyhow::ensure!(
+                        PrSpec::parse(pr).is_some(),
+                        "--pr takes a PR link (https://github.com/OWNER/REPO/pull/N), N or #N, not {pr:?}"
+                    );
+                    set(Request::PullRequest { pr: pr.clone() }, &mut request)?;
+                }
                 flag if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{}", crate::cli::USAGE),
+                // A PR link, `#N` or a bare number is a pull request; a folder named only by
+                // digits is `./123`.
+                pr if PrSpec::parse(pr).is_some() => {
+                    set(Request::PullRequest { pr: pr.to_owned() }, &mut request)?;
+                }
                 path if dir.is_none() => dir = Some(PathBuf::from(path)),
                 extra => anyhow::bail!("unexpected argument {extra:?}\n{}", crate::cli::USAGE),
             }
@@ -168,6 +184,21 @@ mod tests {
             Request::Commit { rev: "HEAD~1".into() }
         );
         assert!(parse(&["--staged", "--commit", "HEAD"]).is_err());
+        let link = "https://github.com/o/r/pull/12";
+        for (args, pr, dir) in [
+            (vec!["12"], "12", None),
+            (vec!["#12", "app"], "#12", Some("app")),
+            (vec!["app", link], link, Some("app")),
+            (vec!["--pr", "12"], "12", None),
+        ] {
+            let parsed = parse(&args).expect("a PR");
+            assert_eq!(parsed.request, Request::PullRequest { pr: pr.into() });
+            assert_eq!(parsed.dir, dir.map(PathBuf::from));
+        }
+        assert_eq!(parse(&["./12"]).expect("a folder").dir, Some(PathBuf::from("./12")));
+        assert!(parse(&["12", "--staged"]).is_err());
+        assert!(parse(&["--pr", "main"]).is_err());
+        assert!(parse(&["12", "13"]).is_err());
         assert!(parse(&["--base"]).is_err());
         assert!(parse(&["--wat"]).is_err());
     }

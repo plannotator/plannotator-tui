@@ -80,9 +80,24 @@ pub(crate) struct ReviewTarget {
     pub(crate) diff_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) base: Option<String>,
+    /// A pull request review's `PR #<n>`, as the browser's PR review names it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) git_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) pr: Option<PrTarget>,
     pub(crate) cwd: String,
     pub(crate) changed_files: usize,
     pub(crate) patch_bytes: usize,
+}
+
+/// The pull request a code review was of (`FeedbackReviewTarget.pr`).
+#[cfg_attr(not(unix), allow(dead_code, reason = "only the code review sends one"))]
+#[derive(Debug, Serialize)]
+pub(crate) struct PrTarget {
+    pub(crate) provider: &'static str,
+    /// `owner/repo`.
+    pub(crate) repo: String,
+    pub(crate) number: u64,
 }
 
 #[derive(Debug, Default, Serialize)]

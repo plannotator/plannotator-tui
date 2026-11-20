@@ -1,5 +1,5 @@
-//! Making and changing notes: what `c`, `s`, `C` and the rail's `e` and `x` do, and saving
-//! what the comment box holds.
+//! Making and changing notes: what `c`, `s`, `C`, `M` and the rail's `e` and `x` do, and
+//! saving what the comment box holds.
 
 use anyhow::Result;
 use plannotator_tui_review::{CodeAnnotation, NoteType, Side};
@@ -48,26 +48,20 @@ impl Screen {
 
     /// `C`: comment on the whole file under the cursor.
     pub(super) fn start_file_comment(&mut self) -> Result<()> {
-        let mut path = match self.diff.selection() {
-            Some(lines) => Some(lines.path),
-            None => self.diff.cursor()?.map(|lines| lines.path),
-        };
-        // On a file or hunk heading, which the viewer does not tie to a file for us: the
-        // first line below the headings belongs to the file they are for.
-        for _ in 0..3 {
-            if path.is_some() {
-                break;
-            }
-            self.diff.run(diffs_rs::engine::Command::Down)?;
-            path = self.diff.cursor()?.map(|lines| lines.path);
-        }
-        let Some(path) = path else {
+        let Some(path) = self.file_under_cursor()? else {
             self.status = Some("move the cursor onto a line of the file first".into());
             return Ok(());
         };
         self.compose = Compose::default();
         self.mode = Mode::Compose(Draft::File(path));
         Ok(())
+    }
+
+    /// `M`, or the Review menu's first row: comment on the whole change, on no file. It sits
+    /// first in the rail and first in the feedback, as the browser's global comment does.
+    pub(super) fn start_change_comment(&mut self) {
+        self.compose = Compose::default();
+        self.mode = Mode::Compose(Draft::Change);
     }
 
     /// `e` in the rail: the comment box with the note's comment, or its code for a
@@ -103,6 +97,7 @@ impl Screen {
                 .file(&lines.path)
                 .map(|file| CodeAnnotation::suggestion(file, lines.first, lines.last, code, None, &key)),
             Draft::File(path) => self.file(path).map(|file| CodeAnnotation::file_comment(file, text, &key)),
+            Draft::Change => Some(CodeAnnotation::general_comment(text, &key)),
             Draft::Edit(id) => {
                 let changed = self.store.edit(id, |note| {
                     let field = match note.kind {

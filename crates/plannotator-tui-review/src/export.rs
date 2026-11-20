@@ -14,12 +14,18 @@
 //!
 //! Files are sorted by path. [`agent_feedback`] adds the `Review directory:` header the
 //! browser's CLI writes (`withReviewDirectory`) and appends the review suffix unchanged.
+//!
+//! A pull request review ([`pull_agent_feedback`]) opens with the browser's PR header
+//! instead of `# Code Review Feedback` and the `**Diff:**` line: `# PR Review: owner/repo#N`,
+//! the bold title, the `Branch:` line (head → base), and the PR's link.
+//!
 //! Browser-only fields (conventional labels, call-flow targets, token selections) are not
 //! written: notes made here never carry them.
 
 use std::fmt::Write as _;
 
 use crate::annotation::{CodeAnnotation, NoteScope};
+use crate::github::PrView;
 
 /// The browser's `OUTDATED_ANNOTATION_LABEL`; its wording is fixed.
 pub const OUTDATED_ANNOTATION_LABEL: &str = "[Outdated — the code changed after this comment]";
@@ -40,15 +46,49 @@ pub fn agent_feedback(repo_root: &str, diff: &str, notes: &[&CodeAnnotation]) ->
     format!("Review directory: {repo_root}\n\n{}{REVIEW_SUFFIX}", review_feedback(notes, Some(diff)))
 }
 
+/// What the agent receives for a pull request: `Review directory: <clone>` when the PR was
+/// fetched into the person's clone, the browser's PR feedback, and the suffix.
+pub fn pull_agent_feedback(pull: &PrView, clone: Option<&str>, notes: &[&CodeAnnotation]) -> String {
+    let directory = clone.map(|root| format!("Review directory: {root}\n\n")).unwrap_or_default();
+    format!("{directory}{}{REVIEW_SUFFIX}", pull_feedback(pull, notes))
+}
+
+/// The browser's `exportReviewFeedback(notes, prMeta)` for a GitHub PR, with the two
+/// additions above.
+pub fn pull_feedback(pull: &PrView, notes: &[&CodeAnnotation]) -> String {
+    if notes.is_empty() {
+        return NO_FEEDBACK.to_owned();
+    }
+    let header = format!(
+        "# PR Review: {}#{}\n\n**{}**\nBranch: `{}` \u{2192} `{}`\n{}\n\n",
+        pull.repo.slug(),
+        pull.number,
+        pull.title,
+        pull.head_ref,
+        pull.base_ref,
+        pull.url
+    );
+    feedback(header, notes)
+}
+
+/// The browser's text for a review with no notes.
+const NO_FEEDBACK: &str = "# Code Review\n\nNo feedback provided.";
+
 /// The browser's `exportReviewFeedback(notes, null, diff)`, with the two additions above.
 pub fn review_feedback(notes: &[&CodeAnnotation], diff: Option<&str>) -> String {
     if notes.is_empty() {
-        return "# Code Review\n\nNo feedback provided.".to_owned();
+        return NO_FEEDBACK.to_owned();
     }
-    let mut out = String::from("# Code Review Feedback\n\n");
+    let mut header = String::from("# Code Review Feedback\n\n");
     if let Some(diff) = diff {
-        let _ = write!(out, "**Diff:** {diff}\n\n");
+        let _ = write!(header, "**Diff:** {diff}\n\n");
     }
+    feedback(header, notes)
+}
+
+/// `header`, then global comments, then each file's notes.
+fn feedback(header: String, notes: &[&CodeAnnotation]) -> String {
+    let mut out = header;
     let (general, mut placed): (Vec<&CodeAnnotation>, Vec<&CodeAnnotation>) =
         notes.iter().partition(|n| n.scope == NoteScope::General);
     if !general.is_empty() {

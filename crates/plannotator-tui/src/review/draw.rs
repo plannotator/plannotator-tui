@@ -26,6 +26,9 @@ const RAIL_MIN_TOTAL_WIDTH: u16 = 80;
 /// The comment box's widest; code suggestions want the room.
 pub(super) const COMPOSE_MAX_WIDTH: u16 = 84;
 
+/// The most characters of a PR's title the header shows.
+const PR_TITLE_MAX: usize = 48;
+
 impl Screen {
     pub(crate) fn draw(&mut self, frame: &mut Frame) -> Result<()> {
         let area = frame.area();
@@ -60,7 +63,7 @@ impl Screen {
             }
             Mode::Menu(cursor) => self.draw_menu(frame, *cursor),
             Mode::PickTarget => {
-                let root = crate::ui::pi_picker::real(self.root());
+                let root = self.real_root();
                 self.picker.draw(frame, area, &self.keys, &root, self.start_delivery.as_deref());
             }
             Mode::Help => self.draw_help(frame, area),
@@ -69,15 +72,29 @@ impl Screen {
         Ok(())
     }
 
+    /// The header's name for what is reviewed: `Uncommitted`, `Commit 1a2b3c4`, or for a pull
+    /// request `PR #123 · title · base ← head`, its title cut to [`PR_TITLE_MAX`] characters.
+    pub(super) fn scope_title(&self) -> String {
+        let Some(pull) = &self.capture.pull else { return self.capture.scope.title() };
+        let view = &pull.view;
+        let mut title: String = view.title.chars().take(PR_TITLE_MAX).collect();
+        if view.title.chars().count() > PR_TITLE_MAX {
+            title.push('\u{2026}');
+        }
+        let title = if title.is_empty() { String::new() } else { format!(" \u{b7} {title}") };
+        format!("PR #{}{title} \u{b7} {} \u{2190} {}", view.number, view.base_ref, view.head_ref)
+    }
+
     /// `Uncommitted · 4 files +120 −30` on the left; on the right the Review menu and the
     /// Send button, on the edge.
     fn draw_header(&mut self, frame: &mut Frame, area: Rect) {
         let (added, removed) = self.capture.totals();
         let files = self.capture.files.len();
         let title = format!(
-            " {} \u{b7} {files} file{} +{added} \u{2212}{removed} ",
-            self.capture.scope.title(),
-            if files == 1 { "" } else { "s" }
+            " {} \u{b7} {files} file{} +{added} \u{2212}{removed} \u{b7} {} ",
+            self.scope_title(),
+            if files == 1 { "" } else { "s" },
+            self.viewed_label()
         );
         let send = format!(" {} ", self.send_label());
         let review = match self.keys.hint(Action::ReviewMenu) {
@@ -129,7 +146,16 @@ impl Screen {
                 let [text_area, help_area] =
                     Layout::horizontal([Constraint::Min(0), Constraint::Length(hints.width() as u16)])
                         .areas(row);
-                frame.render_widget(Paragraph::new(Line::from(Span::raw(text.as_str()).dim())), text_area);
+                // The disk notice stands out from the rest of the dim text.
+                let notice = self.disk_notice().map(|n| format!(" {n}"));
+                let line = match notice.as_deref().and_then(|n| Some((n, text.strip_prefix(n)?))) {
+                    Some((notice, rest)) => Line::from(vec![
+                        Span::styled(notice.to_owned(), Style::new().fg(palette().accent).bold()),
+                        Span::raw(rest).dim(),
+                    ]),
+                    None => Line::from(Span::raw(text.as_str()).dim()),
+                };
+                frame.render_widget(Paragraph::new(line), text_area);
                 help_area
             } else {
                 row
@@ -141,7 +167,8 @@ impl Screen {
 
     /// The footer's left text (status first, as in document reviews) and its hint rows.
     fn footer_text(&self, width: u16) -> (String, Vec<String>) {
-        let mut parts: Vec<String> = self.status.iter().cloned().collect();
+        let mut parts: Vec<String> = self.disk_notice().into_iter().collect();
+        parts.extend(self.status.iter().cloned());
         match self.diff.progress() {
             Progress::Loading => parts.push("loading the diff\u{2026}".into()),
             Progress::Coloring => parts.push("coloring\u{2026}".into()),
@@ -151,6 +178,9 @@ impl Screen {
         }
         let notes = self.store.annotations();
         let outdated = notes.iter().filter(|n| super::notes::is_outdated(n)).count();
+        if self.cursor_file_viewed() {
+            parts.push("\u{2713} viewed".into());
+        }
         parts.push(self.repo_name());
         parts.push(match outdated {
             0 => count(notes.len()),
@@ -171,6 +201,14 @@ impl Screen {
         let room = usize::from(width).saturating_sub(1);
         let beside = room.saturating_sub(text.width() + 1);
         (text, hints::flow(&self.footer_hints(), room, beside))
+    }
+
+    /// `the diff changed on disk · r refreshes`, once a check saw the diff change.
+    fn disk_notice(&self) -> Option<String> {
+        self.watch.changed().then(|| match self.keys.hint(Action::Reload) {
+            key if key.is_empty() => "the diff changed on disk".to_owned(),
+            key => format!("the diff changed on disk \u{b7} {key} refreshes"),
+        })
     }
 
     fn footer_hints(&self) -> Vec<String> {
@@ -198,6 +236,7 @@ impl Screen {
                 key(Action::FileComment, "file note"),
                 pair(Action::NextHunk, Action::PreviousHunk, "hunk"),
                 pair(Action::NextFile, Action::PreviousFile, "file"),
+                key(Action::ToggleViewed, "viewed"),
                 key(Action::Reload, "reload"),
                 (!self.store.annotations().is_empty()).then(|| key(Action::CycleFocus, "notes")).flatten(),
             ]
@@ -237,6 +276,7 @@ impl Screen {
                 format!("suggest code for {}", lines_label(lines))
             }
             Draft::File(path) => format!("note on {path}"),
+            Draft::Change => "comment on the whole change".to_owned(),
             Draft::Edit(_) => "edit".to_owned(),
         };
         let title = self.compose.heading(&verb, self.shift_enter, &self.keys);

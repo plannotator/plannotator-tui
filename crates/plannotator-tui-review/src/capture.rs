@@ -6,18 +6,28 @@
 //! | Staged | HEAD vs index | `git diff --cached <HEAD>` |
 //! | Branch | merge-base(base, HEAD) vs working tree, untracked included | `git diff <merge-base>` on a temp index |
 //! | Commit | first parent vs commit | `git diff <sha>^ <sha>` |
+//! | Pull request | merge-base(base, head) vs head | `gh pr view`, `git fetch`, `git diff <merge-base> <head>` |
 //!
 //! Untracked files are marked intent-to-add in a temporary copy of the index
 //! (`GIT_INDEX_FILE`); the real index is never written. With no HEAD yet (a new repo) the
 //! empty tree stands in for it, as for a root commit's parent.
+//!
+//! A pull request ([`Repo::pull_request`]) is looked up with `gh pr view` and its head
+//! fetched with `git fetch <remote> refs/pull/<n>/head` into a private ref,
+//! `refs/plannotator-tui/pull/<n>/head`; no branch, index or working tree is touched, and
+//! both sides are read from commits. The fetch goes into the person's clone when the folder
+//! the review runs in is one (a remote names the PR's repository), else into a bare cache
+//! repository per GitHub repository under the data dir, fetched with `gh` as the credential
+//! helper.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::annotation::{CodeAnnotation, Side};
+use crate::annotation::{CodeAnnotation, NoteScope, Side};
 use crate::error::{Error, Result};
 use crate::git::{self, TempIndex};
+use crate::github::{Gh, PrRepo, PrSpec, PrView};
 use crate::patch::{self, FilePatch};
 use crate::resolve::{self, Current, Resolution};
 use crate::scope::Scope;
@@ -40,10 +50,37 @@ const DIFF_FLAGS: [&str; 6] = [
     "--submodule=short",
 ];
 
-/// A git work tree, found from any folder inside it.
+/// A git work tree, found from any folder inside it; for a pull request, the repository its
+/// commits are fetched into.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Repo {
     root: PathBuf,
+    pull: Option<PullSource>,
+}
+
+/// Where a pull request review fetches from, so a reload can fetch again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PullSource {
+    gh: Gh,
+    /// A remote of the person's clone, or the clone URL when fetching into the cache.
+    remote: String,
+    /// Fetching into the cache repository, with `gh` as the credential helper.
+    cache: bool,
+    /// Where the review was opened: the clone's root, or the folder it ran in for the cache.
+    workdir: PathBuf,
+}
+
+/// The pull request a capture shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequest {
+    /// What `gh pr view` said: repository, number, link, title, branches and commits.
+    pub view: PrView,
+    /// The head commit fetched (gh's `headRefOid`, or newer when a push landed in between).
+    pub head: String,
+    /// The base commit the diff starts from: merge-base(base, head).
+    pub merge_base: String,
+    /// The person's clone it was fetched into; `None` for the cache repository.
+    pub clone: Option<PathBuf>,
 }
 
 /// What the person asked to review, before refs are resolved.
@@ -61,6 +98,10 @@ pub enum Request {
     /// One commit, by any revision git understands (`HEAD`, a short sha).
     Commit {
         rev: String,
+    },
+    /// A GitHub pull request: a link, `N` or `#N`. Opened with [`Repo::pull_request`].
+    PullRequest {
+        pr: String,
     },
 }
 
@@ -91,6 +132,8 @@ pub struct Capture {
     pub new: SideSource,
     /// A commit review's subject line, for the feedback's `**Diff:**` line.
     pub commit_subject: Option<String>,
+    /// A pull request review's PR.
+    pub pull: Option<PullRequest>,
 }
 
 impl Repo {
@@ -99,7 +142,7 @@ impl Repo {
         let mut cmd = git::command(dir);
         cmd.args(["rev-parse", "--show-toplevel"]);
         match git::run_text(cmd, "rev-parse --show-toplevel") {
-            Ok(root) if !root.is_empty() => Ok(Self { root: PathBuf::from(root) }),
+            Ok(root) if !root.is_empty() => Ok(Self { root: PathBuf::from(root), pull: None }),
             Ok(_) => Err(Error::NotARepo { dir: dir.to_path_buf(), detail: "no work tree".into() }),
             Err(Error::Git { detail, .. }) => Err(Error::NotARepo { dir: dir.to_path_buf(), detail }),
             Err(other) => Err(other),
@@ -108,6 +151,121 @@ impl Repo {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// The folder the review belongs to, for the agent and Pi: the work tree, or for a pull
+    /// request fetched into the cache, the folder the review was opened in.
+    pub fn workdir(&self) -> &Path {
+        self.pull.as_ref().map_or(&self.root, |p| &p.workdir)
+    }
+
+    /// Open the pull request `text` names (a link, `N` or `#N`) from the folder `dir`: look
+    /// it up with `gh`, fetch its head into `dir`'s clone when a remote of it names the PR's
+    /// repository, else into a bare repository under `cache`, and capture its diff. A bare
+    /// number needs `dir` to be a clone with a GitHub remote.
+    pub fn pull_request(dir: &Path, text: &str, cache: &Path, gh: &Gh) -> Result<(Self, Capture)> {
+        let spec = PrSpec::parse(text).ok_or_else(|| Error::NotAPull { text: text.to_owned() })?;
+        let local = Self::discover(dir).ok();
+        if matches!(spec, PrSpec::Number(_)) && local.is_none() {
+            return Err(Error::NoGitHubRemote {
+                detail: format!("{} is not inside a git repository", dir.display()),
+            });
+        }
+        let view = gh.view(&spec, local.as_ref().map_or(dir, Self::root))?;
+        let clone = local.and_then(|repo| repo.remote_for(&view.repo).map(|remote| (repo, remote)));
+        let source = |remote, cache, workdir| Some(PullSource { gh: gh.clone(), remote, cache, workdir });
+        let repo = if let Some((repo, remote)) = clone {
+            let workdir = repo.root.clone();
+            Self { root: repo.root, pull: source(remote, false, workdir) }
+        } else {
+            let root = cache_repo(cache, &view.repo)?;
+            Self { root, pull: source(view.repo.clone_url(), true, dir.to_path_buf()) }
+        };
+        let capture = repo.capture_pull(view)?;
+        Ok((repo, capture))
+    }
+
+    /// The first remote (by name) whose URL names `repo`, as configured (before `insteadOf`).
+    fn remote_for(&self, repo: &PrRepo) -> Option<String> {
+        let mut cmd = git::command(&self.root);
+        cmd.args(["config", "--get-regexp", r"^remote\..*\.url$"]);
+        let listed = git::run_text(cmd, "config --get-regexp remote").ok()?;
+        let mut names: Vec<&str> = listed
+            .lines()
+            .filter_map(|line| line.split_once(' '))
+            .filter(|(_, url)| repo.matches_remote(url.trim()))
+            .filter_map(|(key, _)| key.strip_prefix("remote.")?.strip_suffix(".url"))
+            .collect();
+        names.sort_unstable();
+        names.first().map(|n| (*n).to_owned())
+    }
+
+    /// Fetch the PR `view` describes and capture merge-base(base, head) against head.
+    fn capture_pull(&self, view: PrView) -> Result<Capture> {
+        let source = self.pull.as_ref().ok_or_else(|| Error::Git {
+            command: "fetch".into(),
+            detail: "this review was not opened for a pull request".into(),
+        })?;
+        let n = view.number;
+        let head_ref = format!("refs/plannotator-tui/pull/{n}/head");
+        let base_ref = format!("refs/plannotator-tui/pull/{n}/base");
+        self.fetch(source, &[&format!("+refs/pull/{n}/head:{head_ref}")])?;
+        let head = self.commit(&head_ref)?;
+        // The base commit gh named is usually here already (it is on the base branch); else
+        // fetch the base branch, then the commit itself; else diff against the branch's tip.
+        if self.commit(&view.base_sha).is_err() {
+            let branch = format!("+refs/heads/{}:{base_ref}", view.base_ref);
+            if self.fetch(source, &[&branch]).is_err() || self.commit(&view.base_sha).is_err() {
+                let _ = self.fetch(source, &[&view.base_sha]);
+            }
+        }
+        let base = self.commit(&view.base_sha).or_else(|_| self.commit(&base_ref)).map_err(|_| {
+            Error::NoBase { base: format!("{} ({}) of PR #{n}", view.base_ref, short(&view.base_sha)) }
+        })?;
+        let merge_base = self.merge_base_of(&base, &head)?;
+        let patch = Self::diff(git::command(&self.root), &[], &[&merge_base, &head])?;
+        let files = patch::parse(&String::from_utf8_lossy(&patch));
+        let scope = Scope::PullRequest { url: view.url.clone(), number: n };
+        let clone = (!source.cache).then(|| self.root.clone());
+        Ok(Capture {
+            scope,
+            root: self.root.clone(),
+            patch_key: patch_key(&patch),
+            patch,
+            files,
+            old: SideSource::Rev(merge_base.clone()),
+            new: SideSource::Rev(head.clone()),
+            commit_subject: None,
+            pull: Some(PullRequest { view, head, merge_base, clone }),
+        })
+    }
+
+    /// `git fetch` from the PR's remote: no tags, no `FETCH_HEAD`, never a prompt.
+    fn fetch(&self, source: &PullSource, refspecs: &[&str]) -> Result<()> {
+        let mut cmd = git::command(&self.root);
+        if source.cache && source.remote.starts_with("https://") {
+            // A private repository's objects with the person's gh login, as `gh repo clone` does.
+            let program = source.gh.program().to_string_lossy().replace('\'', r"'\''");
+            cmd.args(["-c", "credential.helper="]);
+            cmd.arg("-c").arg(format!("credential.helper=!'{program}' auth git-credential"));
+        }
+        cmd.args([
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            "--no-write-fetch-head",
+            "--end-of-options",
+            &source.remote,
+        ])
+        .args(refspecs)
+        .env("GIT_TERMINAL_PROMPT", "0");
+        git::run(cmd, &format!("fetch {}", source.remote)).map(drop)
+    }
+
+    fn merge_base_of(&self, base: &str, head: &str) -> Result<String> {
+        let mut cmd = git::command(&self.root);
+        cmd.args(["merge-base", "--end-of-options", base, head]);
+        git::run_text(cmd, "merge-base")
     }
 
     /// Resolve `request` to a scope and capture it. Uncommitted falls back to the branch
@@ -137,10 +295,16 @@ impl Repo {
                 })?;
                 self.capture(&Scope::Commit { sha })
             }
+            // Where a PR is fetched depends on the PR, so it is not this repository's to open.
+            Request::PullRequest { pr } => Err(Error::Git {
+                command: "fetch".into(),
+                detail: format!("open pull request {pr} with Repo::pull_request"),
+            }),
         }
     }
 
-    /// Capture exactly `scope` (no fallback): what a reload runs.
+    /// Capture exactly `scope` (no fallback): what a reload runs. A pull request is looked up
+    /// and fetched again, so new pushes show.
     pub fn capture(&self, scope: &Scope) -> Result<Capture> {
         let (old, new, patch) = match scope {
             Scope::Uncommitted => {
@@ -168,6 +332,12 @@ impl Repo {
                 let patch = Self::diff(git::command(&self.root), &[], &[&parent, sha])?;
                 (SideSource::Rev(parent), SideSource::Rev(sha.clone()), patch)
             }
+            Scope::PullRequest { url, number } => {
+                let source = self.pull.as_ref().ok_or_else(|| Error::NotAPull { text: url.clone() })?;
+                let spec = PrSpec::parse(url).unwrap_or(PrSpec::Number(*number));
+                let view = source.gh.view(&spec, &source.workdir)?;
+                return self.capture_pull(view);
+            }
         };
         let commit_subject = match scope {
             Scope::Commit { sha } => Some(self.subject(sha)?),
@@ -183,6 +353,7 @@ impl Repo {
             old,
             new,
             commit_subject,
+            pull: None,
         })
     }
 
@@ -246,6 +417,19 @@ impl Repo {
 }
 
 impl Capture {
+    /// The project and repository this capture's notes are saved under (see
+    /// [`crate::ReviewStore::load`]): the work tree's name and root, or for a pull request its
+    /// GitHub repository's name and link (`r`, `https://github.com/o/r`), so a PR's notes are
+    /// the same whichever clone, or the cache, it was fetched into.
+    pub fn record_owner(&self) -> (String, String) {
+        match &self.pull {
+            Some(pull) => {
+                (crate::store::project_for(Path::new(&pull.view.repo.name)), pull.view.repo.web_url())
+            }
+            None => (crate::store::project_for(&self.root), self.root.display().to_string()),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.patch.is_empty()
     }
@@ -300,6 +484,13 @@ impl Capture {
         let mut contents: HashMap<(Side, String), Option<String>> = HashMap::new();
         let mut out = Vec::with_capacity(notes.len());
         for note in notes {
+            // A note on the whole change has no file to read (its path is empty, which would
+            // read the work tree's folder or a commit's tree).
+            if note.scope == NoteScope::General {
+                let current = Current { content: None, patch: None, patch_key: &self.patch_key };
+                out.push(resolve::resolve(note, &current));
+                continue;
+            }
             let patch = self.file(&note.file_path);
             // A file renamed in this diff is read from its old path on the old side.
             let file_on_side = match (note.side, patch.and_then(|p| p.old_path.as_deref())) {
@@ -318,10 +509,46 @@ impl Capture {
     }
 }
 
+/// The bare repository under `cache` that `repo`'s pull requests are fetched into, made on
+/// first use: `<cache>/<host>/<owner>/<name>.git`.
+fn cache_repo(cache: &Path, repo: &PrRepo) -> Result<PathBuf> {
+    let path = cache
+        .join(path_safe(&repo.host))
+        .join(path_safe(&repo.owner))
+        .join(format!("{}.git", path_safe(&repo.name)));
+    if !path.join("HEAD").is_file() {
+        std::fs::create_dir_all(&path).map_err(|source| Error::Io {
+            action: "creating the pull request cache",
+            path: path.clone(),
+            source,
+        })?;
+        let mut cmd = git::command(&path);
+        cmd.args(["init", "--quiet", "--bare"]);
+        git::run(cmd, "init --bare")?;
+    }
+    Ok(path)
+}
+
+/// A path component with anything but `[A-Za-z0-9._-]` as `-`, and no leading dot.
+fn path_safe(part: &str) -> String {
+    let cleaned: String = part
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '-' })
+        .collect();
+    let cleaned = cleaned.trim_start_matches('.');
+    if cleaned.is_empty() { "-".to_owned() } else { cleaned.to_owned() }
+}
+
+fn short(sha: &str) -> &str {
+    sha.get(..7).unwrap_or(sha)
+}
+
 /// The browser's `contentHash`: sha256 hex, first 16 characters.
 pub fn patch_key(patch: &[u8]) -> String {
     crate::sha256_hex(&[patch], 16)
 }
 
+#[cfg(all(test, unix))]
+mod pull_tests;
 #[cfg(test)]
 mod tests;

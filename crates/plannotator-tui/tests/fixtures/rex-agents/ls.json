@@ -1,0 +1,12 @@
+{
+  "sessions": [
+    {
+      "session_id": "session:01a1f658-7c0a-71ad-8ff6-a1bcbc31504f",
+      "label": "work"
+    },
+    {
+      "session_id": "session:01a1f658-9a2c-7c92-8a7d-fdc408c67130",
+      "label": "side"
+    }
+  ]
+}

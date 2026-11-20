@@ -14,7 +14,12 @@
 //!   and `hc review`, and the pane they open.
 //! - [`input`]: keys and the mouse. [`draw`], [`rail`] and [`overlays`]: the frame.
 //! - [`send`]: send, resend, finish and undo. [`pi`]: the Pi link.
-//! - [`cli`]: `plannotator-tui review [--staged | --base REF | --commit SHA] [DIR]`.
+//! - [`watch`]: noticing that the diff changed on disk, for the footer.
+//! - [`cli`]: `plannotator-tui review [--staged | --base REF | --commit SHA | PR] [DIR]`.
+//!
+//! A pull request review (`PR` is a GitHub link, `N` or `#N`) fetches the PR with the
+//! person's `gh` login into their clone or a cache repository ([`capture`]), and sends to the
+//! agent as any review does. Nothing is posted to GitHub.
 
 pub(crate) mod cli;
 mod diff;
@@ -30,20 +35,23 @@ pub(crate) mod scope;
 mod send;
 #[cfg(test)]
 mod tests;
+mod viewed;
+mod watch;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::SyncSender;
+use std::time::Instant;
 
 use anyhow::{Context as _, Result};
-use plannotator_tui_review::{Capture, FilePatch, Repo, ReviewStore, Status};
+use plannotator_tui_review::{Capture, FilePatch, Progress, Repo, ReviewStore, Status};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 
 use crate::delivery::Delivery;
 use crate::keys::Keymap;
 use crate::theme::palette;
+use crate::ui::agent_picker::{AgentPicker, Reach};
 use crate::ui::compose::Compose;
-use crate::ui::pi_picker::PiPicker;
 use crate::ui::send_button::SendState;
 use diff::{Diff, Lines};
 
@@ -56,6 +64,8 @@ enum Draft {
     Suggestion(Lines),
     /// A comment on a whole file.
     File(String),
+    /// A comment on the whole change, on no file.
+    Change,
     /// A new body for an existing note, by id.
     Edit(String),
 }
@@ -99,12 +109,18 @@ pub(crate) struct Screen {
     capture: Capture,
     diff: Diff,
     store: ReviewStore,
+    /// Viewed marks, shared with the browser app (`viewed`).
+    progress: Progress,
     data_dir: PathBuf,
     project: String,
     delivery: Box<dyn Delivery>,
-    /// The target the review started with, while Send goes to a Pi picked instead.
+    /// The target the review started with, while Send goes to an agent picked instead.
     start_delivery: Option<Box<dyn Delivery>>,
-    picker: PiPicker,
+    picker: AgentPicker,
+    /// Where the picker looks for agents, and whether Send asks which one first.
+    reach: Reach,
+    /// What to send once the picker that Send opened has a choice.
+    pick_then: Option<send::PickThen>,
     pi_link: Option<crate::pi::link::Link>,
     keys: Keymap,
     /// Whether the terminal reports Shift+Enter distinctly; the comment box's hint says so.
@@ -123,6 +139,10 @@ pub(crate) struct Screen {
     undo: Vec<String>,
     status: Option<String>,
     geometry: Geometry,
+    /// Whether the diff changed on disk since the last capture.
+    watch: watch::Watch,
+    /// The last key or paste, so no disk check starts while the person types.
+    last_key: Option<Instant>,
     quit: bool,
 }
 
@@ -145,21 +165,25 @@ impl Screen {
         delivery: Box<dyn Delivery>,
         wake: SyncSender<()>,
     ) -> Result<Self> {
-        let project = plannotator_tui_review::project_for(&capture.root);
-        let root = capture.root.display().to_string();
-        let store = ReviewStore::load(data_dir, &project, &root, &capture.scope)?;
+        let (project, owner) = capture.record_owner();
+        let store = ReviewStore::load(data_dir, &project, &owner, &capture.scope)?;
         let light = crate::theme::theme() == crate::theme::Theme::Light;
+        let watch = watch::Watch::start(&capture.scope, wake.clone());
         let diff = Diff::open(&capture, light, wake)?;
+        let progress = Progress::open(&capture, data_dir, viewed::saving(data_dir));
         let mut screen = Self {
             repo,
             capture,
             diff,
             store,
+            progress,
             data_dir: data_dir.to_path_buf(),
             project,
             delivery,
             start_delivery: None,
-            picker: PiPicker::default(),
+            picker: AgentPicker::default(),
+            reach: Reach::default(),
+            pick_then: None,
             pi_link: None,
             keys: Keymap::default(),
             shift_enter: false,
@@ -173,6 +197,8 @@ impl Screen {
             undo: Vec::new(),
             status: None,
             geometry: Geometry::default(),
+            watch,
+            last_key: None,
             quit: false,
         };
         let placed = screen.place_notes()?;
@@ -202,6 +228,9 @@ impl Screen {
             changed = true;
         }
         changed |= self.poll_pi();
+        let typing = matches!(self.mode, Mode::Compose(_))
+            || self.last_key.is_some_and(|at| at.elapsed() < watch::QUIET_AFTER_KEY);
+        changed |= self.watch.poll(&self.repo, &self.capture.scope, !typing);
         Ok(changed || self.diff.needs_draw())
     }
 
@@ -234,14 +263,20 @@ impl Screen {
     /// Recapture the diff (`r`): notes follow their lines, the ones whose code is gone move
     /// to Outdated. A capture that fails leaves the review as it was.
     fn reload(&mut self) -> Result<()> {
-        let capture = match self.repo.capture(&self.capture.scope) {
+        let captured = {
+            let _no_check_meanwhile = self.watch.hold_git();
+            self.repo.capture(&self.capture.scope)
+        };
+        let capture = match captured {
             Ok(capture) => capture,
             Err(err) => {
                 self.status = Some(format!("reload failed: {err}"));
                 return Ok(());
             }
         };
+        self.watch.recaptured();
         self.diff.replace(&capture)?;
+        self.progress = self.progress.reopen(&capture, &self.data_dir);
         self.capture = capture;
         let placed = self.place_notes()?;
         self.clamp_rail_cursor();
@@ -292,13 +327,17 @@ impl Screen {
         self.send_state = if self.store.all_delivered() { SendState::Sent } else { SendState::Ready };
     }
 
-    /// The repository root as Pi and the feedback name it.
+    /// The repository root as Pi and the feedback name it: for a pull request fetched into
+    /// the cache, the folder the review was opened in.
     fn root(&self) -> &Path {
-        &self.capture.root
+        self.repo.workdir()
     }
 
-    /// The repository folder's name, for the footer.
+    /// The repository folder's name, for the footer; a pull request's `owner/repo`.
     fn repo_name(&self) -> String {
+        if let Some(pull) = &self.capture.pull {
+            return pull.view.repo.slug();
+        }
         self.root()
             .file_name()
             .map_or_else(|| self.root().display().to_string(), |n| n.to_string_lossy().into())
@@ -306,11 +345,20 @@ impl Screen {
 }
 
 /// Open a review of `dir` for `request` and fail before any screen opens when there is
-/// nothing to show: `No uncommitted changes in app`.
+/// nothing to show: `No uncommitted changes in app`. A pull request is fetched with `gh`
+/// into `dir`'s clone of its repository, else into a bare cache repository under the data
+/// dir (`clients/plannotator-tui/pulls/<host>/<owner>/<repo>.git`).
 pub(crate) fn capture(dir: &Path, request: &plannotator_tui_review::Request) -> Result<(Repo, Capture)> {
-    use plannotator_tui_review::Scope;
-    let repo = Repo::discover(dir)?;
-    let capture = repo.open(request).with_context(|| format!("reviewing {}", repo.root().display()))?;
+    use plannotator_tui_review::{Gh, Request, Scope};
+    let (repo, capture) = if let Request::PullRequest { pr } = request {
+        let cache = crate::workspace_paths::data_dir().join("clients").join("plannotator-tui").join("pulls");
+        Repo::pull_request(dir, pr, &cache, &Gh::default())
+            .with_context(|| format!("reviewing pull request {pr}"))?
+    } else {
+        let repo = Repo::discover(dir)?;
+        let capture = repo.open(request).with_context(|| format!("reviewing {}", repo.root().display()))?;
+        (repo, capture)
+    };
     if capture.is_empty() {
         let root = repo.root();
         let name =
@@ -320,6 +368,7 @@ pub(crate) fn capture(dir: &Path, request: &plannotator_tui_review::Request) -> 
             Scope::Staged => "staged changes".to_owned(),
             Scope::Branch { base } => format!("changes since {base}"),
             Scope::Commit { sha } => format!("changes in commit {}", sha.get(..7).unwrap_or(sha)),
+            Scope::PullRequest { url, .. } => anyhow::bail!("No changes in {url}"),
         };
         anyhow::bail!("No {what} in {name}");
     }

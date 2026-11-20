@@ -58,7 +58,8 @@ plannotator-tui last               # your coding agent's recent replies, pick on
 
 Drag with the mouse (or `v`, move, then `Enter`) to select, then `a` 👍 · `c` 💬 · `d` ✗. `E`
 copies the feedback to the clipboard as numbered annotations (`# Annotations on plan.md`,
-`## Annotation 1 (line 12)`, …). Every annotation is saved as JSON the moment you make it; `q`
+`## Annotation 1 (line 12)`, …), or, when an agent is within reach, first asks which agent
+to send to (see [Choosing the agent](#choosing-the-agent)). Every annotation is saved as JSON the moment you make it; `q`
 closes.
 
 `I` attaches a local image to the selected note (in the notes, or the selected block's note in
@@ -95,7 +96,7 @@ dimmed. The keys also work without opening the menu.
 
 | Where | Keys |
 |---|---|
-| anywhere | `Tab` cycle tree · document · notes; `E` send; `P` choose the Pi to send to; `t` tree; `r` reload; `o` open the file in `$EDITOR`; `q` quit |
+| anywhere | `Tab` cycle tree · document · notes; `E` send; `P` choose the agent to send to; `t` tree; `r` reload; `o` open the file in `$EDITOR`; `q` quit |
 | reply review | `S` send and close |
 | gated review | `A` approve; `E` send and finish; `q` dismiss |
 | document | `j`/`k` block; `c` comment on the block; `a` looks good; `d` delete; `x` clear its annotations; `X` clear every annotation on the document, after a `y`; `v` select with `hjkl` `w` `b` `e` `0` `$`, then `a`, `c` or `d` to act on it, `y` to copy it, or `Enter` for the toolbar; `V` select whole rows; `i` move the cursor with those keys first, then `v` to select from there; `I`/`D` attach or remove an image on the block's note |
@@ -105,7 +106,7 @@ dimmed. The keys also work without opening the menu.
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
-| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `]`/`[` hunk; `n`/`N` file; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `r` read the diff again; `?` keys |
+| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `M` note on the whole change; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `r` read the diff again (the footer says when it changed on disk); `?` keys |
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
 
@@ -168,6 +169,8 @@ plannotator-tui review --staged        # only what is staged
 plannotator-tui review --base main     # everything since this branch left main
 plannotator-tui review --commit 1a2b3c # one commit
 plannotator-tui review ../other-repo   # another repository
+plannotator-tui review 123             # pull request #123 of this repository (also #123)
+plannotator-tui review https://github.com/owner/repo/pull/123
 ```
 
 `review` opens a git diff. Move with `j`/`k`, `]`/`[` for the next or previous hunk, and
@@ -177,20 +180,56 @@ plannotator-tui review ../other-repo   # another repository
 - `c` writes a comment on the lines.
 - `s` writes a suggestion: the box opens with the new lines, so you edit the code you want.
 - `C` writes a note on the whole file.
+- `M` writes a note on the whole change (also the first row of the Review menu). It sits
+  at the top of the rail under **Whole change**, and the agent gets it first, under
+  `## Global comments`, as the browser sends its global comments.
 
 Notes appear in the rail on the right, grouped by file, and a mark in the diff shows their
 lines. Sent notes get a dimmer mark. `Tab` moves to the rail; `j`/`k` there moves to a
 note and the diff moves with it; `e` edits and `x` removes it.
 
-`E` sends the new notes, `S` sends them and closes, and `P` picks the Pi session to send
+`E` sends the new notes, `S` sends them and closes, and `P` picks the agent to send
 to. Sends go to the same place a document review's do (Herdr pane, Rex, Pi or the
-clipboard), and are kept in the feedback archive. `q` asks first when notes are unsent.
-`m` opens the Review menu: `R` resend all, `F` finish review, `U` undo.
+clipboard, or the agent you choose when nothing named one; see [Choosing the agent](#choosing-the-agent)), and are kept in the feedback archive. `q` asks first when notes are unsent.
+`m` opens the Review menu: `M` comment on the whole change, `R` resend all, `F` finish
+review, `U` undo.
 
 `r` reads the diff again after you or the agent change files. Notes follow their lines.
+The review checks for changes by itself every few seconds (a `git status` and the times of
+the changed files; never while you type, less often in a large repository), and the footer
+then says `the diff changed on disk · r refreshes`. It never reloads by itself. Commit and
+pull request reviews have nothing on disk to check.
 A note whose lines changed goes to the **Outdated** group at the end of the rail; it is
 still sent, marked as outdated. `u` switches between split and unified view, `w` wraps
 long lines, `f` lists the changed files and `?` shows every key.
+
+`x` marks the file under the cursor viewed, and `x` again unmarks it. The header counts
+them (`3/12 viewed`) and `ctrl+n` goes to the next file you have not viewed. Marks are
+saved in the browser app's own format under the data folder (`review-progress/`), so a
+review started in the browser continues here and the other way round. A mark stops
+counting once its file changes. Set `PLANNOTATOR_REVIEW_PROGRESS=0` to keep marks for the
+session only. See [docs/spec-review-progress.md](docs/spec-review-progress.md).
+
+### Pull requests
+
+`review` with a pull request link, a number or `#123` (also `--pr PR`) reviews what GitHub
+shows for that pull request: its head commit against where it left its base branch. It uses
+your `gh` login (install the [GitHub CLI](https://cli.github.com) and run `gh auth login`). A
+number is looked up in the GitHub repository of the folder you run it in; a link works from
+any folder. A folder whose name is only digits is `./123`.
+
+The pull request's commits are fetched into your clone when you run it inside one (any remote
+naming the PR's repository), as the private ref `refs/plannotator-tui/pull/<n>/head`. Your
+branch, index and working files are not touched. Outside a clone of that repository, they are
+fetched into a cache repository under the data folder
+(`clients/plannotator-tui/pulls/<host>/<owner>/<repo>.git`); the first review of a repository
+there downloads its history once.
+
+The header shows `PR #123 · title · base ← head`. `r` looks the pull request up again and
+fetches new pushes; notes follow their lines as they do for local changes. Notes are saved
+once per pull request, whichever clone you open it from. Send goes to the agent as for any
+review, with the browser's pull request header (`# PR Review: owner/repo#123`, the title,
+the branches and the link). Nothing is posted to GitHub.
 
 A Pi session can leave notes on the diff too (see [Pi](#pi)). Notes are saved with the
 other annotations, one record per repository and scope. Code review is not available on
@@ -226,7 +265,7 @@ code block. Send goes to the agent in that pane, as it does for a reply; a pane 
 copies instead. `--print` writes the document to stdout instead of opening a pane. Herdr
 Annotate ships it as the `annotate.terminal` action with no default key.
 
-`plannotator-tui herdr review [--staged | --base REF | --commit SHA]` opens a [code
+`plannotator-tui herdr review [--staged | --base REF | --commit SHA | PR]` opens a [code
 review](#code-review) of the focused pane's git repository (else the workspace's folder) in a
 pane. Send goes to the agent in that pane. A folder that is not in a repository, or has no
 changes to review, fails before any pane opens. The development manifest has it as the
@@ -282,23 +321,37 @@ block = "236"            # the focused block and the focused tree row
 toolbar = "238"          # the floating toolbar and the idle header buttons
 cursor = "240"           # the keyboard cursor cell
 selection = "#45475a"    # a character selection, a picker row, a menu row
+code = "light-yellow"    # inline code, and fenced code without a bundled grammar; 94 on light
+code-keyword = "magenta" # fenced code with a known language: keywords
+code-string = "green"    # 28 on the light palette
+code-number = "yellow"   # numbers and constants; 130 on light
+code-function = "blue"
+code-type = "cyan"       # 30 on light
+code-comment = "dark-gray"  # comments (italic), the bar beside code and its language label
 ```
 
 `cursor` and `selection` become plain backgrounds when set: the text on them keeps the
 terminal's colour.
 
-On a wide terminal, `[ui]` can keep the text to a readable measure:
+The document's text sits in a reading column, centred in the columns the tree and the notes
+leave, and `[ui]` sizes it and the app around it:
 
 ```toml
 [ui]
-doc_width = 100          # the document's text columns; spare columns sit before the notes
+doc_width = 80           # the reading column, in columns; 0 lets the text fill the pane
 max_width = 160          # center the whole app in this many columns
 horizontal_margin = 2    # blank columns on each side
 ```
 
-All three default to `0`, which fills the terminal as before. The margin and `max_width`
-yield before the app drops below 80 columns, so a narrow pane keeps its notes rail; a
-narrow pane also lets the document shrink below `doc_width`.
+`doc_width` defaults to `80`; `max_width` and `horizontal_margin` default to `0`, which
+fills the terminal. `<` and `>` narrow and widen the column by eight for the session. The
+margin and `max_width` yield before the app drops below 80 columns, so a narrow pane keeps
+its notes rail; a narrow pane also lets the document shrink below `doc_width`.
+
+Fenced code is drawn without its fences, beside a bar, and coloured by language when the
+grammar is one of the bundled ones; other code keeps one colour. This holds inside a list
+or a quote too. Top-level code also shows its language at the top right when there is
+room, and a line too long for the column continues on the next row.
 
 The comment box is 48 columns wide. `comment_width` changes that, down to a minimum of 38,
 and a narrower pane still narrows it:
@@ -354,7 +407,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `open-in-editor` | `o` | edit the open file in `$VISUAL` or `$EDITOR`, then reload it |
 | `quick-open` | `ctrl+p` | find a file by name in a folder review |
 | `review-menu` | `m` | the Review menu |
-| `pick-target` | `P` | choose the Pi session Send goes to (see [Pi](#pi)) |
+| `pick-target` | `P` | choose the agent Send goes to (see [Choosing the agent](#choosing-the-agent)) |
 | `resend-all` `finish-review` `undo-finish` `archive` | `R` `F` `U` `H` | file and folder review actions |
 | `toggle-hidden` | `.` | show/hide dot-prefixed entries in the tree |
 | `edit` `remove` | `e` `x`, `Delete` | the selected note |
@@ -366,9 +419,12 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `copy` | `y` | copy the selection waiting in the toolbar |
 | `yes` `no` | `y` `n`, `Y` `N` | the send-before-quitting and clear-all questions |
 | `suggest` `file-comment` | `s` `C` | code review: suggest code for the lines; a note on the whole file |
+| `change-comment` | `M` | code review: a note on the whole change |
 | `next-hunk` `previous-hunk` `next-file` `previous-file` | `]` `[` `n` `N` | code review: move by hunk or file |
 | `toggle-layout` `toggle-wrap` `toggle-files` | `u` `w` `f` | code review: split or unified view; wrap; the file list |
+| `toggle-viewed` `next-unviewed` `previous-unviewed` | `x` `ctrl+n`, none | code review: mark the file viewed; the next or previous file not viewed |
 | `help` | `?` | code review: every key |
+| `narrow-column` `widen-column` | `<` `>` | the reading column, by eight columns |
 
 Actions forwarded by Herdr Mirror default to a split beside the invoking remote
 pane. Mirror does not preserve overlay presentation, and Herdr 0.8.2 opens an
@@ -444,7 +500,7 @@ plannotator-tui rex last [--newest]         # the agent's replies
 plannotator-tui rex open [file.md | folder] # a document, or the pane's folder
 plannotator-tui rex terminal [--lines N]    # the pane's recent output; --print writes it out
 plannotator-tui rex find [--lines N]        # the newest .md file the pane's output names
-plannotator-tui rex review [--staged | --base REF | --commit SHA] # a code review of the pane's repository
+plannotator-tui rex review [--staged | --base REF | --commit SHA | PR] # a code review of the pane's repository
 ```
 
 The pane is `--block <id>`, else `REX_BLOCK`, so an agent that runs a launcher in its own
@@ -456,10 +512,17 @@ agent's pane, so you can edit it first; the header says `claude prompt in a1d6db
 that is not in a repository, or has no changes to review, fails before any split opens. Code
 review is not available on Windows yet.
 
+Send goes to the agent in the pane the review was opened from, with no question asked. `P`
+lists every other agent Rex runs, in every session and window, the ones in the review's own
+window first, so a review opened from one agent can go to another (see
+[Choosing the agent](#choosing-the-agent)). A review you start yourself in a Rex pane, with
+no launcher, asks which agent on the first Send.
+
 The agent is the one the pane's program reports to Rex (its program status app, such as `pi`
 or `claude-code`), else the one its process is named after. So pi, which runs under `node`,
 gets Send like any other agent. A pane with no agent copies instead. A send waits while Rex
-reports the agent blocked on a permission prompt or a question, as it does in Herdr. It also
+reports the agent blocked on a permission prompt or a question, as it does in Herdr: nothing is
+sent or copied, the notes stay pending, and `E` retries. It also
 needs the agent to report its state to Rex (Claude Code, Codex and pi do): until it has, the
 review copies instead, since Enter could answer a dialog Rex cannot see, and `--paste` still
 works. Rex does not report its theme to programs, so with a light Rex theme set
@@ -475,7 +538,7 @@ plannotator-tui is started by a command rather than a manifest. Run it in an hc 
 plannotator-tui hc last [--newest] [--session <transcript>]   # the agent's replies
 plannotator-tui hc open [file.md | folder]                    # a document, or the terminal's folder
 plannotator-tui hc open plan.md --gate [--result-file <path>] # adds Approve, as `herdr open --gate`
-plannotator-tui hc review [--staged | --base REF | --commit SHA] # a code review of the terminal's repository
+plannotator-tui hc review [--staged | --base REF | --commit SHA | PR] # a code review of the terminal's repository
 ```
 
 Each starts plannotator-tui in a terminal of its own, `annotate-<terminal>`, and shows it in
@@ -498,7 +561,7 @@ A terminal with no agent copies instead.
 
 A send needs the agent to still be the terminal's foreground program and to have reported its state
 to hc (OSC 7501), because Enter could answer a dialog hc cannot see. `hc send` also refuses an agent
-that reports it is blocked, and the review says so and copies; `E` retries.
+that reports it is blocked, and the review says so; nothing is copied and `E` retries.
 
 hc has no exact session for an agent, so `hc last` reads the newest transcript in the agent's folder.
 Another agent in that folder may have written one more recently; `--session` names the right
@@ -506,6 +569,47 @@ transcript. Terminals on another machine and `terminal` reviews (a terminal's re
 supported yet. The feedback travels as one argument to `hc send`, so the OS caps its size (128 KiB
 on Linux, about 1 MiB on macOS). A longer review is not sent: the review copies it instead and says
 why.
+
+## Choosing the agent
+
+`P` (`pick-target`) opens a picker of every agent Send can reach, in document and code
+reviews alike:
+
+- running Pi sessions with the [Pi extension](#pi);
+- inside Herdr, every pane with an agent (Claude, Codex, Pi and the rest), named by agent,
+  folder, state, and `workspace › tab · pane`, so two Claude panes are told apart. The
+  review's own pane is never listed.
+- inside Rex, every pane with an agent in every Rex session and window (tab), named by
+  agent, folder, state, and `session › window · pane`. A pane you gave a label shows it
+  (`claude · reviewer`); otherwise the row shows the title the agent set, such as the task
+  Claude Code is on (`claude · Fix login redirect`). An agent that has not reported its state
+  to Rex reads `no state`; Send refuses it, as it does for a launcher (see
+  [Rex Annotate](#rex-annotate)). A Pi session in a Rex pane is one row, sent to over the
+  Pi link and placed where Rex has it. The review's own pane is never listed.
+
+```
+╭ send to which agent? ─────────────────────────────────────────────────────────────────╮
+│ claude · Fix login redirect  ~/work/api      idle     work › api · 9ba798             │
+│ codex                        ~/work/api/src  working  work › api · 31496a             │
+│ claude · Migrate styles      ~/work/web      blocked  work › web · 63239c             │
+│ claude · release             ~/work/notes    idle     side › Window 122adf3e · fd82e9 │
+│ pi · π - notes               ~/work/notes    idle     work › web · eda7cc             │
+╰ ↑↓ move · enter send here · esc close ────────────────────────────────────────────────╯
+```
+
+Inside Rex, the agents in the review's own window come first. Then agents in the review's
+folder, then by name; the rows do not move while the picker is open. In a narrow pane the
+folders are shortened first, so the state and the place stay in view. The pick becomes the
+Send target until you change it, and the last row goes back to the target the review started
+with.
+
+Launched from an agent (a Herdr, Rex or herdr-core launcher, or `--deliver-to`), Send goes to
+that agent and `P` switches. Launched on its own, with no [delivery command](#any-other-agent-a-delivery-command),
+Send opens the picker whenever an agent is within reach, and the button says
+`Send 1 new ▸ choose agent (E)`. `Enter` sends to the agent under the cursor (the first one)
+and keeps it as the target; `Copy to clipboard`, one row up, copies this once; `Esc` sends
+nothing. With no agent within reach, Send copies as before. herdr-core agents are reached
+only through their launcher.
 
 ## Pi
 
@@ -518,10 +622,9 @@ plannotator-tui pi install   # copies it into ~/.pi/agent/extensions/
 
 Restart your Pi sessions, or run `/reload` in each one. Then:
 
-- **Send to a Pi:** press `P` (`pick-target`) to choose a session: its name, folder, and
-  whether it is busy. Sessions in the review's folder are listed first. Send (`E`) then
-  goes to that session, as a user message. A busy Pi reads it once its current work is done. The
-  last row of the picker goes back to the target the review started with.
+- **Send to a Pi:** press `P` (`pick-target`) to choose a session (see
+  [Choosing the agent](#choosing-the-agent)). Send (`E`) then goes to that session, as a
+  user message. A busy Pi reads it once its current work is done.
 - **Notes from Pi:** Pi gets a `plannotator_tui_note` tool. It quotes text from a file you
   have open, optionally with a line number, and its note shows up beside that text marked
   `pi · <session name>`. The note is sent with the rest of your review.
@@ -562,7 +665,7 @@ names it by its first word: `Send 3 new ▸ cmd · tmux (E)`.
   | Exit | Means | The review |
   |---|---|---|
   | `0` | delivered | marks the notes sent; the first line on stdout, if any, joins the status |
-  | `75` | the agent cannot take a message now, e.g. it is at a dialog | copies the feedback; `E` retries |
+  | `75` | the agent cannot take a message now, e.g. it is at a dialog | keeps the notes pending and copies nothing; `E` retries |
   | `69` | there is no agent to send to | copies the feedback; `E` retries |
   | anything else | the send failed | shows the first line of stderr; `E` retries |
 
@@ -573,7 +676,7 @@ names it by its first word: `Send 3 new ▸ cmd · tmux (E)`.
 - **Where it sits:** a target that a Herdr, Rex or herdr-core launcher named for this review
   comes first, because it names one agent for one review. The command replaces the clipboard
   everywhere else. A gated review (`--gate`) with no launcher still gives its decision to
-  whoever ran it, and `P` can still switch Send to a Pi session.
+  whoever ran it, and `P` can still switch Send to another agent.
 
 For Pi, `plannotator-tui pi send` is already such a command (see [Pi](#pi)):
 

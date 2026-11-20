@@ -241,6 +241,13 @@ Delivery outcomes are typed (`Blocked`, `Unavailable`, `Failed`) because the app
 differently: a blocked agent means "retry later", so the text is also put on the clipboard
 and nothing is lost; a missing agent means the clipboard is the target now.
 
+Amended 2026-11-19: a blocked agent no longer copies. With the agent picker, the agent at a
+dialog is a target you chose, and a copy you did not ask for overwrote your clipboard while the
+notes stayed pending anyway. Now a blocked send sends and copies nothing, keeps the notes
+pending, and the button and footer say the agent is at a dialog; `E` retries. This holds for
+every agent target (Herdr, Rex, herdr-core, a delivery command's exit 75) in document and code
+reviews. A missing agent (`Unavailable`) still copies.
+
 `annotations.json` gains `deliveries: [{at, target, annotation_ids}]`. It is what lets the
 button say "Sent" after a restart and, later, lets Workspaces know which comments the agent
 has already seen. It is append-only and absent until the first send, so records written by

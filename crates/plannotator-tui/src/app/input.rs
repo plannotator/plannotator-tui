@@ -25,6 +25,8 @@ fn chars_by_column(line: &Line<'_>) -> Vec<char> {
 
 impl App {
     pub(crate) fn handle_event(&mut self, event: &Event) -> Result<()> {
+        // Keys can reach any row (`G`, a page down, a click), so input sees the whole layout.
+        self.open.layout.finish();
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => match &self.mode {
                 Mode::Browse => self.browse_key(*key),
@@ -40,10 +42,7 @@ impl App {
                     Ok(())
                 }
                 Mode::ReviewMenu => self.menu_key(*key),
-                Mode::PickTarget => {
-                    self.pick_target_key(*key);
-                    Ok(())
-                }
+                Mode::PickTarget => self.pick_target_key(*key),
                 Mode::Compose | Mode::Edit(_) => self.text_key(*key),
                 Mode::AttachImage(_) => self.image_prompt_key(*key),
             },
@@ -131,7 +130,7 @@ impl App {
                 return self.run_review_action(ReviewAction::Archive);
             }
             Some(Action::ToggleTree) => {
-                self.toggle_tree(self.geometry.doc.width + self.geometry.tree.width + GUTTER);
+                self.toggle_tree(self.geometry.width);
                 return Ok(());
             }
             Some(Action::Reload) => return self.reload(),
@@ -317,6 +316,8 @@ impl App {
                 self.status = Some(format!("removed {removed} annotation(s) on block"));
             }
             Some(Action::ClearAll) => self.request_clear_all(),
+            Some(Action::NarrowColumn) => self.resize_column(false),
+            Some(Action::WidenColumn) => self.resize_column(true),
             Some(Action::AttachImage) => self.begin_attach_image(),
             Some(Action::RemoveImage) => self.remove_image()?,
             _ => {}

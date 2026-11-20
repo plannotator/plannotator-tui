@@ -59,18 +59,19 @@ impl App {
         } else {
             0
         };
-        // `[ui] doc_width` caps the text; the columns it leaves sit between it and the rail.
-        // Only a cap that binds changes the split, so an unset or roomy cap lays out as before.
+        // `[ui] doc_width` is the reading column: text wraps to it, and it sits centred in the
+        // columns the tree and the rail leave. Only a cap that binds moves anything.
         let gap = u16::from(rail_width > 0);
         let room = body.width.saturating_sub(tree_width + GUTTER + gap + rail_width);
         let cap = self.ui.doc_width.max(20);
-        let (text, spare) = if self.ui.doc_width > 0 && room > cap {
-            (Constraint::Length(cap), Constraint::Min(gap))
+        let (margin, text, spare) = if self.ui.doc_width > 0 && room > cap {
+            ((room - cap) / 2, Constraint::Length(cap), Constraint::Min(gap))
         } else {
-            (Constraint::Min(20), Constraint::Length(gap))
+            (0, Constraint::Min(20), Constraint::Length(gap))
         };
-        let [tree, gutter, doc, _gap, rail] = Layout::horizontal([
+        let [tree, _margin, gutter, doc, _spare, rail] = Layout::horizontal([
             Constraint::Length(tree_width),
+            Constraint::Length(margin),
             Constraint::Length(GUTTER),
             text,
             spare,
@@ -78,7 +79,8 @@ impl App {
         ])
         .areas(body);
         let old_height = self.geometry.doc.height;
-        self.geometry = Geometry { tree, doc, ..Geometry::default() };
+        self.geometry = Geometry { tree, doc, width: area.width, column_room: room, ..Geometry::default() };
+        self.settle_layout_for_view();
 
         // A layout is at least one column wide, so an empty pane must not count as a resize.
         let layout_width = usize::from(doc.width).max(1);
@@ -179,9 +181,13 @@ impl App {
         for y in 0..doc.height {
             let row_index = self.scroll + usize::from(y);
             let Some(block) = self.open.layout.block_at_row(row_index) else { continue };
-            let Some(row) = self.open.layout.row(row_index) else { continue };
+            let (Some(row), Some(line)) =
+                (self.open.layout.row(row_index), self.open.layout.drawn_line(row_index))
+            else {
+                continue;
+            };
             let screen_y = doc.y + y;
-            buf.set_line(doc.x, screen_y, &row.line, doc.width);
+            buf.set_line(doc.x, screen_y, &line, doc.width);
 
             if block == self.selected && !text_selection_active && self.pending.is_none() && doc_focused {
                 buf.set_style(
@@ -492,6 +498,7 @@ impl App {
                     let chars = self.open.doc.source.get(p.range.clone()).map_or(0, |s| s.chars().count());
                     format!("selected {chars} chars")
                 }
+                None if self.open.doc.blocks.is_empty() => "empty document".to_owned(),
                 None => format!("block {}/{}", self.selected + 1, self.open.doc.blocks.len()),
             },
         ]);

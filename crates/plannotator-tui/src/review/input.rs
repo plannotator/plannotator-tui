@@ -9,22 +9,25 @@ use ratatui::layout::{Position, Rect};
 
 use super::{Focus, Mode, Screen};
 use crate::keys::{self, Action};
+use crate::ui::agent_picker::{AgentPicker, Picked, PickerKey};
 use crate::ui::compose::{self, ComposeAction};
-use crate::ui::pi_picker::PickerKey;
 
 /// The Review menu's rows, in display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MenuRow {
+    ChangeComment,
     ResendAll,
     Finish,
     Undo,
 }
 
-pub(super) const MENU: [MenuRow; 3] = [MenuRow::ResendAll, MenuRow::Finish, MenuRow::Undo];
+pub(super) const MENU: [MenuRow; 4] =
+    [MenuRow::ChangeComment, MenuRow::ResendAll, MenuRow::Finish, MenuRow::Undo];
 
 impl MenuRow {
     pub(super) fn binding(self) -> Action {
         match self {
+            Self::ChangeComment => Action::ChangeComment,
             Self::ResendAll => Action::ResendAll,
             Self::Finish => Action::FinishReview,
             Self::Undo => Action::UndoFinish,
@@ -34,6 +37,9 @@ impl MenuRow {
 
 impl Screen {
     pub(crate) fn handle_event(&mut self, event: Event) -> Result<()> {
+        if matches!(event, Event::Key(_) | Event::Paste(_)) {
+            self.last_key = Some(std::time::Instant::now());
+        }
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => self.key(key),
             Event::Paste(text) if matches!(self.mode, Mode::Compose(_)) => {
@@ -79,13 +85,22 @@ impl Screen {
             Mode::PickTarget => {
                 match self.picker.key(&self.keys, &key, self.start_delivery.is_some()) {
                     PickerKey::Stay => {}
-                    PickerKey::Close => self.mode = Mode::Browse,
+                    PickerKey::Close => {
+                        self.mode = Mode::Browse;
+                        if self.pick_then.take().is_some() {
+                            self.status = Some("nothing sent".into());
+                        }
+                    }
                     PickerKey::Chose(row) => {
                         self.mode = Mode::Browse;
-                        if let Some(status) =
-                            self.picker.choose(row, &mut self.delivery, &mut self.start_delivery)
-                        {
-                            self.status = Some(status);
+                        let then = self.pick_then.take();
+                        match self.picker.choose(row, &mut self.delivery, &mut self.start_delivery) {
+                            Picked::Moved(status) => self.status = Some(status),
+                            Picked::Copy => {}
+                            Picked::Nothing => return Ok(()),
+                        }
+                        if let Some(then) = then {
+                            self.send_picked(then);
                         }
                     }
                 }
@@ -131,9 +146,11 @@ impl Screen {
             Some(Action::ResendAll) => return self.run_menu(MenuRow::ResendAll),
             Some(Action::FinishReview) => return self.run_menu(MenuRow::Finish),
             Some(Action::UndoFinish) => return self.run_menu(MenuRow::Undo),
+            Some(Action::ChangeComment) => return self.run_menu(MenuRow::ChangeComment),
             Some(Action::Reload) => return self.reload(),
             Some(Action::PickTarget) => {
-                self.picker = crate::ui::pi_picker::PiPicker::open(&crate::ui::pi_picker::real(self.root()));
+                self.picker = AgentPicker::open(&self.reach, &self.real_root());
+                self.pick_then = None;
                 self.mode = Mode::PickTarget;
                 return Ok(());
             }
@@ -173,6 +190,9 @@ impl Screen {
             Action::ToggleLayout => Command::ToggleLayout,
             Action::ToggleWrap => Command::ToggleWrap,
             Action::ToggleFiles => Command::Files,
+            Action::ToggleViewed => return self.toggle_viewed(),
+            Action::NextUnviewed => return self.jump_unviewed(true),
+            Action::PreviousUnviewed => return self.jump_unviewed(false),
             Action::Confirm => Command::Activate,
             _ => return Ok(()),
         };
@@ -226,6 +246,7 @@ impl Screen {
     fn run_menu(&mut self, row: MenuRow) -> Result<()> {
         self.mode = Mode::Browse;
         match row {
+            MenuRow::ChangeComment => self.start_change_comment(),
             MenuRow::ResendAll => self.send(true),
             MenuRow::Finish => self.finish(),
             MenuRow::Undo => return self.undo_finish(),

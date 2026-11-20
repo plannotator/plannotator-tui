@@ -2,8 +2,17 @@
 //!
 //! Each block is rendered in isolation through `tui-markdown` (cached, width-independent),
 //! aligned back to its source bytes, and wrapped to the current column width. List and quote
-//! blocks are decorated in between (`decorate`). Every screen cell therefore knows its block
-//! and, where it shows real text, its source byte.
+//! blocks are decorated in between (`decorate`), definition lists indented (`definitions`),
+//! and top-level code drawn beside a bar and coloured when shown (`code`). Every screen cell
+//! therefore knows its block and, where it shows real text, its source byte. A long document
+//! lays out its first screens before the first frame and the rest in the background
+//! (`layout::background`).
+
+mod code;
+mod definitions;
+mod nested;
+#[cfg(test)]
+mod tests;
 
 use std::borrow::Cow;
 use std::ops::Range;
@@ -14,24 +23,42 @@ use tui_markdown::{Options, StyleSheet};
 
 use crate::cjk_emphasis::{protect, strip_marks};
 use crate::decorate::{self, Decorated, RULE, Syntax};
-use crate::doc::{BlockKind, Document};
+use crate::doc::{BlockKind, Document, Opening};
 use crate::srcmap::{LineOffsets, align};
 use crate::theme::palette;
 use crate::wrap::{Hang, Row, clip_line, rule_row, wrap_line, wrap_line_hanging, wrap_table};
+use code::Code;
+use nested::Nested;
+
+mod background;
+mod worker_panic;
+
+use background::{Rest, each_in_parallel, lay_out};
+pub(crate) use worker_panic::keep_hook_off_layout_threads;
 
 /// Rows of vertical space between blocks.
 const BLOCK_GAP: usize = 1;
+/// Further rows above a level one or two heading, so a section reads as one.
+const SECTION_GAP: usize = 1;
+/// Drawn under a level one heading, across the reading column.
+pub(crate) const TITLE_RULE: char = '╍';
 
-/// House style: no `#` markers, headings carry weight through bold/underline rather than
+/// Rows [`DocLayout::start`] lays out before the first frame: more than any terminal shows.
+const FIRST_ROWS: usize = 500;
+
+/// House style: no `#` markers, headings carry weight through bold and colour rather than
 /// background color, so the palette stays available for selection and annotations.
 #[derive(Debug, Clone)]
-struct Styles;
+struct Styles {
+    /// Whether code shows the fences it was written with. A top-level code block draws a bar
+    /// instead; code inside a list or quote has nothing else to set it apart.
+    fences: bool,
+}
 
 impl StyleSheet for Styles {
     fn heading(&self, level: u8) -> Style {
         match level {
-            1 => Style::new().fg(palette().heading).add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-            2 => Style::new().fg(palette().heading).add_modifier(Modifier::BOLD),
+            1 | 2 => Style::new().fg(palette().heading).add_modifier(Modifier::BOLD),
             _ => Style::new().fg(palette().subheading).add_modifier(Modifier::BOLD),
         }
     }
@@ -39,7 +66,10 @@ impl StyleSheet for Styles {
         ""
     }
     fn code(&self) -> Style {
-        Style::new().fg(Color::LightYellow)
+        Style::new().fg(palette().code)
+    }
+    fn code_block_fence(&self) -> &str {
+        if self.fences { "```" } else { "" }
     }
     fn link(&self) -> Style {
         Style::new().fg(Color::Blue).add_modifier(Modifier::UNDERLINED)
@@ -58,34 +88,130 @@ pub(crate) struct RenderedBlock {
     kind: BlockKind,
     /// Per line, how its wrapped rows start; empty when nothing hangs.
     hangs: Vec<Hang>,
+    /// A heading's level.
+    heading: Option<u8>,
+    /// A top-level code block's language and colours.
+    code: Option<Code>,
+    /// Fenced code inside a list or quote.
+    nested: Vec<Nested>,
     /// Rows for the current width.
     pub(crate) rows: Vec<Row>,
     /// First screen row of this block in document coordinates.
     pub(crate) first_row: usize,
 }
 
+/// A document laid out for one width. A long one opened with [`DocLayout::start`] holds
+/// only its first blocks until [`DocLayout::finish`] adds the rest from the background.
 #[derive(Debug)]
 pub(crate) struct DocLayout {
     pub(crate) width: usize,
     pub(crate) blocks: Vec<RenderedBlock>,
     pub(crate) total_rows: usize,
+    /// The blocks after `blocks`, still being laid out on another thread.
+    rest: Option<Rest>,
 }
 
-fn render_block(doc: &Document, index: usize) -> Decorated {
+impl RenderedBlock {
+    /// Render block `index` of `doc` (the expensive part) and lay it out `width` columns wide.
+    fn new(doc: &Document, index: usize, width: usize) -> Self {
+        let mut block = render_block(doc, index);
+        block.wrap(width);
+        block
+    }
+
+    /// Lay the block out `width` columns wide.
+    fn wrap(&mut self, width: usize) {
+        let lines = || self.text.lines.iter().zip(&self.offsets);
+        self.rows = if self.kind == BlockKind::Rule {
+            let offset = self.offsets.iter().flatten().flatten().next().copied();
+            vec![rule_row(RULE, Style::new().fg(palette().idle_fg), offset, width)]
+        } else if let Some(code) = &self.code {
+            code.rows(&self.text.lines, &self.offsets, width)
+        } else if self.kind == BlockKind::Table {
+            wrap_table(&self.text.lines, &self.offsets, width)
+        } else if self.kind.preserves_columns() {
+            lines().map(|(l, o)| clip_line(l, o, width)).collect()
+        } else if self.hangs.is_empty() {
+            lines().flat_map(|(l, o)| wrap_line(l, o, width)).collect()
+        } else {
+            lines().zip(&self.hangs).flat_map(|((l, o), h)| wrap_line_hanging(l, o, h, width)).collect()
+        };
+        if self.heading == Some(1) {
+            self.rows.push(rule_row(TITLE_RULE, Style::new().fg(palette().heading), None, width));
+        }
+    }
+}
+
+fn render_block(doc: &Document, index: usize) -> RenderedBlock {
     let source = doc.block_text(index);
+    let kind = doc.blocks.get(index).map_or(BlockKind::Other, |b| b.kind);
+    let base = doc.blocks.get(index).map_or(0, |b| b.range.start);
+    let opening = doc.blocks.get(index).map(|b| &b.opening);
     let protected = protect(source);
-    let text = own(tui_markdown::from_str_with_options(&protected, &Options::new(Styles)));
+    let styles = Styles { fences: kind != BlockKind::CodeBlock };
+    let text = own(tui_markdown::from_str_with_options(&protected, &Options::new(styles)));
     let text = if matches!(protected, Cow::Owned(_)) { strip_marks(text) } else { text };
     let plain: Vec<String> = text.lines.iter().map(ToString::to_string).collect();
-    let block = doc.blocks.get(index);
-    let base = block.map_or(0, |b| b.range.start);
-    if !block.is_some_and(|b| matches!(b.kind, BlockKind::List | BlockKind::BlockQuote)) {
-        let offsets = align(&plain, source, base);
-        return Decorated { text, offsets, hangs: Vec::new() };
+    let block = |Decorated { text, offsets, hangs }, nested| RenderedBlock {
+        text,
+        offsets,
+        kind,
+        hangs,
+        heading: match opening {
+            Some(Opening::Heading(level)) => Some(*level),
+            _ => None,
+        },
+        code: match opening {
+            Some(Opening::Code(info)) => Some(Code::new(info)),
+            _ => None,
+        },
+        nested,
+        rows: Vec::new(),
+        first_row: 0,
+    };
+    match kind {
+        BlockKind::List | BlockKind::BlockQuote => {
+            let syntax = Syntax::parse(source, base);
+            let offsets = align(&plain, &syntax.aligned_source(source, base), base);
+            let decorated = decorate::decorate(&syntax, source, base, text, offsets);
+            let nested = nested::find(source, base);
+            if nested.is_empty() {
+                block(decorated, nested)
+            } else {
+                block(nested::restyle(decorated, &nested), nested)
+            }
+        }
+        BlockKind::DefinitionList => {
+            let offsets = align(&plain, source, base);
+            let definitions = definitions::ranges(source, base);
+            let (lines, offsets, hangs) = definitions::indent(text.lines, offsets, &definitions);
+            block(Decorated { text: Text::from(lines).style(text.style), offsets, hangs }, Vec::new())
+        }
+        _ => {
+            let offsets = align(&plain, source, base);
+            block(Decorated { text, offsets, hangs: Vec::new() }, Vec::new())
+        }
     }
-    let syntax = Syntax::parse(source, base);
-    let offsets = align(&plain, &syntax.aligned_source(source, base), base);
-    decorate::decorate(&syntax, source, base, text, offsets)
+}
+
+/// Languages a reader meets first: the info string and code of the first few code blocks
+/// that name different ones.
+fn first_code(doc: &Document) -> Vec<(String, String)> {
+    const LANGUAGES: usize = 4;
+    let mut samples: Vec<(String, String)> = Vec::new();
+    for (index, block) in doc.blocks.iter().enumerate() {
+        let Opening::Code(info) = &block.opening else { continue };
+        if info.is_empty() || samples.iter().any(|(seen, _)| **seen == **info) {
+            continue;
+        }
+        let code = doc.block_text(index).split_once('\n').map_or("", |(_, code)| code);
+        let end = code.match_indices('\n').nth(crate::highlight::WARM_LINES).map_or(code.len(), |(at, _)| at);
+        samples.push((info.to_string(), code.get(..end).unwrap_or(code).to_owned()));
+        if samples.len() == LANGUAGES {
+            break;
+        }
+    }
+    samples
 }
 
 pub(crate) fn own(text: Text<'_>) -> Text<'static> {
@@ -102,42 +228,86 @@ pub(crate) fn own(text: Text<'_>) -> Text<'static> {
 }
 
 impl DocLayout {
-    /// Render every block once (the expensive part) and lay out for `width`.
+    /// Render and lay out every block for `width` before returning.
     pub(crate) fn build(doc: &Document, width: usize) -> Self {
-        let blocks = doc
-            .blocks
-            .iter()
-            .enumerate()
-            .map(|(i, block)| {
-                let Decorated { text, offsets, hangs } = render_block(doc, i);
-                RenderedBlock { text, offsets, kind: block.kind, hangs, rows: Vec::new(), first_row: 0 }
-            })
-            .collect();
-        let mut layout = Self { width: 0, blocks, total_rows: 0 };
-        layout.reflow(width);
+        crate::highlight::warm_up(first_code(doc));
+        let width = width.max(1);
+        let mut layout =
+            Self { width, blocks: lay_out(doc, 0..doc.blocks.len(), width), total_rows: 0, rest: None };
+        layout.place();
         layout
     }
 
-    /// Re-wrap for a new width without re-rendering markdown.
+    /// Lay out the first screens of `doc` now and the rest on a background thread, so a
+    /// long document shows without waiting for its last block. Rows already laid out never
+    /// move when the rest arrives: each block's rows depend on that block alone.
+    pub(crate) fn start(doc: &Document, width: usize) -> Self {
+        crate::highlight::warm_up(first_code(doc));
+        let width = width.max(1);
+        let mut blocks = Vec::new();
+        let mut rows = 0;
+        for index in 0..doc.blocks.len() {
+            if rows >= FIRST_ROWS {
+                break;
+            }
+            let block = RenderedBlock::new(doc, index, width);
+            rows += block.rows.len() + BLOCK_GAP;
+            blocks.push(block);
+        }
+        let rest = (blocks.len() < doc.blocks.len()).then(|| Rest::spawn(doc, blocks.len(), width));
+        let mut layout = Self { width, blocks, total_rows: 0, rest };
+        layout.place();
+        layout
+    }
+
+    /// Whether every block is laid out.
+    pub(crate) fn is_complete(&self) -> bool {
+        self.rest.is_none()
+    }
+
+    /// Wait for the blocks still being laid out and add them. Anything that needs the whole
+    /// document (its last row, a block far down, the text under a range) calls this first.
+    pub(crate) fn finish(&mut self) {
+        let Some(rest) = self.rest.take() else { return };
+        let (mut blocks, width) = rest.join();
+        if width != self.width {
+            each_in_parallel(&mut blocks, |block| block.wrap(self.width));
+        }
+        self.blocks.append(&mut blocks);
+        self.place();
+    }
+
+    /// Add the background blocks if they are ready, without waiting.
+    pub(crate) fn poll(&mut self) {
+        if self.rest.as_ref().is_some_and(Rest::is_finished) {
+            self.finish();
+        }
+    }
+
+    /// [`DocLayout::finish`] when document row `end` lies past the rows laid out so far.
+    pub(crate) fn finish_through(&mut self, end: usize) {
+        if end > self.total_rows {
+            self.finish();
+        }
+    }
+
+    /// Re-wrap for a new width without re-rendering markdown. Blocks still in the
+    /// background are re-wrapped when they arrive.
     pub(crate) fn reflow(&mut self, width: usize) {
         let width = width.max(1);
         self.width = width;
+        each_in_parallel(&mut self.blocks, |block| block.wrap(width));
+        self.place();
+    }
+
+    /// Give each block its first row: one gap row apart, and more above a section heading.
+    fn place(&mut self) {
         let mut row = 0usize;
-        for block in &mut self.blocks {
+        for (index, block) in self.blocks.iter_mut().enumerate() {
+            if index > 0 && block.heading.is_some_and(|level| level <= 2) {
+                row += SECTION_GAP;
+            }
             block.first_row = row;
-            let lines = || block.text.lines.iter().zip(&block.offsets);
-            block.rows = if block.kind == BlockKind::Rule {
-                let offset = block.offsets.iter().flatten().flatten().next().copied();
-                vec![rule_row(RULE, Style::new().fg(palette().idle_fg), offset, width)]
-            } else if block.kind == BlockKind::Table {
-                wrap_table(&block.text.lines, &block.offsets, width)
-            } else if block.kind.preserves_columns() {
-                lines().map(|(l, o)| clip_line(l, o, width)).collect()
-            } else if block.hangs.is_empty() {
-                lines().flat_map(|(l, o)| wrap_line(l, o, width)).collect()
-            } else {
-                lines().zip(&block.hangs).flat_map(|((l, o), h)| wrap_line_hanging(l, o, h, width)).collect()
-            };
             row += block.rows.len() + BLOCK_GAP;
         }
         self.total_rows = row.saturating_sub(BLOCK_GAP);
@@ -155,6 +325,20 @@ impl DocLayout {
     pub(crate) fn row(&self, row: usize) -> Option<&Row> {
         let block = self.blocks.get(self.block_at_row(row)?)?;
         block.rows.get(row - block.first_row)
+    }
+
+    /// The row at document coordinate `row` as it is drawn: code in its language's colours.
+    /// Colouring is worked out here, for the rows asked for, and kept.
+    pub(crate) fn drawn_line(&self, row: usize) -> Option<Cow<'_, Line<'static>>> {
+        let block = self.blocks.get(self.block_at_row(row)?)?;
+        let index = row - block.first_row;
+        let laid_out = block.rows.get(index)?;
+        let painted = match &block.code {
+            Some(code) => code.paint(&block.text.lines, &block.offsets, index, laid_out),
+            None if !block.nested.is_empty() => nested::paint(&block.nested, laid_out),
+            None => None,
+        };
+        Some(painted.map_or(Cow::Borrowed(&laid_out.line), Cow::Owned))
     }
 
     /// First document row on which any cell falls inside `range`.
@@ -195,51 +379,5 @@ impl DocLayout {
             }
         }
         out
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::expect_used, reason = "tests assert by panicking")]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rendered_text_strips_markup_and_joins_blocks_without_separator() {
-        let doc = Document::parse("Ship the **login page**\nby Friday.\n\nNext para.\n".to_owned());
-        let layout = DocLayout::build(&doc, 80);
-        let whole = 0..doc.source.len();
-        assert_eq!(layout.rendered_in_range(&doc.source, &whole), "Ship the login page by Friday.Next para.");
-        let bold = doc.source.find("**login").expect("present");
-        let bold_range = bold..bold + "**login page**".len();
-        assert_eq!(layout.rendered_in_range(&doc.source, &bold_range), "login page");
-    }
-
-    #[test]
-    fn every_cell_of_a_long_table_maps_to_its_source() {
-        let doc = Document::parse(
-            "| Item | Status | Next step |\n|---|---|---|\n\
-| A. Four changes from 3/7 (release checklist handoff, the 3/4 planning call, the 3/6 search demo, \
-the 3/4-3/7 progress review and rollout advice) | Scope partly confirmed; never added to the \
-draft | 1.0d design + 1.0d build + 1.0d review + 2.5d rollout = **5.5d** |\n\
-| B. 3/14 cache troubleshooting and the `api.example.com` proxy | Owner and priority not set | Your call |\n\
-| C. 3/19-20 export access in the admin panel (read and write) | Agreed at 1.0d, done once it's \
-tested; it's live, but QA hasn't finished acceptance testing | Close it now, or wait for the next sprint |\n\
-| D. 3/21 lookup and report tools in the CLI; 3/23 plugin consolidation | Marked \"not confirmed\" | Your call |\n"
-                .to_owned(),
-        );
-        let layout = DocLayout::build(&doc, 100);
-        let table = layout.blocks.iter().find(|b| b.kind == BlockKind::Table).expect("a table");
-        let mut cells = 0;
-        for row in &table.rows {
-            let text: String = row.line.spans.iter().map(|s| s.content.as_ref()).collect();
-            for (ch, offset) in text.chars().zip(&row.cells) {
-                if ch.is_alphanumeric() {
-                    let source = offset.and_then(|o| doc.source.get(o..));
-                    assert!(source.is_some_and(|s| s.starts_with(ch)), "{ch:?} is unmapped in {text:?}");
-                    cells += 1;
-                }
-            }
-        }
-        assert!(cells > 300, "only {cells} cells checked");
     }
 }

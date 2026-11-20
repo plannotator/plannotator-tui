@@ -127,9 +127,48 @@ Reply: `{"ok":true,"busy":false,"name":"…","id":"…"}`.
 ## plannotator-tui
 
 - Registers itself on start in an interactive review and removes the entry on exit.
-- `P` (`pick-target`) opens the Pi picker: live Pi sessions, the ones in the document's folder first. The
-  pick becomes the Send target until changed; the picker also offers going back to the
-  target the review started with.
+- `P` (`pick-target`) opens the agent picker: live Pi sessions and, inside Herdr
+  (`HERDR_ENV=1`), every Herdr pane with an agent (`herdr agent list`, labelled with
+  `herdr workspace list` and `herdr tab list`). A row shows the agent, its folder, its state,
+  and where it runs (`pid N` for a Pi, `workspace › tab · pane` for a Herdr pane). The
+  review's own pane (`HERDR_PANE_ID`) is never listed, and a Pi that Herdr also lists (same
+  transcript or session id) is shown once, as the Pi session.
+- Inside Rex (`REX_SESSION` set), the picker also lists every Rex block with an agent, in
+  every session. Rex has no agent list, so it is built from reads only: `rex ls --json`
+  (sessions), `rex window ls -s <session> --json` (windows, their layers and blocks), and for
+  each terminal block `rex do com.superlogical.terminal.process`, `…program_status` and, for
+  an agent, `…title`, scoped with `-b <block> -s <session>`. Blocks are read in parallel. The
+  agent is the program status app its foreground process reports (`claude-code` is
+  `claude`), else the name of that process, as the Rex launchers find it. The state is the
+  most urgent record that process owns (`blocked`, `error`, `working`, `idle`, `done`), or
+  `unknown` when it owns none. A row shows the agent with the block's label when it is not
+  the flavor's default (`shell`), else the terminal title the agent set (leading spinner
+  removed, cut to 28 characters, left out when it only names the agent); the folder (the
+  foreground process's cwd); the state; and `session › window · block` (labels, else the
+  short session id or the window's position; the block's short id). An agent that owns no
+  record shows `no state`: Send refuses it as a Rex launcher's target does (Enter could answer
+  a dialog Rex cannot see). The review's own block (`REX_BLOCK`) is never listed. A Pi the Pi
+  link lists with the same pid is shown once, as the Pi session, with the Rex block's place
+  instead of `pid N`. A Rex pick sends as a Rex launcher's target does: it checks the agent's
+  process still runs in the block and is not blocked, pastes with `block.event`, and presses
+  Enter.
+- Order: inside Rex, the agents in the window that holds `REX_BLOCK` first (a Pi there
+  too). Then agents in the review's folder, then by name, then by pid, pane id or Rex's own
+  order; the list is read once on open and does not move while the picker is open. Rows
+  wider than the pane shorten the folder column from the left, then the names from the
+  right, so the state and the place stay in view. The pick becomes the Send target until
+  changed (a Herdr pick sends with `herdr agent prompt`); the picker also offers going back
+  to the target the review started with. Document and code reviews share the picker.
+- When nothing names a target (no launcher, `--deliver-to` or delivery command, so Send
+  would copy), Send opens the same picker if an agent is within reach, with
+  `Copy to clipboard` as the first row and the cursor on the first agent below it. Enter
+  sends there and makes it the Send target; the copy row copies this once, and the next
+  Send asks again; Esc sends nothing. With no agent within reach, Send copies as before.
+  The Send button says `Send N new ▸ choose agent (E)` while Send would ask. The first look
+  for agents runs in the background at start; Send looks again each time it is pressed.
+  herdr-core agents are not listed: their targets are tied to the agent process a launcher
+  named. A Rex launcher's target is a named target too, so Send goes there without asking
+  and `P` switches.
 - A note from Pi is added to the open document, or to the diff in a code review, with the
   author shown, and the footer says so. Notes from Pi are sent with the rest of the review like any other note.
 - `plannotator-tui pi list` prints live Pi sessions. `plannotator-tui pi send --session <id>`

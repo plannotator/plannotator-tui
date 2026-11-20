@@ -210,3 +210,69 @@ fn at_80_columns_the_header_footer_and_rail_all_fit() {
     let rows = frame(&mut screen, 80, 24);
     assert!(row_with(&rows, "code review keys").contains('\u{256d}'));
 }
+
+#[test]
+fn a_comment_on_the_whole_change_heads_the_rail_and_the_feedback() {
+    let fixture = Fixture::new("change-note");
+    let mut screen = fixture.open();
+    at(&mut screen, 9);
+    keys(&mut screen, "c");
+    type_and_save(&mut screen, "name the total");
+    keys(&mut screen, "M");
+    assert_eq!(screen.mode, Mode::Compose(Draft::Change));
+    let rows = frame(&mut screen, 120, 40);
+    assert!(row_with(&rows, "comment on the whole change").contains('\u{256d}'), "{rows:#?}");
+    type_and_save(&mut screen, "split this into two commits");
+    let rows = frame(&mut screen, 120, 40);
+    let heading = rows.iter().position(|r| r.contains(" Whole change")).expect("the heading");
+    let bubble = rows.iter().position(|r| r.contains("review note")).expect("the bubble");
+    let file = rows.iter().position(|r| r.trim_end().ends_with(" app.py")).expect("the file heading");
+    assert!(heading < bubble && bubble < file, "whole change first: {rows:#?}");
+    assert!(row_with(&rows, "Uncommitted").contains("Send 2 new"), "{}", rows[0]);
+    assert!(!rows.iter().any(|r| r.contains("not in diff")), "{rows:#?}");
+
+    keys(&mut screen, "E");
+    let sent = fixture.sent();
+    let [text] = sent.as_slice() else { panic!("one send: {sent:?}") };
+    assert!(
+        text.contains("**Diff:** Uncommitted changes\n\n## Global comments\n\nsplit this into two commits\n\n## app.py\n"),
+        "{text}"
+    );
+
+    // It is edited and removed like any note, and the edit is sent again.
+    press(&mut screen, KeyCode::Tab);
+    assert_eq!(screen.selected_note().map(|n| n.scope), Some(NoteScope::General), "first in the rail");
+    keys(&mut screen, "e");
+    screen.handle_event(Event::Paste(", one per fix".into())).expect("paste");
+    press(&mut screen, KeyCode::Enter);
+    assert_eq!(screen.store.pending().len(), 1);
+    let note = screen.store.pending()[0];
+    assert_eq!(note.text.as_deref(), Some("split this into two commits, one per fix"));
+    keys(&mut screen, "x");
+    assert_eq!(screen.store.annotations().iter().filter(|n| n.scope == NoteScope::General).count(), 0);
+}
+
+#[test]
+fn the_review_menu_comments_on_the_whole_change_and_the_note_survives_reload_and_reopen() {
+    let fixture = Fixture::new("change-menu");
+    let mut screen = fixture.open();
+    keys(&mut screen, "m");
+    let rows = frame(&mut screen, 120, 40);
+    assert!(row_with(&rows, "Comment on the whole change").contains("M  Comment"), "{rows:#?}");
+    press(&mut screen, KeyCode::Enter);
+    assert_eq!(screen.mode, Mode::Compose(Draft::Change), "the first row");
+    type_and_save(&mut screen, "needs a changelog entry");
+    fixture.write("app.py", &format!("# greeter\n{AFTER}"));
+    keys(&mut screen, "r");
+    settle(&mut screen);
+    let [note] = screen.store.annotations() else { panic!("one note") };
+    assert_eq!(
+        (note.scope, note.status(), note.outdated),
+        (NoteScope::General, Some(Status::StillThere), false)
+    );
+    assert!(screen.status.as_deref().is_some_and(|s| s.starts_with("reloaded")), "{:?}", screen.status);
+    drop(screen);
+    let mut again = fixture.open();
+    let rows = frame(&mut again, 120, 40);
+    assert!(row_with(&rows, "needs a changelog entry").contains('\u{2502}'), "{rows:#?}");
+}

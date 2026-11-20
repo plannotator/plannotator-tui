@@ -266,3 +266,22 @@ fn notes_follow_their_lines_across_a_recapture() {
     let statuses: Vec<_> = moved.iter().map(CodeAnnotation::status).collect();
     assert_eq!(statuses, [Some(Status::StillThere), Some(Status::Outdated)]);
 }
+
+#[test]
+fn a_whole_change_note_resolves_without_reading_a_file_in_every_scope() {
+    let Some(t) = TestRepo::new("general") else { return };
+    t.write("src/lib.rs", "fn keep() {}\n");
+    t.commit_all("init");
+    t.write("src/lib.rs", "fn keep() {}\nfn more() {}\n");
+    t.git(&["add", "-A"]);
+    let repo = t.repo();
+    for scope in [Scope::Uncommitted, Scope::Staged] {
+        let capture = repo.capture(&scope).expect("captures");
+        let note = CodeAnnotation::general_comment("split it".into(), &capture.patch_key);
+        assert_eq!(capture.resolve_all(&[note]).expect("resolves"), [Resolution::StillThere], "{scope:?}");
+    }
+    let head = t.commit_all("more");
+    let capture = repo.capture(&Scope::Commit { sha: head }).expect("captures");
+    let note = CodeAnnotation::general_comment("split it".into(), "another patch");
+    assert_eq!(capture.resolve_all(&[note]).expect("resolves"), [Resolution::StillThere]);
+}

@@ -36,21 +36,21 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui --annotate <file.md> <quote> <text> [comment|looks_good|delete] [--occurrence N]
   plannotator-tui --annotate-block <file.md> <block> <text>
   plannotator-tui --snapshot <file.md> [cols rows scroll] [select-quote] [menu]
-  plannotator-tui review [--staged | --base REF | --commit SHA] [DIR]
+  plannotator-tui review [--staged | --base REF | --commit SHA | PR] [DIR]
   plannotator-tui config
   plannotator-tui --version
   plannotator-tui herdr open [file.md | folder] [--placement overlay|split|popup] [--deliver-to <pane>]
                              [--gate] [--result-file <path>]
   plannotator-tui herdr last [--placement P] [--deliver-to <pane>] [--newest]
   plannotator-tui herdr terminal [--lines N] [--placement P] [--deliver-to <pane>] [--print]
-  plannotator-tui herdr review [--staged | --base REF | --commit SHA] [--placement P] [--deliver-to <pane>]
+  plannotator-tui herdr review [--staged | --base REF | --commit SHA | PR] [--placement P] [--deliver-to <pane>]
   plannotator-tui herdr pane
   plannotator-tui rex open [file.md | folder] [--block <id>] [--session <id>] [--paste]
                            [--placement split|popup] [--gate] [--result-file <path>]
   plannotator-tui rex last [--block <id>] [--session <id>] [--newest] [--paste] [--placement P]
   plannotator-tui rex terminal [--block <id>] [--session <id>] [--lines N] [--paste] [--placement P] [--print]
   plannotator-tui rex find [--block <id>] [--session <id>] [--lines N] [--paste] [--placement P]
-  plannotator-tui rex review [--staged | --base REF | --commit SHA] [--block <id>] [--session <id>] [--paste]
+  plannotator-tui rex review [--staged | --base REF | --commit SHA | PR] [--block <id>] [--session <id>] [--paste]
                              [--placement P]
   plannotator-tui rex install [--dry-run | --print]
   plannotator-tui rex pane (open <path> [--gate [--result-file <path>]] | last <last args>
@@ -61,14 +61,17 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui hc open [file.md | folder] [--terminal <t>] [--placement overlay|split|popup]
                           [--gate] [--result-file <path>]
   plannotator-tui hc last [--terminal <t>] [--placement P] [--newest] [--session <transcript>]
-  plannotator-tui hc review [--staged | --base REF | --commit SHA] [--terminal <t>] [--placement P]
+  plannotator-tui hc review [--staged | --base REF | --commit SHA | PR] [--terminal <t>] [--placement P]
   plannotator-tui hc pane (open <path> [--gate [--result-file <path>]] | last <last args> | review <scope> <repo>)
   plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes|opencode|cmd|agy] [--pid N] [--session <transcript>]
                        [--session-id <id>] [--stdin] [--print] [--pick N] [--newest]";
 
-/// Width the document gets when nothing else is known: gutter + rail + gap subtracted.
-fn doc_width(cols: u16) -> usize {
-    usize::from(cols.saturating_sub(2 + 1 + 36).max(20))
+/// Width the document gets when nothing else is known: gutter + rail + gap subtracted, then
+/// held to the reading column `cap` (`[ui] doc_width`; zero for none), so the first frame
+/// finds the text already wrapped to it.
+fn doc_width(cols: u16, cap: u16) -> usize {
+    let room = cols.saturating_sub(2 + 1 + 36).max(20);
+    usize::from(if cap > 0 { room.min(cap.max(20)) } else { room })
 }
 
 fn open_file(path: &PathBuf) -> Result<DocumentSource> {
@@ -202,7 +205,7 @@ fn tool(args: &[String]) -> Result<()> {
             Ok(())
         }
         Some("--blocks") => {
-            let app = open_app(&path(1)?, 100, false)?;
+            let mut app = open_app(&path(1)?, 100, false)?;
             for line in app.describe_blocks() {
                 println!("{line}");
             }
@@ -247,7 +250,7 @@ fn tool(args: &[String]) -> Result<()> {
     }
 }
 
-/// `plannotator-tui review [--staged | --base REF | --commit SHA] [DIR]`: a git diff, with notes
+/// `plannotator-tui review [--staged | --base REF | --commit SHA | PR] [DIR]`: a git diff, with notes
 /// for the agent (`src/review/`).
 fn code_review(args: &[String]) -> Result<()> {
     #[cfg(unix)]
@@ -570,7 +573,7 @@ pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
 /// `run_ui`, returning how a gated review ended; `None` for an ordinary one.
 fn run_review(build: impl FnOnce(usize) -> Result<App>) -> Result<Option<Decision>> {
     with_terminal(|terminal, session| {
-        let width = doc_width(terminal.size().map_or(120, |s| s.width));
+        let width = doc_width(terminal.size().map_or(120, |s| s.width), session.config.ui.doc_width);
         let mut app = build(width)?;
         app.shift_enter = session.shift_enter;
         app.keys = session.config.keys;
@@ -603,6 +606,7 @@ pub(crate) fn with_terminal<T>(
         &config.colors,
     );
     let mut terminal = ratatui::init();
+    crate::layout::keep_hook_off_layout_threads();
     #[cfg(unix)]
     crate::hangup::watch();
     execute!(stdout(), EnableMouseCapture)?;
@@ -673,6 +677,8 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<O
             app.editor_returned(&request, outcome);
             dirty = true;
         }
+        // Merges the background layout when it is done; a panic there ends the app here.
+        app.poll_layout();
         dirty |= app.poll_file_search();
         dirty |= app.poll_disk();
         dirty |= app.poll_pi();
@@ -682,7 +688,7 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<O
             app.record_frame(started.elapsed().as_secs_f64() * 1000.0);
             dirty = false;
         }
-        let wait_ms = if app.file_search_scanning() { 25 } else { 250 };
+        let wait_ms = if app.file_search_scanning() || app.layout_pending() { 25 } else { 250 };
         if event::poll(Duration::from_millis(wait_ms))? {
             app.handle_event(&event::read()?)?;
             dirty = true;
@@ -703,6 +709,13 @@ fn bench(path: &PathBuf) -> Result<()> {
     let t = Instant::now();
     let doc = Document::parse(source.content);
     let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+    let t = Instant::now();
+    let mut lazy = DocLayout::start(&doc, 100);
+    let start_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let (first_blocks, first_rows) = (lazy.blocks.len(), lazy.total_rows);
+    lazy.finish();
+    let finish_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     let t = Instant::now();
     let mut layout = DocLayout::build(&doc, 100);
@@ -727,6 +740,8 @@ fn bench(path: &PathBuf) -> Result<()> {
 
     println!("{}: {bytes} bytes, {} blocks", path.display(), doc.blocks.len());
     println!("parse+split          {parse_ms:8.1} ms");
+    println!("first screens        {start_ms:8.1} ms  ({first_blocks} blocks, {first_rows} rows)");
+    println!("  rest in background {finish_ms:8.1} ms  (until every block is laid out)");
     println!("render+align+wrap    {build_ms:8.1} ms  ({} rows)", layout.total_rows);
     println!("reflow               {}", reflow.join("  "));
     println!("row lookup           {lookup_us:8.3} µs avg ({hits} hits)");
@@ -747,7 +762,7 @@ fn snapshot(
     use ratatui::backend::TestBackend;
     use ratatui::style::Modifier;
     let mut terminal = ratatui::Terminal::new(TestBackend::new(cols, rows))?;
-    let mut app = open_app(path, doc_width(cols), false)?;
+    let mut app = open_app(path, doc_width(cols, crate::config::UiConfig::default().doc_width), false)?;
     terminal.draw(|frame| app.draw(frame))?;
     app.scroll_for_snapshot(scroll);
     if let Some(quote) = select {

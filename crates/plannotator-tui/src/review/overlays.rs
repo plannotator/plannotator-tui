@@ -21,6 +21,7 @@ impl Screen {
             .iter()
             .map(|row| {
                 let label = match row {
+                    MenuRow::ChangeComment => "Comment on the whole change".to_owned(),
                     MenuRow::ResendAll => {
                         format!("Resend all \u{b7} {} notes", self.store.annotations().len())
                     }
@@ -80,9 +81,16 @@ impl Screen {
                     (key(&[Action::CycleFocus]), "diff / notes"),
                     (key(&[Action::Send]), "send new and edited notes"),
                     (key(&[Action::SendAndClose]), "send and close"),
-                    (key(&[Action::ReviewMenu]), "review menu: resend all, finish, undo"),
-                    (key(&[Action::PickTarget]), "send to a Pi session"),
-                    (key(&[Action::Reload]), "reload the diff; notes follow their lines"),
+                    (key(&[Action::ChangeComment]), "comment on the whole change"),
+                    (
+                        key(&[Action::ReviewMenu]),
+                        "review menu: whole-change comment, resend all, finish, undo",
+                    ),
+                    (key(&[Action::PickTarget]), "choose the agent Send goes to"),
+                    (
+                        key(&[Action::Reload]),
+                        "reload the diff (the footer says when it changed); notes follow",
+                    ),
                     (key(&[Action::Quit]), "quit"),
                 ],
             ),
@@ -92,6 +100,11 @@ impl Screen {
                     (key(&[Action::Down, Action::Up]), "line"),
                     (key(&[Action::NextHunk, Action::PreviousHunk]), "hunk"),
                     (key(&[Action::NextFile, Action::PreviousFile]), "file"),
+                    (key(&[Action::ToggleViewed]), "mark the file viewed, or not (shared with the browser)"),
+                    (
+                        key(&[Action::NextUnviewed, Action::PreviousUnviewed]),
+                        "next / previous file not viewed",
+                    ),
                     (key(&[Action::Top, Action::Bottom]), "first / last"),
                     (key(&[Action::Left, Action::Right]), "old / new side"),
                     (key(&[Action::Visual]), "select lines (again to finish); shift-click too"),

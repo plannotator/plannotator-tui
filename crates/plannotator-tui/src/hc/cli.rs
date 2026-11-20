@@ -87,7 +87,7 @@ fn target_terminal(terminal: Option<String>) -> Result<String> {
         .context("no hc terminal: pass --terminal or run inside hc (HC_TERMINAL_ID is not set)")
 }
 
-/// `plannotator-tui hc review [--staged | --base REF | --commit SHA]`: a code review of the
+/// `plannotator-tui hc review [--staged | --base REF | --commit SHA | PR]`: a code review of the
 /// terminal's repository. A folder outside a repository, or with nothing to review, fails
 /// before any terminal starts.
 fn code_review(args: &[String]) -> Result<()> {
