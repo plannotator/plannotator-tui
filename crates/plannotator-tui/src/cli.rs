@@ -140,11 +140,15 @@ fn open_review(path: &PathBuf, width: usize, delivery: Box<dyn Delivery>) -> Res
     }
 }
 
-fn parse_kind(s: Option<&str>) -> Kind {
-    match s {
-        Some("looks_good" | "approve") => Kind::LooksGood,
-        Some("delete") => Kind::Delete,
-        _ => Kind::Comment,
+/// The type word of `--annotate` and `--annotate-block`. `approve` is an older spelling of
+/// `looks_good`, kept for callers that still pass it. Any other word is refused: a typo that
+/// quietly became a comment would save the wrong kind of note.
+fn parse_kind(word: &str) -> Result<Kind> {
+    match word {
+        "comment" => Ok(Kind::Comment),
+        "looks_good" | "approve" => Ok(Kind::LooksGood),
+        "delete" => Ok(Kind::Delete),
+        other => anyhow::bail!("unknown type {other:?}: use comment, looks_good or delete\n{USAGE}"),
     }
 }
 
@@ -166,7 +170,7 @@ fn annotate_options(rest: &[String], occurrences: bool) -> Result<(Kind, usize)>
                     .context("--occurrence takes a number from 1")?;
             }
             flag if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{USAGE}"),
-            other if kind.is_none() => kind = Some(parse_kind(Some(other))),
+            other if kind.is_none() => kind = Some(parse_kind(other)?),
             other => anyhow::bail!("unexpected argument {other:?}\n{USAGE}"),
         }
     }
