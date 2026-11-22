@@ -35,10 +35,13 @@ const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 /// `<data dir>/clients/plannotator-tui/sessions`, beside this tool's notes. Plannotator
 /// keeps its own live sessions in `<data dir>/sessions`, so that name is taken.
 pub(crate) fn root() -> PathBuf {
-    root_from(std::env::var("PLANNOTATOR_TUI_SESSIONS_DIR").ok(), crate::workspace_paths::data_dir)
+    root_from(std::env::var(SESSIONS_DIR_VAR).ok(), crate::workspace_paths::data_dir)
 }
 
-fn root_from(env: Option<String>, data_dir: impl FnOnce() -> PathBuf) -> PathBuf {
+/// Names the registry root, for a process that must use the one another found a Pi in.
+pub(crate) const SESSIONS_DIR_VAR: &str = "PLANNOTATOR_TUI_SESSIONS_DIR";
+
+pub(crate) fn root_from(env: Option<String>, data_dir: impl FnOnce() -> PathBuf) -> PathBuf {
     match env.map(|dir| dir.trim().to_owned()).filter(|dir| !dir.is_empty()) {
         Some(dir) => PathBuf::from(dir),
         None => data_dir().join("clients").join("plannotator-tui").join("sessions"),
@@ -100,33 +103,67 @@ pub(crate) fn pi_entries(root: &Path) -> Vec<PiEntry> {
     entries
 }
 
+/// The entry the running Pi session with this pid wrote last. An entry whose Pi is gone
+/// (it answers no ping) is not the session, even when the pid has been reused.
+pub(crate) fn live_entry_for_pid(root: &Path, pid: u32) -> Option<PiEntry> {
+    pi_entries(root).into_iter().rev().filter(|entry| entry.pid == pid).find_map(alive)
+}
+
+/// The entry of the running Pi session reading `transcript`. With `pid`, only that Pi's
+/// own entry counts: two Pis can resume one session file, each at its own place in the
+/// tree. Without one, the entry written last.
+pub(crate) fn live_entry_for_transcript(root: &Path, transcript: &Path, pid: Option<u32>) -> Option<PiEntry> {
+    let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let wanted = real(transcript);
+    pi_entries(root)
+        .into_iter()
+        .rev()
+        .filter(|entry| pid.is_none_or(|pid| entry.pid == pid))
+        .filter(|entry| entry.transcript.as_deref().is_some_and(|path| real(path) == wanted))
+        .find_map(alive)
+}
+
+/// Where a Pi session stands in its tree, from two more fields of its entry. `/tree` moves
+/// Pi's leaf without writing to the transcript.
+#[derive(Debug, Deserialize)]
+pub(crate) struct TreePosition {
+    /// The newest entry in the session when `leaf` was recorded. While it is still the
+    /// transcript's newest entry, `leaf` is current.
+    pub(crate) tip: String,
+    /// Pi's current entry; `None` before the first.
+    #[serde(default)]
+    pub(crate) leaf: Option<String>,
+}
+
+/// The tree position `entry` records, or `None` from an extension that records none.
+pub(crate) fn tree_position(entry: &PiEntry) -> Option<TreePosition> {
+    serde_json::from_str(&std::fs::read_to_string(&entry.path).ok()?).ok()
+}
+
 /// The Pi sessions that answer a ping, with their busy flag and name fresh from the
 /// answer. An entry whose port refuses the connection is left behind by a session that
 /// ended without cleaning up, and is deleted.
 pub(crate) fn live_pi_sessions(root: &Path) -> Vec<PiEntry> {
-    pi_entries(root)
-        .into_iter()
-        .filter_map(|mut entry| {
-            match request(
-                entry.port,
-                &json!({"v": VERSION, "token": entry.token, "op": "ping"}),
-                PING_TIMEOUT,
-            ) {
-                Ok(reply) if field(&reply, "ok") == true => {
-                    entry.busy = field(&reply, "busy").as_bool().unwrap_or(entry.busy);
-                    if let Some(name) = field(&reply, "name").as_str() {
-                        entry.name = Some(name.to_owned());
-                    }
-                    Some(entry)
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::ConnectionRefused => {
-                    let _ = std::fs::remove_file(&entry.path);
-                    None
-                }
-                _ => None,
+    pi_entries(root).into_iter().filter_map(alive).collect()
+}
+
+/// `entry` when its session answers a ping, with busy and name from the answer. A refused
+/// connection means the session ended without cleaning up: its entry is deleted.
+fn alive(mut entry: PiEntry) -> Option<PiEntry> {
+    match request(entry.port, &json!({"v": VERSION, "token": entry.token, "op": "ping"}), PING_TIMEOUT) {
+        Ok(reply) if field(&reply, "ok") == true => {
+            entry.busy = field(&reply, "busy").as_bool().unwrap_or(entry.busy);
+            if let Some(name) = field(&reply, "name").as_str() {
+                entry.name = Some(name.to_owned());
             }
-        })
-        .collect()
+            Some(entry)
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::ConnectionRefused => {
+            let _ = std::fs::remove_file(&entry.path);
+            None
+        }
+        _ => None,
+    }
 }
 
 /// One request line to `127.0.0.1:<port>` and its one reply line.
@@ -258,6 +295,27 @@ pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+/// Write an entry for Pi session `id`, pid `pid`, that answers pings when `running`, as
+/// tests elsewhere in the crate need.
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "tests assert by panicking")]
+pub(crate) fn write_test_entry(root: &Path, id: &str, pid: u32, running: bool) {
+    let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    if running {
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut line = String::new();
+                let _ = BufReader::new(&stream).read_line(&mut line);
+                let _ = (&stream).write_all(b"{\"ok\":true}\n");
+            }
+        });
+    }
+    let entry = json!({ "v": VERSION, "host": "pi", "id": id, "pid": pid, "cwd": "/w",
+        "port": port, "token": "t", "updated": now_ms() });
+    write_entry(&root.join("pi").join(format!("{id}-{pid}.json")), &entry).expect("entry");
 }
 
 #[cfg(test)]

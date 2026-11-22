@@ -10,8 +10,12 @@ use plannotator_tui_hosts::{Role, claude, codex, copilot, droid, omp, pi};
 const NAMED_CODEX_ID: &str = "11111111-1111-4111-8111-111111111111";
 const NEWER_CODEX_ID: &str = "22222222-2222-4222-8222-222222222222";
 
+/// The binary, kept away from the person's own Pi link registry: a test that needs one
+/// names its own.
 fn bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_plannotator-tui"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_plannotator-tui"));
+    command.env("PLANNOTATOR_TUI_SESSIONS_DIR", std::env::temp_dir().join("plannotator last no registry"));
+    command
 }
 
 fn fixtures() -> PathBuf {
@@ -311,7 +315,7 @@ fn a_pi_pid_in_the_link_registry_picks_its_session_over_a_newer_one_in_the_same_
     let registry = root.join("registry");
     std::fs::create_dir_all(registry.join("pi")).expect("registry");
     let entry = serde_json::json!({ "v": 1, "host": "pi", "id": "focused", "pid": 4242, "cwd": cwd,
-        "transcript": focused, "port": 1, "token": "t", "updated": 1 });
+        "transcript": focused, "port": live_pi_port(), "token": "t", "updated": 1 });
     std::fs::write(registry.join("pi/focused-4242.json"), entry.to_string()).expect("entry");
     let last = |pid: &str| {
         let out = bin()
@@ -326,6 +330,144 @@ fn a_pi_pid_in_the_link_registry_picks_its_session_over_a_newer_one_in_the_same_
     assert_eq!(last("4242"), "from the focused pi");
     assert_eq!(last("4343"), "from the other pi", "an unregistered pid keeps the folder's newest");
     std::fs::remove_dir_all(root).ok();
+}
+
+/// A port that answers every request line as a running Pi answers a ping.
+fn live_pi_port() -> u16 {
+    use std::io::{BufRead as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listen");
+    let port = listener.local_addr().expect("addr").port();
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut line = String::new();
+            let _ = std::io::BufReader::new(&stream).read_line(&mut line);
+            let _ = stream.write_all(b"{\"ok\":true}\n");
+        }
+    });
+    port
+}
+
+/// A port nothing listens on: the entry of a Pi that is gone.
+fn dead_pi_port() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listen");
+    listener.local_addr().expect("addr").port()
+}
+
+/// A Pi link registry holding these entries (each gets an id, pid 4242, a running Pi's
+/// port and the rest unless it names them), and a `last --print` run against it.
+fn last_with_pi_entries(tag: &str, entries: &[serde_json::Value], args: &[&str]) -> (String, String) {
+    let registry = temp_dir(tag);
+    std::fs::create_dir_all(registry.join("pi")).expect("registry");
+    for (n, fields) in entries.iter().enumerate() {
+        let mut entry = serde_json::json!({ "v": 1, "host": "pi", "id": format!("s{n}"), "pid": 4242,
+            "cwd": "/w", "port": live_pi_port(), "token": "t", "updated": n });
+        if let (Some(entry), Some(fields)) = (entry.as_object_mut(), fields.as_object()) {
+            entry.extend(fields.clone());
+        }
+        let field = |key: &str| entry.get(key).map(ToString::to_string).expect("field");
+        let name = format!("{}-{}.json", field("id").trim_matches('"'), field("pid"));
+        std::fs::write(registry.join("pi").join(name), entry.to_string()).expect("entry");
+    }
+    let out = bin()
+        .args(["last", "--host", "pi", "--print"])
+        .args(args)
+        .env("PLANNOTATOR_TUI_SESSIONS_DIR", &registry)
+        .env("PLANNOTATOR_TUI_CWD", "/w/no-sessions-here")
+        .env("PI_CODING_AGENT_SESSION_DIR", registry.join("no-sessions"))
+        .output()
+        .expect("runs");
+    std::fs::remove_dir_all(registry).ok();
+    (
+        String::from_utf8_lossy(&out.stdout).trim().to_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+fn last_with_pi_entry(tag: &str, fields: &serde_json::Value, args: &[&str]) -> (String, String) {
+    last_with_pi_entries(tag, std::slice::from_ref(fields), args)
+}
+
+#[test]
+fn after_a_tree_move_pi_last_opens_the_reply_on_the_branch_pi_stands_on() {
+    // The fixture has two branches; its newest entry, `0c0c0c0c`, ends the second. The
+    // entry says Pi moved back to the first one's reply and has written nothing since.
+    let transcript = fixtures().join("pi.jsonl");
+    let moved = serde_json::json!({ "transcript": transcript, "tip": "0c0c0c0c", "leaf": "dbcc01c1" });
+    let path = transcript.to_str().expect("path");
+    for args in [&["--pid", "4242"][..], &["--session", path][..], &["--pid", "4242", "--session", path][..]]
+    {
+        let (out, err) = last_with_pi_entry("pi tree move", &moved, args);
+        assert_eq!(out, "assistant text 2 (abandoned)", "{args:?}: {err}");
+    }
+}
+
+#[test]
+fn a_pi_entry_written_before_the_newest_entry_or_without_a_position_keeps_the_newest_branch() {
+    let transcript = fixtures().join("pi.jsonl");
+    for fields in [
+        serde_json::json!({ "transcript": transcript, "tip": "dbcc01c1", "leaf": "dbcc01c1" }),
+        serde_json::json!({ "transcript": transcript }),
+    ] {
+        let (out, err) = last_with_pi_entry("pi tree stale", &fields, &["--pid", "4242"]);
+        assert_eq!(out, "assistant text 3", "{fields}: {err}");
+    }
+}
+
+#[test]
+fn two_pis_on_one_session_file_each_get_their_own_place_in_the_tree() {
+    let transcript = fixtures().join("pi.jsonl");
+    let entries = [
+        serde_json::json!({ "pid": 1111, "transcript": transcript, "tip": "0c0c0c0c", "leaf": "0c0c0c0c" }),
+        serde_json::json!({ "pid": 2222, "transcript": transcript, "tip": "0c0c0c0c", "leaf": "dbcc01c1" }),
+    ];
+    let path = transcript.to_str().expect("path");
+    let last = |args: &[&str]| last_with_pi_entries("pi two on one file", &entries, args);
+    assert_eq!(last(&["--pid", "1111"]).0, "assistant text 3", "the other Pi's newer move is not this one's");
+    assert_eq!(last(&["--pid", "1111", "--session", path]).0, "assistant text 3");
+    assert_eq!(last(&["--pid", "2222"]).0, "assistant text 2 (abandoned)");
+    assert_eq!(
+        last(&["--session", path]).0,
+        "assistant text 2 (abandoned)",
+        "no pid: the entry written last"
+    );
+}
+
+#[test]
+fn the_entry_of_a_pi_that_is_gone_is_not_trusted() {
+    let transcript = fixtures().join("pi.jsonl");
+    let path = transcript.to_str().expect("path");
+    let gone = serde_json::json!({ "port": dead_pi_port(), "transcript": transcript, "tip": "0c0c0c0c", "leaf": "dbcc01c1" });
+    let (out, err) = last_with_pi_entry("pi gone tree", &gone, &["--session", path]);
+    assert_eq!(out, "assistant text 3", "a crashed Pi's place does not steer the read: {err}");
+    let unsaved = serde_json::json!({ "port": dead_pi_port(), "transcript": null });
+    let (out, err) = last_with_pi_entry("pi gone unsaved", &unsaved, &["--pid", "4242"]);
+    assert_eq!(out, "", "the folder has no sessions");
+    assert!(err.contains("no pi session for"), "a reused pid falls back to the folder: {err}");
+}
+
+#[test]
+fn a_registered_pi_with_no_saved_transcript_is_not_given_another_sessions_reply() {
+    for (transcript, says) in [
+        (serde_json::Value::Null, "is not being saved (pi --no-session)"),
+        (serde_json::json!("/w/not-written-yet.jsonl"), "has not saved a reply yet"),
+    ] {
+        let (out, err) = last_with_pi_entry(
+            "pi unsaved",
+            &serde_json::json!({ "transcript": transcript }),
+            &["--pid", "4242"],
+        );
+        assert_eq!(out, "", "{transcript}: printed a reply");
+        assert!(err.contains(says), "{transcript}: {err}");
+    }
+}
+
+#[test]
+fn a_pi_moved_before_its_first_reply_is_told_so() {
+    let transcript = fixtures().join("pi.jsonl");
+    let root = serde_json::json!({ "transcript": transcript, "tip": "0c0c0c0c", "leaf": null });
+    let (out, err) = last_with_pi_entry("pi tree root", &root, &["--pid", "4242"]);
+    assert_eq!(out, "");
+    assert!(err.contains("stands before the first reply"), "{err}");
 }
 
 fn newest_pi_reply() -> (PathBuf, String) {

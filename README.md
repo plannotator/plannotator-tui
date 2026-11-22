@@ -694,7 +694,10 @@ session, and Pi can leave notes in the file you have open. Install the extension
 plannotator-tui pi install   # copies it into ~/.pi/agent/extensions/
 ```
 
-Restart your Pi sessions, or run `/reload` in each one. Then:
+Restart your Pi sessions, or run `/reload` in each one. Run `plannotator-tui pi install`
+again after upgrading plannotator-tui: the binary does not notice an older extension, and
+some fixes need the new one (for example, `last` following Pi's place after `/tree`).
+Then:
 
 - **Send to a Pi:** press `P` (`pick-target`) to choose a session (see
   [Choosing the agent](#choosing-the-agent)). Send (`E`) then goes to that session, as a

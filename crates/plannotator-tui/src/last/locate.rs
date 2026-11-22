@@ -38,14 +38,14 @@ pub(crate) fn locate(options: &LastOptions) -> Result<Located> {
         // An id given next to a path is validated like any other before a reader sees it.
         let supplied =
             options.session_id.as_deref().map(plannotator_tui_hosts::validate_session_id).transpose()?;
-        let (transcript, messages) = readers::explicit(host, &path, supplied, pick)?;
+        let (transcript, messages) = readers::explicit(host, &path, supplied, options.pid, pick)?;
         (transcript, messages, Discovery::Exact)
     } else if let Some(id) = options.session_id.as_deref() {
         // Validation precedes cwd lookup and every resolver filesystem access.
         let id = plannotator_tui_hosts::validate_session_id(id)?;
         let cwd = agent_cwd()?;
         let exact = exact::resolve(host, id, &cwd, &roots)?;
-        let (transcript, messages) = readers::exact(host, id, exact, pick)?;
+        let (transcript, messages) = readers::exact(host, id, exact, options.pid, pick)?;
         (transcript, messages, Discovery::Exact)
     } else {
         let cwd = agent_cwd()?;

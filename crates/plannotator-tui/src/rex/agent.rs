@@ -27,6 +27,9 @@ pub(crate) const AGENT_VAR: &str = "PLANNOTATOR_TUI_DELIVER_AGENT";
 pub(crate) const PID_VAR: &str = "PLANNOTATOR_TUI_REX_PID";
 /// `PLANNOTATOR_TUI_REX_SUBMIT=0`: paste into the agent's prompt without pressing Enter.
 pub(crate) const SUBMIT_VAR: &str = "PLANNOTATOR_TUI_REX_SUBMIT";
+/// `PLANNOTATOR_TUI_REX_PI_SESSION`: the Pi session a `last` review shows, from the Pi link
+/// registry when the review opened. A send checks Pi is still in it.
+pub(crate) const PI_SESSION_VAR: &str = "PLANNOTATOR_TUI_REX_PI_SESSION";
 
 #[derive(Debug)]
 pub(crate) struct RexAgent {
@@ -35,6 +38,12 @@ pub(crate) struct RexAgent {
     agent: Option<String>,
     /// The agent's process ID at launch. A send needs this process in the block's foreground.
     pid: u32,
+    /// The Pi session the review shows. A `/new` or `/resume` keeps the process and its
+    /// block but changes the session, and feedback about one session's reply must not land
+    /// in another.
+    pi_session: Option<String>,
+    /// The Pi link registry that lists it.
+    registry: std::path::PathBuf,
     /// Press Enter after the paste; `false` leaves the feedback in the prompt to edit.
     submit: bool,
     /// What the last send left for you to do: Enter, when it did not reach the agent.
@@ -49,13 +58,34 @@ impl RexAgent {
         let pid = non_empty(PID_VAR)?.parse().ok()?;
         let rex = Rex::from_lookup(&env, None).ok()?;
         let submit = env(SUBMIT_VAR).as_deref() != Some("0");
-        Some(Self { rex, block, agent: non_empty(AGENT_VAR), pid, submit, notice: RefCell::default() })
+        Some(Self {
+            rex,
+            block,
+            agent: non_empty(AGENT_VAR),
+            pid,
+            pi_session: non_empty(PI_SESSION_VAR),
+            registry: crate::pi::root_from(
+                env(crate::pi::SESSIONS_DIR_VAR),
+                crate::workspace_paths::data_dir,
+            ),
+            submit,
+            notice: RefCell::default(),
+        })
     }
 
     /// The agent `agent` (its host label), process `pid`, that the agent picker found in
     /// `block`. A send presses Enter, as a launcher's target does.
     pub(crate) fn picked(rex: Rex, block: String, agent: String, pid: u32) -> Self {
-        Self { rex, block, agent: Some(agent), pid, submit: true, notice: RefCell::default() }
+        Self {
+            rex,
+            block,
+            agent: Some(agent),
+            pid,
+            pi_session: None,
+            registry: std::path::PathBuf::new(),
+            submit: true,
+            notice: RefCell::default(),
+        }
     }
 }
 
@@ -82,6 +112,16 @@ impl Delivery for RexAgent {
                 "{who} no longer runs in {}",
                 short_id(&self.block)
             )));
+        }
+        // A registry this pane cannot read says nothing about the session: send as before.
+        if let Some(expected) = &self.pi_session
+            && self.registry.join("pi").is_dir()
+        {
+            let current = crate::pi::live_entry_for_pid(&self.registry, self.pid).map(|entry| entry.id);
+            if let Some(reason) = pi_session_changed(expected, current.as_deref()) {
+                // Pi is still the target: copy nothing, keep the notes pending for `E`.
+                return Err(DeliveryError::Failed(anyhow::anyhow!(reason)));
+            }
         }
         let status = self.rex.terminal_method(&self.block, "program_status").map_err(unavailable)?;
         if let Some(reason) = blocked_reason(&status) {
@@ -117,6 +157,22 @@ impl Delivery for RexAgent {
 
     fn notice(&self) -> Option<String> {
         self.notice.take()
+    }
+}
+
+/// Why feedback for Pi session `expected` must not be sent, given the session the Pi link
+/// registry now lists for the process. A `/clone` or `/fork` is refused too: it is a new
+/// session, and whether it holds the reply reviewed depends on where it branched. The check
+/// and the paste are separate steps, so a switch between them still goes unseen.
+fn pi_session_changed(expected: &str, current: Option<&str>) -> Option<&'static str> {
+    match current {
+        Some(current) if current == expected => None,
+        Some(_) => Some(
+            "Pi has moved to another session since the review opened (/new, /resume, /fork or /clone); nothing was sent: /resume the reviewed session and retry, or press P to pick a target",
+        ),
+        None => Some(
+            "Pi's plannotator-tui link is not answering, so its session cannot be checked; nothing was sent: retry once Pi has reloaded, or run `plannotator-tui pi install` and /reload in Pi",
+        ),
     }
 }
 
@@ -158,6 +214,17 @@ mod tests {
         let owned: Vec<(String, String)> =
             vars.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
         RexAgent::from_lookup(|k| owned.iter().find(|(name, _)| name == k).map(|(_, v)| v.clone()))
+    }
+
+    #[test]
+    fn a_pi_last_review_sends_only_while_pi_is_in_the_same_session() {
+        assert_eq!(pi_session_changed("session-1", Some("session-1")), None);
+        let block = "block:01a17dd5-e47c-754f-b72e-ef739ea1d6db";
+        let base = [("REX_SESSION", "s"), (BLOCK_VAR, block), (PID_VAR, "7"), (AGENT_VAR, "pi")];
+        let pinned = agent(&[base.as_slice(), &[(PI_SESSION_VAR, "session-1")]].concat()).expect("target");
+        assert_eq!(pinned.pi_session.as_deref(), Some("session-1"));
+        let unpinned = agent(&base).expect("target");
+        assert_eq!(unpinned.pi_session, None, "without the extension a send is not pinned");
     }
 
     #[test]
@@ -261,6 +328,36 @@ esac
     #[cfg(unix)]
     fn pastes(dir: &std::path::Path) -> usize {
         std::fs::read_to_string(dir.join("log")).expect("log").lines().filter(|l| *l == "api call").count()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pi_that_moved_to_another_session_gets_nothing_and_nothing_is_copied() {
+        let dir = fake_rex("pi-session");
+        let registry = dir.join("registry");
+        let root = registry.display().to_string();
+        let pinned = [(PI_SESSION_VAR, "session-1"), (crate::pi::SESSIONS_DIR_VAR, root.as_str())];
+        let target = sender_with(&dir, "42", &pinned);
+
+        crate::pi::write_test_entry(&registry, "session-2", 42, true);
+        let err = target.deliver("notes").expect_err("another session");
+        assert!(matches!(&err, DeliveryError::Failed(_)) && !err.wants_copy(), "{err}");
+        assert!(err.to_string().contains("moved to another session"), "{err}");
+
+        let _ = std::fs::remove_dir_all(registry.join("pi"));
+        crate::pi::write_test_entry(&registry, "session-1", 42, false);
+        let err = target.deliver("notes").expect_err("a Pi that does not answer");
+        assert!(!err.wants_copy() && err.to_string().contains("plannotator-tui pi install"), "{err}");
+        assert_eq!(pastes(&dir), 0);
+
+        crate::pi::write_test_entry(&registry, "session-1", 42, true);
+        target.deliver("notes").expect("the reviewed session");
+        assert_eq!(pastes(&dir), 1);
+
+        std::fs::remove_dir_all(&registry).expect("registry");
+        target.deliver("notes").expect("no registry to read: sent as before");
+        assert_eq!(pastes(&dir), 2);
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[cfg(unix)]
