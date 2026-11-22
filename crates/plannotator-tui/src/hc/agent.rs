@@ -134,7 +134,6 @@ mod tests {
     /// `blocked` there makes `send` refuse the way `hc` does for an agent at a dialog.
     #[cfg(unix)]
     fn fake_hc(tag: &str) -> std::path::PathBuf {
-        use std::os::unix::fs::PermissionsExt as _;
         let dir = std::env::temp_dir().join(format!("plannotator-tui-hc-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         let script = format!(
@@ -150,8 +149,7 @@ esac
 "#,
             dir = dir.display()
         );
-        std::fs::write(dir.join("hc"), script).expect("write hc");
-        std::fs::set_permissions(dir.join("hc"), std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        crate::test_support::write_script(&dir.join("hc"), &script);
         dir
     }
 

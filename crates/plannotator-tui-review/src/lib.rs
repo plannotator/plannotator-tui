@@ -31,6 +31,8 @@ pub mod resolve;
 pub mod scope;
 pub mod stamp;
 pub mod store;
+#[cfg(all(test, unix))]
+mod test_support;
 
 pub use annotation::{AnchorContext, CodeAnnotation, Extras, NoteScope, NoteType, Side, Status};
 pub use capture::{

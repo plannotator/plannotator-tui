@@ -54,6 +54,31 @@ interpret markdown ourselves. Anything that needs to know "what is a heading" is
 - **Commits are small and describe intent**, lowercase conventional style:
   `feat(schema): anchor resolution by rendered quote`.
 
+## Tests share one process
+
+`cargo test` runs a test binary's tests at once, as threads of one process. They share
+ports, temp paths and file descriptors, and a child any test spawns holds a copy of every
+open descriptor until it execs, close-on-exec ones included. A test that passes alone can
+then fail once in a hundred runs or so.
+
+- **Write a fake command with `test_support::write_script`** (`tests/support` for
+  integration tests), never `fs::write`:
+  a fork on another thread while the file is open keeps a write handle until it execs, and
+  running the script meanwhile fails with "Text file busy".
+- **A close doesn't reach the other end at once.** A pipe hangs up, and a pty's terminal
+  sees its controller go, only once every copy is closed. Shut a socket down instead where
+  you can; otherwise poll with a deadline. Open raw descriptors (`rustix`) close-on-exec
+  atomically, never with a later `fcntl`: a child forked in between keeps its copy past
+  exec, for as long as it runs.
+- **Don't bind and release a port** to get a free or a closed one: a test running alongside
+  can be handed it. Keep the listener, or use port 1 for one nothing listens on.
+- **Paths are unique per test, not just per process:** the pid, a tag naming the test, and
+  a counter if a helper can run twice with one tag.
+- **A flake is a bug until shown otherwise**, sometimes in production code. Find the race;
+  no retries, sleeps or `#[ignore]` as a fix.
+- **Loop a new test that spawns processes or uses ports, pipes or ptys:** 100 runs of its
+  whole test binary, unfiltered, so the tests that fork beside it run too.
+
 ## Data contract
 
 Annotations are the Workspaces wire shape. The anchor object is opaque to the server; the

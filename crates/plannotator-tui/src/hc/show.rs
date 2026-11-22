@@ -176,7 +176,6 @@ mod tests {
     /// is set. Returns the script.
     #[cfg(unix)]
     fn fake_app(tag: &str, not_yet: u32, fail: bool) -> std::path::PathBuf {
-        use std::os::unix::fs::PermissionsExt as _;
         let dir =
             std::env::temp_dir().join(format!("plannotator-tui-herdr-app-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
@@ -191,8 +190,7 @@ echo '{{}}'
             fail = u8::from(fail),
         );
         let bin = dir.join("herdr-app");
-        std::fs::write(&bin, script).expect("write herdr-app");
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        crate::test_support::write_script(&bin, &script);
         bin
     }
 

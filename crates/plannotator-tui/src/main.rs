@@ -30,6 +30,8 @@ mod rex;
 mod srcmap;
 mod store;
 mod terminal;
+#[cfg(all(test, unix))]
+mod test_support;
 mod theme;
 mod tree;
 mod ui;
