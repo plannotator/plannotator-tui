@@ -1,12 +1,14 @@
-//! Running inside Rex: find the agent in a block, open ourselves in a split beside it, and
-//! send the feedback back to that block.
+//! Running inside Rex: find the agent in a block, open ourselves in a tab of our own or a
+//! split beside it, and send the feedback back to that block.
 //!
 //! Rex is driven only through its `rex` CLI. `command` runs it; `launch` finds the agent and
-//! `place` opens the split or popup; `terminal` reads a block's output; `paths` finds the
-//! Markdown files in it; `agent` is the delivery target the opened app sends to; `install`
+//! `place` opens the tab, split or popup; `terminal` reads a block's output; `paths` finds the
+//! Markdown files in it; `agent` is the delivery target the opened app sends to; `agents`
+//! lists every agent Rex runs, for the agent picker; `install`
 //! writes the Rex Annotate Lua module; `cli` parses the `rex` subcommands.
 
 pub(crate) mod agent;
+pub(crate) mod agents;
 pub(crate) mod cli;
 pub(crate) mod command;
 pub(crate) mod install;

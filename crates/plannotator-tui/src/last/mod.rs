@@ -22,6 +22,31 @@ use self::fallback::Discovery;
 use crate::app::App;
 use crate::cli;
 
+/// Put the terminal back on stdin once the piped document has been read from it.
+///
+/// crossterm reads keys from stdin when stdin is a terminal and otherwise registers
+/// `/dev/tty` with mio, which kqueue on macOS refuses. Its keyboard-protocol query then
+/// retries the failed poll forever: the screen stays blank at full CPU and no key arrives.
+/// The terminal's own device (`/dev/ttys003`, named by the screen we draw on) is accepted,
+/// so that goes on stdin and every reader takes the ordinary path.
+#[cfg(unix)]
+fn keys_from_terminal() -> Result<()> {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let screen = [rustix::stdio::stdout(), rustix::stdio::stderr()]
+        .into_iter()
+        .find_map(|fd| rustix::termios::ttyname(fd, Vec::new()).ok());
+    let path = screen.as_ref().map_or(OsStr::new("/dev/tty"), |name| OsStr::from_bytes(name.as_bytes()));
+    let tty = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .with_context(|| format!("opening the terminal ({}) to read keys", path.to_string_lossy()))?;
+    rustix::stdio::dup2_stdin(&tty).context("reading keys from the terminal")?;
+    Ok(())
+}
+
 /// What `last` was asked to open. Every field optional; detection fills the gaps.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct LastOptions {
@@ -57,6 +82,8 @@ pub(crate) fn run(options: &LastOptions) -> Result<()> {
             print!("{text}");
             return Ok(());
         }
+        #[cfg(unix)]
+        keys_from_terminal()?;
         let source = DocumentSource::new(text, "stdin · message", true, Provenance::Stdin);
         return cli::run_ui(|width| App::open(source, width, cli::delivery(true)));
     }

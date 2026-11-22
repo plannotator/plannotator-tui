@@ -470,3 +470,64 @@ fn a_gated_open_tells_the_pane_to_gate_and_where_to_publish() {
     );
     std::fs::remove_dir_all(&root).expect("cleanup");
 }
+
+#[test]
+fn a_review_looks_in_the_focused_pane_then_the_workspace_then_the_cwd() {
+    let both = HerdrContext {
+        focused_pane_cwd: Some("/work/app/src".into()),
+        workspace_cwd: Some("/work".into()),
+        ..HerdrContext::default()
+    };
+    let workspace = HerdrContext { workspace_cwd: Some("/work".into()), ..HerdrContext::default() };
+    let cwd = Path::new("/here");
+    assert_eq!(review_folder(&env(None, Some(both)), cwd), PathBuf::from("/work/app/src"));
+    assert_eq!(review_folder(&env(None, Some(workspace)), cwd), PathBuf::from("/work"));
+    assert_eq!(review_folder(&env(Some("w1:p1"), None), cwd), PathBuf::from("/here"));
+}
+
+#[test]
+fn a_review_opens_the_doc_pane_on_the_repository_with_its_scope() {
+    let root = temp_folder("review");
+    let context = HerdrContext {
+        focused_pane_id: Some("w1:p1".into()),
+        focused_pane_cwd: Some(root.join("docs").display().to_string()),
+        focused_pane_agent: Some("claude".into()),
+        ..HerdrContext::default()
+    };
+    let config = Config::parse("[herdr]\nplacement = \"split\"\n").expect("config");
+    let launch =
+        plan_review(&env(None, Some(context)), &config, OpenArgs::default(), &root, "base:main".into())
+            .expect("plans");
+    assert_eq!((launch.file.as_path(), launch.cwd.as_path()), (root.as_path(), root.as_path()));
+    assert_eq!(launch.deliver, Some(Target { pane: "w1:p1".into(), agent: Some("claude".into()) }));
+    let args = argv(&launch);
+    let envs: Vec<&str> = args
+        .windows(2)
+        .filter_map(|pair| match pair {
+            [flag, value] if flag == "--env" => Some(value.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        envs,
+        [
+            "PLANNOTATOR_TUI_REVIEW=base:main",
+            &format!("PLANNOTATOR_TUI_REPO={}", root.display()),
+            "PLANNOTATOR_TUI_DELIVER_TO=w1:p1",
+            "PLANNOTATOR_TUI_DELIVER_AGENT=claude",
+        ]
+    );
+    let after_placement: Vec<&str> = args.iter().map(String::as_str).skip(7).take(6).collect();
+    assert_eq!(after_placement, ["--placement", "split", "--direction", "right", "--target-pane", "w1:p1"]);
+
+    let popup = OpenArgs {
+        placement: Some(Placement::Popup),
+        deliver_to: Some("w3:p2".into()),
+        ..OpenArgs::default()
+    };
+    let launch =
+        plan_review(&env(Some("w1:p9"), None), &config, popup, &root, "staged".into()).expect("plans");
+    assert_eq!(launch.placement, Placement::Popup, "--placement wins, as for open");
+    assert_eq!(launch.deliver, Some(Target { pane: "w3:p2".into(), agent: None }), "--deliver-to wins");
+    std::fs::remove_dir_all(&root).expect("cleanup");
+}

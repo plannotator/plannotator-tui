@@ -41,6 +41,8 @@ pub(crate) enum Action {
     OpenInEditor,
     PickMessage,
     QuickOpen,
+    /// Choose which agent Send goes to: a Pi session or a Herdr agent (`docs/spec-pi-link.md`).
+    PickTarget,
     ReviewMenu,
     ResendAll,
     FinishReview,
@@ -64,15 +66,63 @@ pub(crate) enum Action {
     CopySelection,
     Yes,
     No,
+    // Code review (`plannotator-tui review`).
+    /// Suggest replacement code for the selected new-side lines.
+    Suggest,
+    /// Comment on the whole file under the cursor.
+    FileComment,
+    /// Comment on the whole change: a review-level note on no file.
+    ChangeComment,
+    NextHunk,
+    PreviousHunk,
+    NextFile,
+    PreviousFile,
+    /// Split or unified diff.
+    ToggleLayout,
+    ToggleWrap,
+    /// Show or hide the diff's file list.
+    ToggleFiles,
+    /// Mark the file under the cursor viewed, or not (`docs/spec-review-progress.md`).
+    ToggleViewed,
+    /// The next or previous file not marked viewed, wrapping around.
+    NextUnviewed,
+    PreviousUnviewed,
+    Help,
+    /// The reading column, by eight columns.
+    NarrowColumn,
+    WidenColumn,
+    /// The whole file under the cursor as it is now, or back to the diff.
+    WholeFile,
+    /// The whole file as it was before the change (its base), or back to the diff.
+    WholeBase,
+    /// Hide the notes rail, or show it again, in the document and in the code review.
+    ToggleNotes,
+    /// Find text in the open document.
+    Search,
+    /// The next or previous match of the last search, wrapping at either end.
+    NextMatch,
+    PreviousMatch,
+    /// Search for the identifier on the line and go to its definition.
+    GoToDefinition,
+    /// Back to the place before a jump, and forward again.
+    JumpBack,
+    JumpForward,
 }
 
 use Action::{
     Approve, Archive, AttachImage, Back, Bottom, ClearAll, ClearBlock, Comment, Confirm, CopySelection,
     CycleFocus, Delete, Down, Edit, FinishReview, Interrupt, Left, LineEnd, LineStart, LooksGood, MoveCursor,
-    No, OpenInEditor, PageDown, PageUp, PickMessage, QuickOpen, Quit, Reload, Remove, RemoveImage, ResendAll,
-    ReviewMenu, Right, Send, SendAndClose, ToggleHidden, ToggleTree, Top, UndoFinish, Up, Visual, VisualLine,
-    WordBack, WordEnd, WordForward, Yes,
+    No, OpenInEditor, PageDown, PageUp, PickMessage, PickTarget, QuickOpen, Quit, Reload, Remove,
+    RemoveImage, ResendAll, ReviewMenu, Right, Send, SendAndClose, ToggleHidden, ToggleTree, Top, UndoFinish,
+    Up, Visual, VisualLine, WordBack, WordEnd, WordForward, Yes,
 };
+use Action::{
+    ChangeComment, FileComment, Help, NextFile, NextHunk, NextMatch, NextUnviewed, PreviousFile,
+    PreviousHunk, PreviousMatch, PreviousUnviewed, Search, Suggest, ToggleFiles, ToggleLayout, ToggleViewed,
+    ToggleWrap, WholeBase, WholeFile,
+};
+use Action::{GoToDefinition, JumpBack, JumpForward};
+use Action::{NarrowColumn, ToggleNotes, WidenColumn};
 
 /// Browsing, before the focused pane gets the key.
 pub(crate) const GLOBAL: &[Action] = &[
@@ -92,6 +142,8 @@ pub(crate) const GLOBAL: &[Action] = &[
     OpenInEditor,
     QuickOpen,
     PickMessage,
+    PickTarget,
+    ToggleNotes,
 ];
 pub(crate) const TREE: &[Action] = &[Down, Up, Confirm, Right, ToggleHidden, Back];
 pub(crate) const RAIL: &[Action] = &[Down, Up, Confirm, Edit, Remove, AttachImage, RemoveImage, Back];
@@ -115,6 +167,11 @@ pub(crate) const DOCUMENT: &[Action] = &[
     ClearAll,
     AttachImage,
     RemoveImage,
+    NarrowColumn,
+    WidenColumn,
+    Search,
+    NextMatch,
+    PreviousMatch,
 ];
 /// Marking the selected block, tried only when no `DOCUMENT` action claims the key. They sit
 /// outside `SHARED` so a config that gave `a` or `d` to a document action keeps loading.
@@ -132,8 +189,67 @@ pub(crate) const CONFIRM_QUIT: &[Action] = &[Yes, Confirm, No, Back];
 pub(crate) const CONFIRM_CLEAR: &[Action] = &[Yes, No, Back];
 pub(crate) const MENU: &[Action] =
     &[Down, Up, Confirm, Back, ReviewMenu, Interrupt, ResendAll, FinishReview, UndoFinish, Archive];
-pub(crate) const PICK: &[Action] = &[Down, Up, Confirm, Back, Quit];
+pub(crate) const PICK: &[Action] = &[Down, Up, PageDown, PageUp, Top, Bottom, Confirm, Back, Quit];
+/// The agent picker: up and down as in the message picker; `pick-target` again closes it.
+pub(crate) const PICK_TARGET: &[Action] = &[Down, Up, Confirm, Back, PickTarget, Interrupt];
 pub(crate) const ARCHIVE: &[Action] = &[Down, Up, Confirm, Back, Archive, Quit, Interrupt];
+
+/// A code review, before the focused pane gets the key.
+pub(crate) const REVIEW_GLOBAL: &[Action] = &[
+    Quit,
+    Interrupt,
+    CycleFocus,
+    Send,
+    SendAndClose,
+    ReviewMenu,
+    ResendAll,
+    FinishReview,
+    UndoFinish,
+    ChangeComment,
+    Reload,
+    PickTarget,
+    Help,
+    ToggleNotes,
+];
+/// The diff. `left` and `right` pick the old and the new side.
+pub(crate) const DIFF: &[Action] = &[
+    Back,
+    Visual,
+    VisualLine,
+    Comment,
+    Suggest,
+    FileComment,
+    Down,
+    Up,
+    PageDown,
+    PageUp,
+    Top,
+    Bottom,
+    NextHunk,
+    PreviousHunk,
+    NextFile,
+    PreviousFile,
+    Left,
+    Right,
+    ToggleLayout,
+    ToggleWrap,
+    ToggleFiles,
+    ToggleViewed,
+    NextUnviewed,
+    PreviousUnviewed,
+    WholeFile,
+    WholeBase,
+    GoToDefinition,
+    JumpBack,
+    JumpForward,
+    Confirm,
+];
+/// The code review's notes rail.
+pub(crate) const NOTES: &[Action] = &[Down, Up, Confirm, Edit, Remove, Back];
+pub(crate) const REVIEW_MENU: &[Action] =
+    &[Down, Up, Confirm, Back, ReviewMenu, Interrupt, ChangeComment, ResendAll, FinishReview, UndoFinish];
+/// The code review's key help: the motions scroll it when it does not fit; the rest close it.
+pub(crate) const HELP: &[Action] = &[Back, Help, Quit, Interrupt, Down, Up, PageDown, PageUp];
 
 /// Contexts that read the same keypress: the global keys come first while browsing, and
 /// roaming tries the motions before the document's own keys.
@@ -149,6 +265,10 @@ const SHARED: &[&[&[Action]]] = &[
     &[MENU],
     &[PICK],
     &[ARCHIVE],
+    &[REVIEW_GLOBAL, DIFF],
+    &[REVIEW_GLOBAL, NOTES],
+    &[REVIEW_MENU],
+    &[HELP],
 ];
 
 /// Named keys, spelled as the config file writes them.
@@ -188,10 +308,20 @@ const fn named(code: KeyCode) -> Key {
 }
 
 impl Key {
-    /// A plain binding ignores modifiers, as a shifted letter arrives with Shift set; a Ctrl
-    /// binding needs Ctrl alone.
+    /// A Ctrl binding needs Ctrl alone. A plain binding allows Shift, as a shifted letter
+    /// arrives with Shift set, but not Ctrl; Ctrl with Alt still counts as plain, because
+    /// Windows reports `AltGr` that way and `AltGr` types ordinary characters.
+    /// A terminal that reports Shift+e as `e` with Shift (a kitty `CSI 101;2u`) means `E`.
     fn matches(self, key: &KeyEvent) -> bool {
-        self.code == key.code && (!self.ctrl || key.modifiers == KeyModifiers::CONTROL)
+        let ctrl_or_alt = key.modifiers & (KeyModifiers::CONTROL | KeyModifiers::ALT);
+        let held_ctrl = ctrl_or_alt == KeyModifiers::CONTROL;
+        let code = match key.code {
+            KeyCode::Char(c) if c.is_ascii_lowercase() && key.modifiers.contains(KeyModifiers::SHIFT) => {
+                KeyCode::Char(c.to_ascii_uppercase())
+            }
+            code => code,
+        };
+        self.code == code && if self.ctrl { key.modifiers == KeyModifiers::CONTROL } else { !held_ctrl }
     }
 
     /// How the in-app hints spell the key: `j`, `G`, `enter`, `ctrl+d`.
@@ -276,6 +406,7 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (OpenInEditor, &[ch('o')]),
     (PickMessage, &[ch('p')]),
     (QuickOpen, &[ctrl('p')]),
+    (PickTarget, &[ch('P')]),
     (ReviewMenu, &[ch('m')]),
     (ResendAll, &[ch('R')]),
     (FinishReview, &[ch('F')]),
@@ -297,11 +428,70 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (CopySelection, &[ch('y')]),
     (Yes, &[ch('y'), ch('Y')]),
     (No, &[ch('n'), ch('N')]),
+    (Suggest, &[ch('s')]),
+    (FileComment, &[ch('C')]),
+    (ChangeComment, &[ch('M')]),
+    (NextHunk, &[ch(']')]),
+    (PreviousHunk, &[ch('[')]),
+    (NextFile, &[ch('n')]),
+    (PreviousFile, &[ch('N')]),
+    (ToggleLayout, &[ch('u')]),
+    (ToggleWrap, &[ch('w')]),
+    (ToggleFiles, &[ch('f')]),
+    (ToggleViewed, &[ch('x')]),
+    // `n` with Ctrl: the next file, skipping viewed ones. Ctrl+Shift+N reaches most
+    // terminals as Ctrl+N, so the backward jump has no default key.
+    (NextUnviewed, &[ctrl('n')]),
+    (PreviousUnviewed, &[]),
+    (Help, &[ch('?')]),
+    (NarrowColumn, &[ch('<')]),
+    (WidenColumn, &[ch('>')]),
+    (WholeFile, &[ch('o')]),
+    (WholeBase, &[ch('O')]),
+    (ToggleNotes, &[ch('z')]),
+    (Search, &[ch('/')]),
+    (NextMatch, &[ch('n')]),
+    (PreviousMatch, &[ch('N')]),
+    (GoToDefinition, &[ch('d')]),
+    (JumpBack, &[ctrl('o')]),
+    // Ctrl+I is Tab in terminals that do not tell them apart; there `cycle-focus` gets it.
+    (JumpForward, &[ctrl('i')]),
 ];
 
 /// Actions added after configs were written: `approve` (live only in a gated review), `copy`
-/// (on a waiting selection), `word-end` and `visual-line`.
-const LATE: &[Action] = &[Approve, CopySelection, WordEnd, VisualLine];
+/// (on a waiting selection), `word-end`, `visual-line`, the code review's own, the reading
+/// column's, `toggle-notes` and search.
+const LATE: &[Action] = &[
+    Approve,
+    CopySelection,
+    WordEnd,
+    VisualLine,
+    Suggest,
+    FileComment,
+    NextHunk,
+    PreviousHunk,
+    NextFile,
+    PreviousFile,
+    ToggleLayout,
+    ToggleWrap,
+    ToggleFiles,
+    ToggleViewed,
+    NextUnviewed,
+    PreviousUnviewed,
+    Help,
+    ChangeComment,
+    NarrowColumn,
+    WidenColumn,
+    WholeFile,
+    WholeBase,
+    ToggleNotes,
+    Search,
+    NextMatch,
+    PreviousMatch,
+    GoToDefinition,
+    JumpBack,
+    JumpForward,
+];
 
 /// The keys bound to each action. A `[keys]` entry replaces that action's keys and leaves the
 /// others at their defaults; an empty list unbinds the action.
@@ -336,25 +526,9 @@ impl<'de> Deserialize<'de> for Keymap {
 }
 
 impl Keymap {
-    /// The first action in `context` bound to `key`. A plain binding also matches the key
-    /// with Ctrl held, so an exact Ctrl binding is tried first: `page-up = ["ctrl+k"]` must
-    /// not lose `ctrl+k` to `up`'s plain `k` just because `up` comes first.
+    /// The first action in `context` bound to `key`.
     pub(crate) fn action(&self, key: &KeyEvent, context: &[Action]) -> Option<Action> {
-        let exact_ctrl = |action| self.keys(action).iter().any(|k| k.ctrl && k.matches(key));
-        context
-            .iter()
-            .copied()
-            .find(|&action| exact_ctrl(action))
-            .or_else(|| context.iter().copied().find(|&action| self.is(action, key)))
-    }
-
-    /// `action`, except a plain binding does not answer with Ctrl held: `ctrl+d` pages, it
-    /// does not mark. Ctrl with Alt still counts as plain, because Windows reports `AltGr`
-    /// that way and `AltGr` types ordinary characters.
-    pub(crate) fn action_without_ctrl_leak(&self, key: &KeyEvent, context: &[Action]) -> Option<Action> {
-        let held_ctrl = key.modifiers & (KeyModifiers::CONTROL | KeyModifiers::ALT) == KeyModifiers::CONTROL;
-        self.action(key, context)
-            .filter(|&action| !held_ctrl || self.keys(action).iter().any(|k| k.ctrl && k.matches(key)))
+        context.iter().copied().find(|&action| self.is(action, key))
     }
 
     pub(crate) fn is(&self, action: Action, key: &KeyEvent) -> bool {
@@ -437,6 +611,7 @@ impl Action {
             Self::OpenInEditor => "open-in-editor",
             Self::PickMessage => "pick-message",
             Self::QuickOpen => "quick-open",
+            Self::PickTarget => "pick-target",
             Self::ReviewMenu => "review-menu",
             Self::ResendAll => "resend-all",
             Self::FinishReview => "finish-review",
@@ -458,6 +633,31 @@ impl Action {
             Self::CopySelection => "copy",
             Self::Yes => "yes",
             Self::No => "no",
+            Self::Suggest => "suggest",
+            Self::FileComment => "file-comment",
+            Self::ChangeComment => "change-comment",
+            Self::NextHunk => "next-hunk",
+            Self::PreviousHunk => "previous-hunk",
+            Self::NextFile => "next-file",
+            Self::PreviousFile => "previous-file",
+            Self::ToggleLayout => "toggle-layout",
+            Self::ToggleWrap => "toggle-wrap",
+            Self::ToggleFiles => "toggle-files",
+            Self::ToggleViewed => "toggle-viewed",
+            Self::NextUnviewed => "next-unviewed",
+            Self::PreviousUnviewed => "previous-unviewed",
+            Self::Help => "help",
+            Self::NarrowColumn => "narrow-column",
+            Self::WidenColumn => "widen-column",
+            Self::WholeFile => "whole-file",
+            Self::WholeBase => "whole-base",
+            Self::ToggleNotes => "toggle-notes",
+            Self::Search => "search",
+            Self::NextMatch => "next-match",
+            Self::PreviousMatch => "previous-match",
+            Self::GoToDefinition => "go-to-definition",
+            Self::JumpBack => "jump-back",
+            Self::JumpForward => "jump-forward",
         }
     }
 }

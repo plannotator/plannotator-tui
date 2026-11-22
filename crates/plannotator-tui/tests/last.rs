@@ -448,6 +448,47 @@ fn pi_leaf_flag_requires_an_explicit_transcript_and_session_id() {
     }
 }
 
+#[test]
+fn a_pi_pid_in_the_link_registry_picks_its_session_over_a_newer_one_in_the_same_folder() {
+    let root = temp_dir("pi pid");
+    let cwd = PathBuf::from("/w/two-pis");
+    let bucket = root.join("sessions").join(pi::encoded_dir(&cwd));
+    std::fs::create_dir_all(&bucket).expect("bucket");
+    let session = |name: &str, reply: &str| {
+        let path = bucket.join(format!("{name}.jsonl"));
+        std::fs::write(
+            &path,
+            format!(
+                "{{\"type\":\"session\",\"id\":\"{name}\",\"cwd\":\"/w/two-pis\"}}\n\
+                 {{\"type\":\"message\",\"id\":\"{name}-1\",\"parentId\":null,\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"{reply}\"}}]}}}}\n"
+            ),
+        )
+        .expect("session");
+        path
+    };
+    let focused = session("2026-08-01_focused", "from the focused pi");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    session("2026-08-02_other", "from the other pi");
+    let registry = root.join("registry");
+    std::fs::create_dir_all(registry.join("pi")).expect("registry");
+    let entry = serde_json::json!({ "v": 1, "host": "pi", "id": "focused", "pid": 4242, "cwd": cwd,
+        "transcript": focused, "port": 1, "token": "t", "updated": 1 });
+    std::fs::write(registry.join("pi/focused-4242.json"), entry.to_string()).expect("entry");
+    let last = |pid: &str| {
+        let out = bin()
+            .args(["last", "--host", "pi", "--pid", pid, "--print"])
+            .env("PI_CODING_AGENT_SESSION_DIR", root.join("sessions"))
+            .env("PLANNOTATOR_TUI_SESSIONS_DIR", &registry)
+            .env("PLANNOTATOR_TUI_CWD", &cwd)
+            .output()
+            .expect("runs");
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    assert_eq!(last("4242"), "from the focused pi");
+    assert_eq!(last("4343"), "from the other pi", "an unregistered pid keeps the folder's newest");
+    std::fs::remove_dir_all(root).ok();
+}
+
 fn newest_pi_reply() -> (PathBuf, String) {
     let transcript = fixtures().join("pi.jsonl");
     let text = std::fs::read_to_string(&transcript).expect("fixture");

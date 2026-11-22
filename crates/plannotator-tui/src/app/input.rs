@@ -2,11 +2,12 @@
 
 use anyhow::Result;
 use plannotator_tui_schema::Kind;
-use ratatui::crossterm::event::{Event, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{
+    Event, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::text::Line;
 use unicode_width::UnicodeWidthChar;
 
-use super::compose::ComposeAction;
 use super::menu::ReviewAction;
 use super::selection::Selection;
 use super::send::SendState;
@@ -14,6 +15,7 @@ use super::{App, Focus, GUTTER, Mode, Pending, TOOLBAR};
 use crate::delivery::Delivery as _;
 use crate::gate::Gate;
 use crate::keys::{self, Action};
+use crate::ui::compose::ComposeAction;
 
 /// A row's characters indexed by screen column, as the cursor is: a wide one fills two.
 fn chars_by_column(line: &Line<'_>) -> Vec<char> {
@@ -23,6 +25,8 @@ fn chars_by_column(line: &Line<'_>) -> Vec<char> {
 
 impl App {
     pub(crate) fn handle_event(&mut self, event: &Event) -> Result<()> {
+        // Keys can reach any row (`G`, a page down, a click), so input sees the whole layout.
+        self.open.layout.finish();
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => match &self.mode {
                 Mode::Browse => self.browse_key(*key),
@@ -33,11 +37,16 @@ impl App {
                     self.file_search_key(*key);
                     Ok(())
                 }
+                Mode::Search => {
+                    self.search_key(*key);
+                    Ok(())
+                }
                 Mode::Archive => {
                     self.archive_key(*key);
                     Ok(())
                 }
                 Mode::ReviewMenu => self.menu_key(*key),
+                Mode::PickTarget => self.pick_target_key(*key),
                 Mode::Compose | Mode::Edit(_) => self.text_key(*key),
                 Mode::AttachImage(_) => self.image_prompt_key(*key),
             },
@@ -55,6 +64,10 @@ impl App {
             // In Quick Open a paste joins the query, newlines dropped.
             Event::Paste(text) if self.mode == Mode::FileSearch => {
                 self.file_search_paste(text);
+                Ok(())
+            }
+            Event::Paste(text) if self.mode == Mode::Search => {
+                self.search_paste(text);
                 Ok(())
             }
             Event::Mouse(mouse) if self.mode == Mode::Browse => self.mouse(*mouse),
@@ -80,7 +93,7 @@ impl App {
             Some(Action::QuickOpen) if self.tree.is_none() => {
                 let others: Vec<Action> =
                     keys::GLOBAL.iter().copied().filter(|&action| action != Action::QuickOpen).collect();
-                self.keys.action(&key, &others)
+                self.keys.action(&KeyEvent::new(key.code, KeyModifiers::NONE), &others)
             }
             action => action,
         };
@@ -104,6 +117,10 @@ impl App {
                 }
                 return self.send_and_quit();
             }
+            Some(Action::PickTarget) => {
+                self.open_pi_picker();
+                return Ok(());
+            }
             Some(Action::ReviewMenu) if self.is_file_review() => {
                 self.open_review_menu();
                 return Ok(());
@@ -121,7 +138,7 @@ impl App {
                 return self.run_review_action(ReviewAction::Archive);
             }
             Some(Action::ToggleTree) => {
-                self.toggle_tree(self.geometry.doc.width + self.geometry.tree.width + GUTTER);
+                self.toggle_tree(self.geometry.width);
                 return Ok(());
             }
             Some(Action::Reload) => return self.reload(),
@@ -131,6 +148,10 @@ impl App {
             }
             Some(Action::PickMessage) => {
                 self.reopen_picker();
+                return Ok(());
+            }
+            Some(Action::ToggleNotes) => {
+                self.toggle_notes();
                 return Ok(());
             }
             _ => {}
@@ -193,7 +214,11 @@ impl App {
         let has_tree = self.tree.is_some();
         let has_rail = !self.open.store.placed().is_empty();
         self.focus = match self.focus {
-            Focus::Document if has_rail => Focus::Rail,
+            // Moving to the notes shows them again when `toggle-notes` hid them.
+            Focus::Document if has_rail => {
+                self.reveal_notes();
+                Focus::Rail
+            }
             Focus::Document | Focus::Rail if has_tree => Focus::Tree,
             Focus::Tree | Focus::Document | Focus::Rail => Focus::Document,
         };
@@ -267,18 +292,21 @@ impl App {
                 return Ok(());
             }
         }
-        let action = self
-            .keys
-            .action(&key, keys::DOCUMENT)
-            .or_else(|| self.keys.action_without_ctrl_leak(&key, keys::BLOCK_MARKS));
+        let action =
+            self.keys.action(&key, keys::DOCUMENT).or_else(|| self.keys.action(&key, keys::BLOCK_MARKS));
         match action {
+            // Esc peels one layer at a time: a selection, then a search's highlights, then
+            // the review itself.
             Some(Action::Back) => {
                 if self.pending.is_some() || self.selection.is_some() {
                     self.clear_selection();
-                } else {
+                } else if !self.clear_search() {
                     self.request_quit();
                 }
             }
+            Some(Action::Search) => self.start_search(),
+            Some(Action::NextMatch) => self.step_search(true),
+            Some(Action::PreviousMatch) => self.step_search(false),
             Some(Action::Visual) => self.start_visual(Selection::start(self.cursor)),
             Some(Action::VisualLine) => self.start_visual(Selection::start_rows(self.cursor)),
             Some(Action::MoveCursor) => self.start_roaming(),
@@ -309,6 +337,8 @@ impl App {
                 self.status = Some(format!("removed {removed} annotation(s) on block"));
             }
             Some(Action::ClearAll) => self.request_clear_all(),
+            Some(Action::NarrowColumn) => self.resize_column(false),
+            Some(Action::WidenColumn) => self.resize_column(true),
             Some(Action::AttachImage) => self.begin_attach_image(),
             Some(Action::RemoveImage) => self.remove_image()?,
             _ => {}
@@ -346,7 +376,6 @@ impl App {
                     sel.set_head(self.cursor);
                 }
             }
-            _ if self.keys.action_without_ctrl_leak(&key, keys::TOOLBAR).is_none() => {}
             _ => {
                 if self.keys.action(&key, keys::TOOLBAR) == Some(Action::CopySelection) {
                     self.finish_selection();
@@ -476,7 +505,7 @@ impl App {
     }
 
     fn text_key(&mut self, key: KeyEvent) -> Result<()> {
-        match self.compose.handle_key(key) {
+        match self.compose.key(&self.keys, key, self.compose_wrap()) {
             ComposeAction::Cancel => self.cancel_compose(),
             ComposeAction::Save => {
                 let body = self.compose.value().trim().to_owned();
@@ -496,8 +525,10 @@ impl App {
                     | Mode::ConfirmClearAll
                     | Mode::Pick
                     | Mode::FileSearch
+                    | Mode::Search
                     | Mode::Archive
-                    | Mode::ReviewMenu => {
+                    | Mode::ReviewMenu
+                    | Mode::PickTarget => {
                         if !body.is_empty()
                             && let Some(pending) = self.pending.take()
                         {

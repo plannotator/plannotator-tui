@@ -85,19 +85,26 @@ fn an_empty_list_unbinds_the_action() {
 }
 
 #[test]
-fn an_exact_ctrl_binding_wins_over_a_plain_one_earlier_in_the_context() {
-    // `up` comes before `page-up` in the document, and its plain `k` also matches ctrl+k.
+fn a_ctrl_binding_and_a_plain_one_on_the_same_letter_stay_apart() {
     let keymap = parse("page-up = [\"ctrl+k\"]\n").expect("parses");
     assert_eq!(keymap.action(&press(KeyCode::Char('k'), KeyModifiers::CONTROL), DOCUMENT), Some(PageUp));
     assert_eq!(keymap.action(&press(KeyCode::Char('k'), KeyModifiers::NONE), DOCUMENT), Some(Up));
 }
 
 #[test]
-fn a_plain_binding_still_answers_ctrl_when_no_ctrl_binding_claims_it() {
-    // The defaults keep their behaviour: no action binds ctrl+j, so it still moves down.
+fn a_plain_binding_does_not_answer_ctrl() {
     let keymap = Keymap::default();
-    assert_eq!(keymap.action(&press(KeyCode::Char('j'), KeyModifiers::CONTROL), DOCUMENT), Some(Down));
+    assert_eq!(keymap.action(&press(KeyCode::Char('j'), KeyModifiers::CONTROL), DOCUMENT), None);
+    assert_eq!(keymap.action(&press(KeyCode::Down, KeyModifiers::CONTROL), DOCUMENT), None);
+    assert!(!keymap.is(LooksGood, &press(KeyCode::Char('a'), KeyModifiers::CONTROL)));
     assert_eq!(keymap.action(&press(KeyCode::Char('d'), KeyModifiers::CONTROL), DOCUMENT), Some(PageDown));
+}
+
+#[test]
+fn a_plain_binding_answers_altgr_which_windows_reports_as_ctrl_and_alt() {
+    let keymap = Keymap::default();
+    let altgr = KeyModifiers::CONTROL | KeyModifiers::ALT;
+    assert!(keymap.is(LineEnd, &press(KeyCode::Char('$'), altgr)));
 }
 
 #[test]
@@ -160,4 +167,75 @@ fn copy_is_y_on_a_waiting_selection_and_yields_to_an_older_config() {
     assert_eq!(keymap.hint(CopySelection), "");
     assert_eq!(keymap.hint(Approve), "A");
     assert_eq!(parse("copy = [\"Y\"]\n").expect("rebinds").hint(CopySelection), "Y");
+}
+
+#[test]
+fn shift_with_a_lowercase_letter_counts_as_the_capital() {
+    let keymap = Keymap::default();
+    assert_eq!(keymap.action(&press(KeyCode::Char('x'), KeyModifiers::SHIFT), DOCUMENT), Some(ClearAll));
+    assert!(keymap.is(Bottom, &press(KeyCode::Char('g'), KeyModifiers::SHIFT)));
+    assert!(!keymap.is(Bottom, &press(KeyCode::Char('g'), KeyModifiers::NONE)));
+}
+
+#[test]
+fn change_comment_is_m_in_the_code_review_and_yields_to_an_older_config() {
+    let keymap = Keymap::default();
+    let shifted_m = press(KeyCode::Char('M'), KeyModifiers::SHIFT);
+    assert_eq!(keymap.action(&shifted_m, REVIEW_GLOBAL), Some(ChangeComment));
+    assert_eq!(keymap.action(&shifted_m, REVIEW_MENU), Some(ChangeComment));
+    // Written before `change-comment` existed: `M` is the user's, and it is left unbound.
+    let keymap = parse("reload = [\"M\"]\n").expect("an older config keeps loading");
+    assert_eq!(keymap.hint(ChangeComment), "");
+}
+
+#[test]
+fn whole_file_is_o_and_whole_base_shifted_o_in_the_diff_and_yield_to_an_older_config() {
+    let keymap = Keymap::default();
+    assert_eq!(keymap.action(&press(KeyCode::Char('o'), KeyModifiers::NONE), DIFF), Some(WholeFile));
+    assert_eq!(keymap.action(&press(KeyCode::Char('O'), KeyModifiers::SHIFT), DIFF), Some(WholeBase));
+    // `o` stays open-in-editor in a document review.
+    assert_eq!(keymap.action(&press(KeyCode::Char('o'), KeyModifiers::NONE), GLOBAL), Some(OpenInEditor));
+    let keymap = parse("toggle-wrap = [\"o\"]\n").expect("an older config keeps loading");
+    assert_eq!(keymap.hint(WholeFile), "");
+    assert_eq!(keymap.hint(WholeBase), "O");
+}
+
+#[test]
+fn search_is_slash_and_n_and_shift_n_step_without_taking_them_from_other_screens() {
+    let keymap = Keymap::default();
+    let n = press(KeyCode::Char('n'), KeyModifiers::NONE);
+    let shift_n = press(KeyCode::Char('N'), KeyModifiers::SHIFT);
+    assert_eq!(keymap.action(&press(KeyCode::Char('/'), KeyModifiers::NONE), DOCUMENT), Some(Search));
+    assert_eq!(keymap.action(&n, DOCUMENT), Some(NextMatch));
+    assert_eq!(keymap.action(&shift_n, DOCUMENT), Some(PreviousMatch));
+    // The quit question and the code review keep their own meaning for the same keys.
+    assert_eq!(keymap.action(&n, CONFIRM_QUIT), Some(No));
+    assert_eq!(keymap.action(&n, DIFF), Some(NextFile));
+    assert_eq!(keymap.action(&shift_n, DIFF), Some(PreviousFile));
+}
+
+#[test]
+fn the_search_keys_yield_to_an_older_config_that_gave_them_away() {
+    // The example at the top of this module: `n` moves down, so next-match is left unbound.
+    let keymap = parse("down = [\"n\", \"Down\"]\n").expect("an older config keeps loading");
+    assert_eq!(keymap.action(&press(KeyCode::Char('n'), KeyModifiers::NONE), DOCUMENT), Some(Down));
+    assert_eq!(keymap.hint(NextMatch), "");
+    assert_eq!(keymap.hint(PreviousMatch), "N");
+    assert_eq!(parse("comment = [\"/\"]\n").expect("loads").hint(Search), "");
+    assert_eq!(parse("search = [\"ctrl+f\"]\n").expect("rebinds").hint(Search), "ctrl+f");
+}
+
+#[test]
+fn go_to_definition_is_d_with_ctrl_o_back_and_ctrl_i_forward_in_the_diff() {
+    let keymap = Keymap::default();
+    assert_eq!(keymap.action(&press(KeyCode::Char('d'), KeyModifiers::NONE), DIFF), Some(GoToDefinition));
+    assert_eq!(keymap.action(&press(KeyCode::Char('o'), KeyModifiers::CONTROL), DIFF), Some(JumpBack));
+    assert_eq!(keymap.action(&press(KeyCode::Char('i'), KeyModifiers::CONTROL), DIFF), Some(JumpForward));
+    // Where the terminal sends Ctrl+I as Tab, Tab still cycles the focus.
+    assert_eq!(keymap.action(&press(KeyCode::Tab, KeyModifiers::NONE), REVIEW_GLOBAL), Some(CycleFocus));
+    // `d` stays a block mark in a document review.
+    assert_eq!(keymap.action(&press(KeyCode::Char('d'), KeyModifiers::NONE), BLOCK_MARKS), Some(Delete));
+    let keymap = parse("toggle-files = [\"d\"]\n").expect("an older config keeps loading");
+    assert_eq!(keymap.hint(GoToDefinition), "");
+    assert_eq!((keymap.hint(JumpBack), keymap.hint(JumpForward)), ("ctrl+o".into(), "ctrl+i".into()));
 }

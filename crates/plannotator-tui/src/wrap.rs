@@ -3,14 +3,20 @@
 //! `tui-markdown` emits one `Line` per logical line and never wraps; the layout needs
 //! exact row counts and the selection needs to know which source byte sits under each
 //! screen column, so both live here. Generic text wrapping — no markdown knowledge.
-//! Reflowing a rendered table is the one shape-aware job, and it lives in `wrap::table`.
+//! Where a line may break is `wrap::breaks`; hanging indents are `wrap::hang`. Reflowing a rendered table is the one
+//! shape-aware job, and it lives in `wrap::table`.
 
+mod breaks;
+mod hang;
 mod table;
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthChar;
 
+use breaks::token_len;
+
+pub(crate) use hang::{Hang, wrap_line_hanging};
 pub(crate) use table::wrap_table;
 
 /// One screen row: styled text plus, per column, the source byte it came from.
@@ -97,12 +103,10 @@ fn wrap_cells(cells: &[Cell], width: usize) -> Vec<Vec<Cell>> {
     let mut current: Vec<Cell> = Vec::new();
     let mut current_width = 0usize;
 
-    // Tokens are unbreakable runs: a word, or a run of whitespace.
     let mut rest = cells;
     while let Some(first) = rest.first() {
         let is_space = first.ch.is_whitespace();
-        let len = rest.iter().take_while(|c| c.ch.is_whitespace() == is_space).count();
-        let (token, tail) = rest.split_at(len);
+        let (token, tail) = rest.split_at(token_len(rest));
         rest = tail;
         let token_width = cells_width(token);
 
@@ -152,6 +156,76 @@ pub(crate) fn wrap_line(line: &Line<'_>, offsets: &[Option<usize>], width: usize
         .collect()
 }
 
+/// `glyph` across `width` columns, every cell pointing at `offset`.
+pub(crate) fn rule_row(glyph: char, style: Style, offset: Option<usize>, width: usize) -> Row {
+    let line = Line::from(Span::styled(glyph.to_string().repeat(width), style));
+    Row { line, cells: vec![offset; width] }
+}
+
+/// Split one line into rows of `width` columns, each starting with `prefix`, breaking
+/// anywhere and keeping every character, spaces included: code, whose columns mean
+/// something. The rows go onto `rows`. The prefix maps to no source byte. An empty line
+/// yields one row, the prefix.
+pub(crate) fn split_line(
+    rows: &mut Vec<Row>,
+    prefix: &Span<'static>,
+    line: &Line<'_>,
+    offsets: &[Option<usize>],
+    width: usize,
+) {
+    if let Some(row) = fitting_line(prefix, line, offsets, width) {
+        rows.push(row);
+        return;
+    }
+    let lead: Vec<Cell> = prefix
+        .content
+        .chars()
+        .map(|ch| Cell { ch, width: ch.width().unwrap_or(0), offset: None, style: prefix.style })
+        .collect();
+    let room = width.saturating_sub(cells_width(&lead)).max(1);
+    let mut piece = lead.clone();
+    let mut used = 0;
+    for cell in cells_of(line, offsets) {
+        if used + cell.width > room && used > 0 {
+            rows.push(finish_row(std::mem::replace(&mut piece, lead.clone()), line.style));
+            used = 0;
+        }
+        used += cell.width;
+        piece.push(cell);
+    }
+    rows.push(finish_row(piece, line.style));
+}
+
+/// [`split_line`]'s usual case, cheaply: a line of printable ASCII that fits beside the prefix
+/// and ends on something visible, kept span for span. `None` for any other line.
+fn fitting_line(
+    prefix: &Span<'static>,
+    line: &Line<'_>,
+    offsets: &[Option<usize>],
+    width: usize,
+) -> Option<Row> {
+    let printable = |s: &str| s.bytes().all(|b| (b' '..=b'~').contains(&b));
+    let chars: usize = line.spans.iter().map(|span| span.content.len()).sum();
+    let lead = prefix.width();
+    let ends_visible = line
+        .spans
+        .iter()
+        .rev()
+        .find(|span| !span.content.is_empty())
+        .is_some_and(|span| span.content.as_bytes().last().is_some_and(|b| *b != b' '));
+    let fits = chars > 0 && lead + chars <= width && ends_visible;
+    if !fits || !line.spans.iter().all(|span| printable(&span.content)) {
+        return None;
+    }
+    let mut spans = Vec::with_capacity(line.spans.len() + 1);
+    spans.push(prefix.clone());
+    spans.extend(line.spans.iter().map(|span| Span::styled(span.content.to_string(), span.style)));
+    let mut cells = Vec::with_capacity(lead + chars);
+    cells.resize(lead, None);
+    cells.extend(offsets.iter().copied().chain(std::iter::repeat(None)).take(chars));
+    Some(Row { line: Line::from(spans).style(line.style), cells })
+}
+
 /// Keep one row; clip anything past `width` (code and tables keep their columns).
 pub(crate) fn clip_line(line: &Line<'_>, offsets: &[Option<usize>], width: usize) -> Row {
     finish_row(clip_cells(cells_of(line, offsets), width), line.style)
@@ -163,11 +237,11 @@ mod tests {
     use super::*;
     use ratatui::style::{Modifier, Stylize};
 
-    fn plain(rows: &[Row]) -> Vec<String> {
+    pub(super) fn plain(rows: &[Row]) -> Vec<String> {
         rows.iter().map(|r| r.line.to_string()).collect()
     }
 
-    fn identity(n: usize) -> Vec<Option<usize>> {
+    pub(super) fn identity(n: usize) -> Vec<Option<usize>> {
         (0..n).map(Some).collect()
     }
 

@@ -118,6 +118,24 @@ pub(crate) struct Palette {
     pub(crate) cursor: Style,
     /// A character selection, a picker row, a review-menu row.
     pub(crate) selection: Style,
+    /// Inline code, and fenced code in a language without a bundled grammar.
+    pub(crate) code: Color,
+    /// Fenced code with a known language: keywords and storage.
+    pub(crate) code_keyword: Color,
+    /// Strings and characters in code.
+    pub(crate) code_string: Color,
+    /// Numbers and named constants in code.
+    pub(crate) code_number: Color,
+    /// Function names in code.
+    pub(crate) code_function: Color,
+    /// Type names in code.
+    pub(crate) code_type: Color,
+    /// Comments in code, drawn italic as well.
+    pub(crate) code_comment: Color,
+    /// Every match of the document search.
+    pub(crate) search: Style,
+    /// The match the cursor is on.
+    pub(crate) search_current: Style,
 }
 
 /// The palette this app has always had. Dark terminals must see no change at all.
@@ -135,6 +153,16 @@ pub(crate) static DARK: Palette = Palette {
     approve_bg: Color::Indexed(22),
     cursor: Style::new().bg(Color::Indexed(240)),
     selection: Style::new().add_modifier(Modifier::REVERSED),
+    code: Color::LightYellow,
+    code_keyword: Color::Magenta,
+    code_string: Color::Green,
+    code_number: Color::Yellow,
+    code_function: Color::Blue,
+    code_type: Color::Cyan,
+    code_comment: Color::DarkGray,
+    // Blue and orange: no annotation tint, the block bar or the cursor uses either hue.
+    search: Style::new().bg(Color::Indexed(24)),
+    search_current: Style::new().bg(Color::Indexed(208)).fg(Color::Black),
 };
 
 /// The same roles, light. The greys mirror the dark ones about the middle of the ramp, so
@@ -156,6 +184,19 @@ pub(crate) static LIGHT: Palette = Palette {
     // A dark cell with its own light foreground, so the glyph under the cursor stays legible.
     cursor: Style::new().bg(Color::Indexed(238)).fg(Color::White),
     selection: Style::new().bg(Color::Indexed(153)),
+    // Light yellow, the code colour on dark, all but vanishes on white: a dark amber instead.
+    code: Color::Indexed(94),
+    code_keyword: DARK.code_keyword,
+    // Light themes' ANSI green and cyan are often too pale for text on white; these 256-colour
+    // ones are darker on every terminal.
+    code_string: Color::Indexed(28),
+    // Yellow is the one ANSI hue most light themes leave too pale to read on white.
+    code_number: Color::Indexed(130),
+    code_function: DARK.code_function,
+    code_type: Color::Indexed(30),
+    code_comment: DARK.code_comment,
+    search: Style::new().bg(Color::Indexed(117)),
+    search_current: Style::new().bg(Color::Indexed(214)).fg(Color::Black),
 };
 
 /// A colour as `[colors]` writes it: a name (`yellow`, `light-cyan`), a 256-colour index
@@ -242,7 +283,7 @@ impl<'de> Deserialize<'de> for ColorValue {
 }
 
 /// `[colors]`: per-role replacements for the palette in force. A role left out keeps the
-/// light or dark value; `cursor` and `selection` become plain backgrounds.
+/// light or dark value; `cursor`, `selection` and the search roles become plain backgrounds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default, rename_all = "kebab-case")]
 pub(crate) struct Colors {
@@ -269,6 +310,26 @@ pub(crate) struct Colors {
     pub(crate) cursor: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) selection: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) code: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) code_keyword: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) code_string: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) code_number: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) code_function: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) code_type: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) code_comment: Option<ColorValue>,
+    /// Every match of the document search.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) search: Option<ColorValue>,
+    /// The match the cursor is on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) search_current: Option<ColorValue>,
 }
 
 impl Palette {
@@ -289,17 +350,31 @@ impl Palette {
         set(&mut self.approve_bg, colors.looks_good_bg);
         set(&mut self.block_bg, colors.block);
         set(&mut self.toolbar_bg, colors.toolbar);
+        set(&mut self.code, colors.code);
+        set(&mut self.code_keyword, colors.code_keyword);
+        set(&mut self.code_string, colors.code_string);
+        set(&mut self.code_number, colors.code_number);
+        set(&mut self.code_function, colors.code_function);
+        set(&mut self.code_type, colors.code_type);
+        set(&mut self.code_comment, colors.code_comment);
         if let Some(ColorValue(color)) = colors.cursor {
             self.cursor = Style::new().bg(color);
         }
         if let Some(ColorValue(color)) = colors.selection {
             self.selection = Style::new().bg(color);
         }
+        if let Some(ColorValue(color)) = colors.search {
+            self.search = Style::new().bg(color);
+        }
+        if let Some(ColorValue(color)) = colors.search_current {
+            self.search_current = Style::new().bg(color);
+        }
         self
     }
 }
 
 static PALETTE: OnceLock<Palette> = OnceLock::new();
+static THEME: OnceLock<Theme> = OnceLock::new();
 
 /// The palette in force. Dark until [`install`] says otherwise, which is what tests,
 /// `--snapshot`, `--export` and every other headless run get.
@@ -310,6 +385,14 @@ pub(crate) fn palette() -> &'static Palette {
 /// Fix the palette for this process. The first call wins; later ones are ignored.
 pub(crate) fn install(theme: Theme, colors: &Colors) {
     let _ = PALETTE.set(theme.palette().with(colors));
+    let _ = THEME.set(theme);
+}
+
+/// The theme in force: dark until [`install`] says otherwise. The diff viewer colours its
+/// code by it.
+#[cfg_attr(not(unix), allow(dead_code, reason = "only the code review reads it"))]
+pub(crate) fn theme() -> Theme {
+    THEME.get().copied().unwrap_or(Theme::Dark)
 }
 
 /// Ask the terminal whether its background is light or dark.
@@ -456,6 +539,42 @@ mod tests {
         assert_ne!(LIGHT.approve_bg, DARK.approve_bg);
         assert_ne!(LIGHT.cursor, DARK.cursor);
         assert_ne!(LIGHT.selection, DARK.selection);
+        assert_ne!(LIGHT.search, DARK.search);
+        assert_ne!(LIGHT.search_current, DARK.search_current);
+    }
+
+    /// A search match must never read as a note: its background is none of the tints the
+    /// annotations, the focused block or the cursor paint, in either palette.
+    #[test]
+    fn search_highlights_share_no_background_with_annotations() {
+        for palette in [&DARK, &LIGHT] {
+            let taken = [
+                Some(palette.comment_bg),
+                Some(palette.approve_bg),
+                Some(palette.block_bg),
+                palette.cursor.bg,
+            ];
+            for role in [palette.search, palette.search_current] {
+                assert_ne!(role.bg, None);
+                assert!(!taken.contains(&role.bg), "{role:?}");
+            }
+            assert_ne!(palette.search, palette.search_current);
+        }
+    }
+
+    #[test]
+    fn the_search_roles_are_configurable_like_the_others() {
+        let colors = Colors {
+            search: Some(ColorValue(Color::Indexed(5))),
+            search_current: Some(ColorValue(Color::Indexed(6))),
+            ..Colors::default()
+        };
+        let palette = DARK.with(&colors);
+        assert_eq!(
+            (palette.search, palette.search_current),
+            (Style::new().bg(Color::Indexed(5)), Style::new().bg(Color::Indexed(6)))
+        );
+        assert_eq!(Palette { search: DARK.search, search_current: DARK.search_current, ..palette }, DARK);
     }
 
     /// `REVERSED` is what made a selection unreadable on a light terminal; the light
@@ -498,6 +617,19 @@ mod tests {
         };
         assert_eq!(LIGHT.with(&colors).cursor, Style::new().bg(Color::Indexed(7)));
         assert_eq!(DARK.with(&colors).selection, Style::new().bg(Color::Indexed(8)));
+    }
+
+    /// On white, code avoids the pale ANSI hues light themes tend to ship: light yellow,
+    /// yellow, green and cyan. `[colors] code` still sets the one code colour.
+    #[test]
+    fn light_code_colours_stay_dark_enough_for_white_and_code_is_configurable() {
+        let pale = [Color::LightYellow, Color::Yellow, Color::Green, Color::Cyan];
+        for color in [LIGHT.code, LIGHT.code_string, LIGHT.code_number, LIGHT.code_type] {
+            assert!(!pale.contains(&color), "{color:?}");
+        }
+        let colors = Colors { code: Some(ColorValue(Color::Indexed(166))), ..Colors::default() };
+        assert_eq!(LIGHT.with(&colors).code, Color::Indexed(166));
+        assert_eq!(DARK.code, Color::LightYellow, "dark terminals see the code colour they always had");
     }
 
     #[test]

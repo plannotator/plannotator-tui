@@ -1,0 +1,1 @@
+{"last_exit":null,"child":{"pid":94656,"user_id":0,"user":"root","name":"login","path":"/usr/bin/login"},"foreground":{"pid":94666,"user_id":501,"user":"me","name":"zsh","path":"/bin/zsh","invoked_path":"/bin/zsh","argv0":"-zsh","cwd":"/Users/me/work/api"},"ancestors":[{"pid":94656,"user_id":0,"user":"root","name":"login","path":"/usr/bin/login"}],"home":"/Users/me"}

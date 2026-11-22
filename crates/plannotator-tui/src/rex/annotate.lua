@@ -1,5 +1,5 @@
--- Rex Annotate: review documents and your agent's replies in plannotator-tui, and send the
--- feedback back to the agent as its next message.
+-- Rex Annotate: review documents, code changes and your agent's replies in plannotator-tui,
+-- and send the feedback back to the agent as its next message.
 --
 -- Written by `plannotator-tui rex install`; run that again after upgrading plannotator-tui.
 -- Load it from ~/.config/rex/init.lua, then run `rex config reload`:
@@ -7,8 +7,10 @@
 --   require("plannotator.annotate").setup{}
 --
 -- Options, all optional:
---   placement = "split" | "popup"   where reviews open; default: [rex] placement in
---                                   plannotator-tui's config, else a split
+--   placement = "tab" | "split" | "popup"
+--                                   where reviews open: a full-size tab of their own, a split
+--                                   beside the pane, or a popup over it; default: [rex]
+--                                   placement in plannotator-tui's config, else a tab
 --   keys = { annotate_gate = "ctrl+cmd+a", annotate_last = false }
 --                                   change, add or drop keys; keys = false binds none
 --   bin = "/path/to/plannotator-tui"
@@ -26,7 +28,8 @@ M.keys = {
   annotate_open = "ctrl+cmd+o",
 }
 
--- Each action reviews the focused pane: the agent in it, its folder, or its output.
+-- Each action reviews the focused pane: the agent in it, its folder, its repository's changes,
+-- or its output.
 M.actions = {
   { name = "annotate_last", title = "Annotate: Agent's Last Reply", args = { "last" },
     description = "Review the agent's recent replies and send feedback back." },
@@ -40,6 +43,8 @@ M.actions = {
     description = "Review the pane's recent output and send feedback to its agent." },
   { name = "annotate_find", title = "Annotate: Newest Markdown File Named Here", args = { "find" },
     description = "Review the newest Markdown file the pane's output names." },
+  { name = "annotate_review", title = "Annotate: Review Changes", args = { "review" },
+    description = "Review the uncommitted changes in the pane's git repository and send feedback to its agent." },
 }
 
 local function launch(bin, placement, review, ctx)

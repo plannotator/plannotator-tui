@@ -64,6 +64,12 @@ pub(super) fn read(
             Ok((path, messages, Discovery::Folder))
         }
         Host::Pi => {
+            // A Pi running our extension lists its pid and transcript in the Pi link
+            // registry: that is the session, even when another Pi shares the folder.
+            if let Some(path) = options.pid.and_then(registered_pi_transcript) {
+                let messages = readers::pi_messages(&path, pick)?;
+                return Ok((path, messages, Discovery::Exact));
+            }
             let path = find_pi_transcript(cwd, roots, ".pi/agent", "pi")?;
             let messages = readers::pi_messages(&path, pick)?;
             Ok((path, messages, Discovery::Folder))
@@ -195,6 +201,16 @@ fn find_pi_transcript(cwd: &Path, roots: &Roots, default_agent_dir: &str, label:
     pi::find_transcript(&sessions_dir, cwd).ok_or_else(|| {
         anyhow::anyhow!("no {label} session for {} (looked in {})", cwd.display(), sessions_dir.display())
     })
+}
+
+/// The transcript the Pi session with this pid registered, newest entry first.
+fn registered_pi_transcript(pid: u32) -> Option<PathBuf> {
+    crate::pi::pi_entries(&crate::pi::root())
+        .into_iter()
+        .rev()
+        .filter(|entry| entry.pid == pid)
+        .find_map(|entry| entry.transcript)
+        .filter(|path| path.is_file())
 }
 
 fn find_commandcode_transcript(cwd: &Path, roots: &Roots) -> Result<PathBuf> {

@@ -15,24 +15,37 @@ use crate::store::{Location, Store};
 #[cfg(test)]
 mod tests;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum SendState {
-    Ready,
-    Sent,
-    Blocked(String),
+pub(super) use crate::ui::send_button::SendState;
+
+/// A send waiting on the agent picker that Send opened: what to send, and whether to close after.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PickThen {
+    scope: SendScope,
+    close: bool,
 }
 
 impl App {
+    fn default_scope(&self) -> SendScope {
+        if self.is_file_review() { SendScope::Pending } else { SendScope::All }
+    }
+
     pub(super) fn send_feedback(&mut self) -> Result<()> {
-        let scope = if self.is_file_review() { SendScope::Pending } else { SendScope::All };
-        self.send_feedback_scope(scope)
+        self.send_feedback_scope(PickThen { scope: self.default_scope(), close: false }, true)
     }
 
     pub(super) fn resend_all(&mut self) -> Result<()> {
-        self.send_feedback_scope(SendScope::All)
+        self.send_feedback_scope(PickThen { scope: SendScope::All, close: false }, true)
     }
 
-    fn send_feedback_scope(&mut self, scope: SendScope) -> Result<()> {
+    /// Send what the picker that Send opened was waiting for, to the target now chosen.
+    pub(super) fn send_picked(&mut self, then: PickThen) -> Result<()> {
+        self.send_feedback_scope(then, false)
+    }
+
+    /// Send `then.scope`. With `ask`, a review that nothing named a target for opens the
+    /// agent picker first when an agent is within reach, and sends once one is chosen.
+    fn send_feedback_scope(&mut self, then: PickThen, ask: bool) -> Result<()> {
+        let PickThen { scope, close } = then;
         let mut feedback = self.prepare_feedback(scope)?;
         if self.tree.is_some() {
             self.folder_counts = std::mem::take(&mut feedback.counts);
@@ -44,7 +57,17 @@ impl App {
             } else {
                 "nothing to send".into()
             });
+            self.quit |= close;
             return Ok(());
+        }
+        if ask {
+            let folder = crate::ui::agent_picker::real(&self.review_folder());
+            if let Some(picker) = self.reach.picker_for_send(self.delivery.as_ref(), &folder) {
+                self.agent_picker = picker;
+                self.pick_then = Some(then);
+                self.mode = Mode::PickTarget;
+                return Ok(());
+            }
         }
         let target = self.delivery.describe();
         let retry = if scope == SendScope::All && self.is_file_review() { 'R' } else { 'E' };
@@ -82,20 +105,17 @@ impl App {
                     self.quit = true;
                 }
             }
-            Err(DeliveryError::Blocked(msg)) => {
-                let copied = if self.copy_fallback(&feedback.text) { " · copied to clipboard" } else { "" };
-                self.status = Some(format!("{target} is at a dialog{copied} · {retry} retry"));
-                self.send_state = SendState::Blocked(msg);
-            }
-            Err(DeliveryError::Unavailable(msg)) => {
-                let copied = if self.copy_fallback(&feedback.text) { " · copied to clipboard" } else { "" };
-                self.status = Some(format!("no agent to send to ({msg}){copied} · {retry} retry"));
+            Err(error) => {
+                let copied = error.wants_copy() && self.copy_fallback(&feedback.text);
+                self.status = Some(error.status(&target, copied, retry));
                 self.derive_send_state();
+                if let DeliveryError::Blocked(msg) = error {
+                    self.send_state = SendState::Blocked(msg);
+                }
             }
-            Err(DeliveryError::Failed(err)) => {
-                self.status = Some(format!("send failed: {err:#} · {retry} retry"));
-                self.derive_send_state();
-            }
+        }
+        if close {
+            self.quit = !self.has_unsent();
         }
         Ok(())
     }
@@ -204,14 +224,22 @@ impl App {
     pub(super) fn send_label(&self) -> String {
         let target = self.delivery.describe();
         let count = self.send_count();
+        // Nothing named a target, but Send asks which agent first.
+        let asks = self.reach.asks(self.delivery.as_ref());
         if self.is_file_review() {
-            let verb = if self.delivery.is_agent() { "Send" } else { "Copy" };
+            let verb = if self.delivery.is_agent() || asks { "Send" } else { "Copy" };
             let across = if self.tree.is_some() {
                 format!(" across {} files", self.pending_file_count())
             } else {
                 String::new()
             };
-            let to = if self.delivery.is_agent() { format!(" ▸ {target}") } else { String::new() };
+            let to = if self.delivery.is_agent() {
+                format!(" ▸ {target}")
+            } else if asks {
+                " ▸ choose agent".to_owned()
+            } else {
+                String::new()
+            };
             let key = match self.keys.hint(Action::Send) {
                 key if key.is_empty() => String::new(),
                 key => format!(" ({key})"),
@@ -227,6 +255,7 @@ impl App {
         } else {
             match &self.send_state {
                 SendState::Sent => "Copied".to_owned(),
+                SendState::Ready | SendState::Blocked(_) if asks => format!("Send {count} ▸ choose agent"),
                 SendState::Ready | SendState::Blocked(_) => format!("Copy {count} as feedback"),
             }
         }
@@ -248,10 +277,9 @@ impl App {
 
     /// Send, then quit unless something is still unsent. A refused send keeps the app open
     /// so the footer can say why; an empty review or a clipboard copy has nothing to wait for.
+    /// When Send asks which agent first, the quit waits for that choice.
     pub(super) fn send_and_quit(&mut self) -> Result<()> {
-        self.send_feedback()?;
-        self.quit = !self.has_unsent();
-        Ok(())
+        self.send_feedback_scope(PickThen { scope: self.default_scope(), close: true }, true)
     }
 
     pub(super) fn derive_send_state(&mut self) {

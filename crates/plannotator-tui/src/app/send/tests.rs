@@ -243,13 +243,24 @@ fn the_footer_names_s_only_in_a_reply_review_and_fits_at_80_columns() {
         let (root, mut app, _) = if reply { reply_app("s-footer") } else { file_app("s-footer-file") };
         app.roam = true;
         let screen = draw(&mut app, 80, 24);
-        let footer = screen.lines().last().expect("footer");
         let help = if reply {
             "hjkl move · v select · c comment · esc blocks · S send+quit · q quit"
         } else {
             "hjkl move · v select · c comment · esc blocks · q quit"
         };
-        assert!(footer.contains(help), "reply={reply}: {footer:?}");
+        assert!(screen.contains(help), "reply={reply}: {screen}");
         std::fs::remove_dir_all(root).expect("cleanup");
     }
+}
+
+/// A file just opened at 80 columns keeps its annotation count: the mark hint gives way.
+#[test]
+fn at_80_columns_a_file_review_keeps_its_annotation_count() {
+    let (root, mut app, _) = file_app("count-footer");
+    let footer = draw(&mut app, 80, 24).lines().last().expect("footer").to_owned();
+    assert!(footer.contains(" · 0 annotations · "), "{footer:?}");
+    assert!(!footer.contains("mark"), "{footer:?}");
+    let footer = draw(&mut app, 140, 24).lines().last().expect("footer").to_owned();
+    assert!(footer.contains("a/d mark"), "wide enough for the mark hint: {footer:?}");
+    std::fs::remove_dir_all(root).expect("cleanup");
 }

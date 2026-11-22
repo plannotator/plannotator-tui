@@ -9,8 +9,8 @@ use anyhow::{Result, bail};
 use plannotator_tui_schema::Provenance;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::compose::{Compose, ComposeAction};
 use super::{App, Focus, Mode};
+use crate::ui::compose::{Compose, ComposeAction};
 use crate::workspace_paths;
 
 /// Extensions accepted as images, lowercase.
@@ -63,7 +63,7 @@ impl App {
             // The comment box's new-line key; a path has one line.
             KeyCode::Char('j' | 'J') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
             _ => {
-                if self.compose.handle_key(key) == ComposeAction::Cancel {
+                if self.compose.handle_key(key, self.compose_wrap()) == ComposeAction::Cancel {
                     self.mode = Mode::Browse;
                 }
             }

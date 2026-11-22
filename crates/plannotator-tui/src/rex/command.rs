@@ -46,6 +46,11 @@ pub(crate) fn installed_bin() -> PathBuf {
     bin(|k| std::env::var(k).ok(), parent_rex)
 }
 
+/// The `rex` that `env` names, as [`Rex::from_lookup`] finds it, for reads across sessions.
+pub(crate) fn bin_from(env: impl Fn(&str) -> Option<String>) -> PathBuf {
+    bin(env, parent_rex)
+}
+
 /// The parent process's executable, when it is a `rex`.
 fn parent_rex() -> Option<PathBuf> {
     let exe = parent_exe()?;
@@ -90,6 +95,11 @@ impl Rex {
             .or_else(|| non_empty("REX_SESSION"))
             .context("no Rex session: pass --session or run inside Rex (REX_SESSION is not set)")?;
         Ok(Self { bin: bin(&env, parent_rex), session })
+    }
+
+    /// `rex` at `bin`, scoped to `session`: an agent the picker found in another session.
+    pub(crate) fn new(bin: PathBuf, session: String) -> Self {
+        Self { bin, session }
     }
 
     /// Run `rex ARGS -s SESSION`, writing `stdin` to it when given. Returns stdout.

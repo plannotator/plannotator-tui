@@ -3,8 +3,12 @@
 //! The app renders feedback with one function regardless of target; only the target
 //! varies. Clipboard is the standalone default. Inside Herdr the target is an agent's pane
 //! and the transport is `herdr agent prompt`; inside Rex it is an agent's block and the `rex`
-//! CLI (`crate::rex::agent`). Nothing else in the app knows which is in use; it only
-//! distinguishes the three outcomes below.
+//! CLI (`crate::rex::agent`); inside herdr-core it is an agent's terminal and `hc send`
+//! (`crate::hc::agent`). Anywhere else, a delivery command can take the feedback on stdin
+//! (`command`). Nothing else in the app knows which is in use; it only distinguishes the
+//! three outcomes below.
+
+pub(crate) mod command;
 
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -13,9 +17,11 @@ use std::process::{Command, Stdio};
 /// Why a send did not land. The app reacts differently to each.
 #[derive(Debug)]
 pub(crate) enum DeliveryError {
-    /// The agent is at a dialog and its host (Herdr or Rex) refused the prompt; retry later.
+    /// The agent is at a dialog and its host (Herdr, Rex or hc) refused the prompt; retry later.
+    /// Nothing is copied: the notes stay pending for the retry.
     Blocked(String),
-    /// No agent to send to: pane gone, agent not detected yet, herdr or rex binary missing.
+    /// No agent to send to: pane gone, agent not detected yet, herdr, rex or hc binary missing.
+    /// The review copies the feedback instead.
     Unavailable(String),
     /// Anything else, with whatever the transport said.
     Failed(anyhow::Error),
@@ -26,6 +32,26 @@ impl std::fmt::Display for DeliveryError {
         match self {
             Self::Blocked(msg) | Self::Unavailable(msg) => f.write_str(msg),
             Self::Failed(err) => write!(f, "{err:#}"),
+        }
+    }
+}
+
+impl DeliveryError {
+    /// Whether the feedback should go to the clipboard instead: the agent is gone, so the
+    /// person can paste it themselves. An agent at a dialog is still the target, so a blocked
+    /// send copies nothing and waits for the retry; neither does a failed transport.
+    pub(crate) fn wants_copy(&self) -> bool {
+        matches!(self, Self::Unavailable(_))
+    }
+
+    /// What the footer says about a send that did not land: `copied` when the text went to
+    /// the clipboard instead, and `retry` the key that tries again.
+    pub(crate) fn status(&self, target: &str, copied: bool, retry: char) -> String {
+        let copied = if copied { " · copied to clipboard" } else { "" };
+        match self {
+            Self::Blocked(_) => format!("{target} is at a dialog{copied} · {retry} retry"),
+            Self::Unavailable(msg) => format!("no agent to send to ({msg}){copied} · {retry} retry"),
+            Self::Failed(err) => format!("send failed: {err:#} · {retry} retry"),
         }
     }
 }
@@ -41,6 +67,11 @@ pub(crate) trait Delivery {
     fn describe(&self) -> String;
     /// True when the target is an agent that will act on the feedback.
     fn is_agent(&self) -> bool {
+        false
+    }
+    /// True for the clipboard a review falls back to when nothing names a target. Send then
+    /// offers the agents it can reach before copying (`ui::agent_picker`).
+    fn is_fallback(&self) -> bool {
         false
     }
     /// The receiving agent's host label (`claude`, `codex`, ...), when the target is one.
@@ -74,12 +105,37 @@ impl Delivery for Clipboard {
         "clipboard".to_owned()
     }
 
+    fn is_fallback(&self) -> bool {
+        true
+    }
+
     fn deliver(&self, feedback: &str) -> Result<(), DeliveryError> {
+        // Tests never write to a terminal's clipboard; they read what would have gone there.
+        #[cfg(test)]
+        {
+            test_clipboard::COPIED.with_borrow_mut(|copied| copied.push(feedback.to_owned()));
+            return Ok(());
+        }
+        #[cfg_attr(test, allow(unreachable_code))]
         let mut out = std::io::stdout().lock();
         // Callers write between frames, so the sequence never lands inside one.
         out.write_all(osc52_sequence(feedback).as_bytes())?;
         out.flush()?;
         Ok(())
+    }
+}
+
+/// What [`Clipboard`] would have copied on this test thread.
+#[cfg(test)]
+pub(crate) mod test_clipboard {
+    thread_local! {
+        pub(crate) static COPIED: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// The copies so far on this thread.
+    #[cfg_attr(not(unix), allow(dead_code, reason = "the tests that read it are Unix-only"))]
+    pub(crate) fn copied() -> Vec<String> {
+        COPIED.with_borrow(Clone::clone)
     }
 }
 

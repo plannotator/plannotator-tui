@@ -3,26 +3,36 @@
 mod app;
 mod archive;
 mod base64;
+mod cjk_emphasis;
 mod cli;
 mod config;
+mod decorate;
 mod delivery;
 mod doc;
+mod doc_search;
 mod editor;
 mod export;
 mod file_search;
 mod gate;
 #[cfg(unix)]
 mod hangup;
+mod hc;
 mod herdr;
+mod highlight;
 mod keys;
 mod last;
 mod layout;
+mod notes_rail;
+mod pi;
+#[cfg(unix)]
+mod review;
 mod rex;
 mod srcmap;
 mod store;
 mod terminal;
 mod theme;
 mod tree;
+mod ui;
 mod workspace_paths;
 mod wrap;
 
@@ -38,6 +48,8 @@ fn main() -> std::process::ExitCode {
             // A strict gate's own failure must not read as the reviewer's rejection.
             if err.is::<gate::GateError>() {
                 std::process::ExitCode::from(gate::GATE_ERROR_EXIT)
+            } else if err.is::<pi::cli::NoPi>() {
+                std::process::ExitCode::from(u8::try_from(delivery::command::EXIT_UNAVAILABLE).unwrap_or(1))
             } else {
                 std::process::ExitCode::FAILURE
             }

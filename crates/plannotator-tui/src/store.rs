@@ -241,6 +241,15 @@ impl Store {
         self.save()
     }
 
+    /// Credit the newest annotation to `author` (an id such as `pi`) shown as `name`.
+    pub(crate) fn credit_last(&mut self, author: &str, name: &str) -> Result<()> {
+        if let Some(annotation) = self.annotations.last_mut() {
+            annotation.author = Some(author.to_owned());
+            annotation.author_name = Some(name.to_owned());
+        }
+        self.save()
+    }
+
     /// Remove every annotation resolved into `block`. Returns how many were removed.
     pub(crate) fn remove_in_block(&mut self, doc: &Document, block: usize) -> Result<usize> {
         let ids: Vec<String> = self

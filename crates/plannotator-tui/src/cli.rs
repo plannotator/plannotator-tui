@@ -19,9 +19,11 @@ use ratatui::crossterm::execute;
 
 use crate::app::App;
 use crate::config::Config;
+use crate::delivery::command::DeliverCommand;
 use crate::delivery::{Caller, Clipboard, Delivery, Discard, HerdrAgent};
 use crate::doc::Document;
 use crate::gate::{self, Decision, GateError, ReviewArgs};
+use crate::hc::agent::HcAgent;
 use crate::herdr::context::HerdrEnv;
 use crate::layout::DocLayout;
 use crate::rex::agent::RexAgent;
@@ -34,27 +36,44 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui --annotate <file.md> <quote> <text> [comment|looks_good|delete] [--occurrence N]
   plannotator-tui --annotate-block <file.md> <block> <text>
   plannotator-tui --snapshot <file.md> [cols rows scroll] [select-quote] [menu]
+  plannotator-tui review [--staged | --base REF | --commit SHA | PR] [DIR]
   plannotator-tui config
   plannotator-tui --version
   plannotator-tui herdr open [file.md | folder] [--placement overlay|split|popup] [--deliver-to <pane>]
                              [--gate] [--result-file <path>]
   plannotator-tui herdr last [--placement P] [--deliver-to <pane>] [--newest]
   plannotator-tui herdr terminal [--lines N] [--placement P] [--deliver-to <pane>] [--print]
+  plannotator-tui herdr review [--staged | --base REF | --commit SHA | PR] [--placement P] [--deliver-to <pane>]
   plannotator-tui herdr pane
   plannotator-tui rex open [file.md | folder] [--block <id>] [--session <id>] [--paste]
-                           [--placement split|popup] [--gate] [--result-file <path>]
+                           [--placement split|popup|tab] [--gate] [--result-file <path>]
   plannotator-tui rex last [--block <id>] [--session <id>] [--newest] [--paste] [--placement P]
   plannotator-tui rex terminal [--block <id>] [--session <id>] [--lines N] [--paste] [--placement P] [--print]
   plannotator-tui rex find [--block <id>] [--session <id>] [--lines N] [--paste] [--placement P]
+  plannotator-tui rex review [--staged | --base REF | --commit SHA | PR] [--block <id>] [--session <id>] [--paste]
+                             [--placement P]
   plannotator-tui rex install [--dry-run | --print]
   plannotator-tui rex pane (open <path> [--gate [--result-file <path>]] | last <last args>
-                            | terminal --block <id> [--lines N])
+                            | terminal --block <id> [--lines N] | review <scope> <repo>)
+  plannotator-tui pi list [--json]
+  plannotator-tui pi send --session <id or name> < feedback.md
+  plannotator-tui pi install [--dry-run | --print]
+  plannotator-tui hc open [file.md | folder] [--terminal <t>] [--placement overlay|split|popup]
+                          [--gate] [--result-file <path>]
+  plannotator-tui hc last [--terminal <t>] [--placement P] [--newest] [--session <transcript>]
+  plannotator-tui hc review [--staged | --base REF | --commit SHA | PR] [--terminal <t>] [--placement P]
+  plannotator-tui hc pane (open <path> [--gate [--result-file <path>]] | last <last args> | review <scope> <repo>)
   plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes|opencode|cmd|agy] [--pid N] [--session <transcript>]
                        [--session-id <id>] [--pi-leaf-id <id>] [--stdin] [--print] [--pick N] [--newest]";
 
-/// Width the document gets when nothing else is known: gutter + rail + gap subtracted.
-fn doc_width(cols: u16) -> usize {
-    usize::from(cols.saturating_sub(2 + 1 + 36).max(20))
+/// Width the document gets when nothing else is known: the gutter subtracted, and the rail
+/// and its gap when `[ui] notes_rail` always shows it, then held to the reading column
+/// (`[ui] doc_width`; zero for none), so the first frame finds the text already wrapped to it.
+fn doc_width(cols: u16, ui: &crate::config::UiConfig) -> usize {
+    let rail = if ui.notes_rail == crate::notes_rail::RailStart::Shown { 1 + 36 } else { 0 };
+    let room = cols.saturating_sub(2 + rail).max(20);
+    let cap = ui.doc_width;
+    usize::from(if cap > 0 { room.min(cap.max(20)) } else { room })
 }
 
 fn open_file(path: &PathBuf) -> Result<DocumentSource> {
@@ -63,13 +82,27 @@ fn open_file(path: &PathBuf) -> Result<DocumentSource> {
 }
 
 /// A file opens on its own; a folder opens in folder mode on its first markdown file.
-/// Interactive runs send to the Rex block or Herdr agent pane named by the environment, else the
-/// clipboard; headless runs send nowhere.
+/// Interactive runs send to the Rex block, hc terminal or Herdr agent pane named by the
+/// environment, else to the delivery command, else the clipboard; headless runs send nowhere.
 pub(crate) fn delivery(interactive: bool) -> Box<dyn Delivery> {
+    review_delivery(interactive, None)
+}
+
+/// [`delivery`] for a review of `path`, which a delivery command is told about. A launcher
+/// names one agent for one review, so its target comes before a command set for every review.
+fn review_delivery(interactive: bool, path: Option<&Path>) -> Box<dyn Delivery> {
     if !interactive {
         return Box::new(Discard);
     }
-    agent_pane().unwrap_or_else(|| Box::new(Clipboard))
+    agent_pane().or_else(|| deliver_command(path)).unwrap_or_else(|| Box::new(Clipboard))
+}
+
+/// `PLANNOTATOR_TUI_DELIVER_CMD`, else `[deliver] command`. A config that does not parse
+/// is reported by `plannotator-tui config`, as for the theme.
+fn deliver_command(path: Option<&Path>) -> Option<Box<dyn Delivery>> {
+    let configured = Config::load().unwrap_or_default().deliver.command;
+    let command = DeliverCommand::from_lookup(|k| std::env::var(k).ok(), configured.as_deref(), path)?;
+    Some(Box::new(command))
 }
 
 /// A gated review sends to the same agent pane; without one its decision goes to the caller.
@@ -77,9 +110,12 @@ fn gate_delivery() -> Box<dyn Delivery> {
     agent_pane().unwrap_or_else(|| Box::new(Caller))
 }
 
-/// The Rex block or Herdr agent pane the environment names, if any.
+/// The Rex block, hc terminal or Herdr agent pane the environment names, if any.
 fn agent_pane() -> Option<Box<dyn Delivery>> {
     if let Some(agent) = RexAgent::from_lookup(|k| std::env::var(k).ok()) {
+        return Some(Box::new(agent));
+    }
+    if let Some(agent) = HcAgent::from_lookup(|k| std::env::var(k).ok()) {
         return Some(Box::new(agent));
     }
     let env = HerdrEnv::from_env();
@@ -93,7 +129,7 @@ fn agent_pane() -> Option<Box<dyn Delivery>> {
 }
 
 fn open_app(path: &PathBuf, width: usize, interactive: bool) -> Result<App> {
-    open_review(path, width, delivery(interactive))
+    open_review(path, width, review_delivery(interactive, Some(path)))
 }
 
 fn open_review(path: &PathBuf, width: usize, delivery: Box<dyn Delivery>) -> Result<App> {
@@ -149,7 +185,8 @@ fn wants_decision(args: &[String]) -> bool {
     match args.first() {
         Some(first) if decision_flag(first) => true,
         Some(first)
-            if first.starts_with('-') || matches!(first.as_str(), "config" | "herdr" | "rex" | "last") =>
+            if first.starts_with('-')
+                || matches!(first.as_str(), "config" | "herdr" | "rex" | "hc" | "pi" | "last" | "review") =>
         {
             false
         }
@@ -170,7 +207,7 @@ fn tool(args: &[String]) -> Result<()> {
             Ok(())
         }
         Some("--blocks") => {
-            let app = open_app(&path(1)?, 100, false)?;
+            let mut app = open_app(&path(1)?, 100, false)?;
             for line in app.describe_blocks() {
                 println!("{line}");
             }
@@ -205,10 +242,27 @@ fn tool(args: &[String]) -> Result<()> {
         Some("config") => show_config(),
         Some("herdr") => herdr_command(args.get(1..).unwrap_or_default()),
         Some("rex") => crate::rex::cli::run(args.get(1..).unwrap_or_default()),
+        Some("hc") => crate::hc::cli::run(args.get(1..).unwrap_or_default()),
+        Some("pi") => crate::pi::cli::run(args.get(1..).unwrap_or_default()),
         Some("last") => last_command(args.get(1..).unwrap_or_default()),
+        Some("review") => code_review(args.get(1..).unwrap_or_default()),
         Some(flag) if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{USAGE}"),
         Some(_) => interactive(&path(0)?),
         None => anyhow::bail!(USAGE),
+    }
+}
+
+/// `plannotator-tui review [--staged | --base REF | --commit SHA | PR] [DIR]`: a git diff, with notes
+/// for the agent (`src/review/`).
+fn code_review(args: &[String]) -> Result<()> {
+    #[cfg(unix)]
+    {
+        crate::review::cli::run(args)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = args;
+        anyhow::bail!("code review is not available on Windows yet")
     }
 }
 
@@ -219,6 +273,11 @@ fn show_config() -> Result<()> {
     let mut config = Config::load_from(&path)?;
     // `PLANNOTATOR_TUI_THEME` overrides the file, so the file's value is not the effective one.
     config.ui.theme = crate::theme::effective_setting(|key| std::env::var(key).ok(), config.ui.theme)?;
+    // So does `PLANNOTATOR_TUI_DELIVER_CMD`.
+    let env = |k: &str| std::env::var(k).ok();
+    if let Some(command) = DeliverCommand::from_lookup(env, config.deliver.command.as_deref(), None) {
+        config.deliver.command = Some(command.line().to_owned());
+    }
     let state = if path.is_file() { "" } else { " (not present; defaults)" };
     println!("# {}{state}", path.display());
     print!("{}", config.to_toml()?);
@@ -286,6 +345,9 @@ fn herdr_launch(args: &[String]) -> Result<()> {
     }
     if sub == Some("terminal") {
         return herdr_terminal(args.get(1..).unwrap_or_default());
+    }
+    if sub == Some("review") {
+        return herdr_review(args.get(1..).unwrap_or_default());
     }
     if !matches!(sub, Some("open" | "last")) {
         anyhow::bail!(USAGE);
@@ -379,6 +441,32 @@ fn herdr_terminal(args: &[String]) -> Result<()> {
     run(&env, &launch)
 }
 
+/// `plannotator-tui herdr review …`: a code review of the focused pane's repository.
+fn herdr_review(args: &[String]) -> Result<()> {
+    #[cfg(unix)]
+    {
+        crate::review::herdr::launch(args)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = args;
+        anyhow::bail!("code review is not available on Windows yet")
+    }
+}
+
+/// The pane side of a code-review launcher (`herdr review`, `rex review`, `hc review`).
+pub(crate) fn review_pane(scope: &str, repo: Option<&Path>) -> Result<()> {
+    #[cfg(unix)]
+    {
+        crate::review::scope::pane(scope, repo)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (scope, repo);
+        anyhow::bail!("code review is not available on Windows yet")
+    }
+}
+
 /// The pane entrypoint: Herdr runs this in the opened pane; the environment says what to show.
 fn herdr_pane() -> Result<()> {
     let env = HerdrEnv::from_env();
@@ -390,10 +478,12 @@ fn herdr_pane() -> Result<()> {
             pid: env.message_pid,
             session: env.session.clone(),
             session_id: env.session_id.clone(),
-            pick: 25,
+            pick: picker_count(),
             newest: env.newest,
             ..crate::last::LastOptions::default()
         })
+    } else if let Some(scope) = &env.review {
+        review_pane(scope, env.repo.as_deref())
     } else {
         let path = env.file.clone().unwrap_or(std::env::current_dir().context("current directory")?);
         if env.gate { gated_pane(&path, env.result_file.as_deref()) } else { interactive(&path) }
@@ -420,11 +510,20 @@ pub(crate) fn wait_on_error(err: &anyhow::Error) {
     let _ = std::io::stdin().read_line(&mut line);
 }
 
+/// `[last] pick`. A config that fails to parse gives the default rather than failing the lookup.
+fn picker_count() -> usize {
+    Config::load().unwrap_or_default().last.pick
+}
+
 /// `plannotator-tui last [--host H] [--pid N] [--session PATH] [--stdin] [--print] [--pick N]
 /// [--newest]`.
 pub(crate) fn last_command(args: &[String]) -> Result<()> {
-    use crate::last::LastOptions;
-    let mut options = LastOptions { pick: 25, ..LastOptions::default() };
+    crate::last::run(&last_options(args, picker_count())?)
+}
+
+/// `last`'s arguments, offering `pick` messages unless `--pick` says otherwise.
+fn last_options(args: &[String], pick: usize) -> Result<crate::last::LastOptions> {
+    let mut options = crate::last::LastOptions { pick, ..crate::last::LastOptions::default() };
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
@@ -448,11 +547,11 @@ pub(crate) fn last_command(args: &[String]) -> Result<()> {
             other => anyhow::bail!("unknown argument {other}\n{USAGE}"),
         }
     }
-    crate::last::run(&options)
+    Ok(options)
 }
 
-/// A gated review in a Herdr or Rex pane: the agent hears the decision through delivery, and the
-/// result file, when asked for, records it. The pane has no caller reading its stdout.
+/// A gated review in a Herdr, Rex or hc pane: the agent hears the decision through delivery,
+/// and the result file, when asked for, records it. The pane has no caller reading its stdout.
 pub(crate) fn gated_pane(path: &PathBuf, result_file: Option<&Path>) -> Result<()> {
     if let Some(file) = result_file {
         gate::check_result_file(file)?;
@@ -480,6 +579,31 @@ pub(crate) fn run_ui(build: impl FnOnce(usize) -> Result<App>) -> Result<()> {
 
 /// `run_ui`, returning how a gated review ended; `None` for an ordinary one.
 fn run_review(build: impl FnOnce(usize) -> Result<App>) -> Result<Option<Decision>> {
+    with_terminal(|terminal, session| {
+        let width = doc_width(terminal.size().map_or(120, |s| s.width), &session.config.ui);
+        let mut app = build(width)?;
+        app.shift_enter = session.shift_enter;
+        app.keys = session.config.keys;
+        app.ui = session.config.ui;
+        app.start_notes_rail();
+        app.editor = crate::editor::from_env(|key| std::env::var(key).ok());
+        event_loop(terminal, app)
+    })
+}
+
+/// What a screen learns while the terminal is being taken over.
+pub(crate) struct Session {
+    pub(crate) config: Config,
+    /// Whether the terminal reports Shift+Enter distinctly (kitty keyboard protocol).
+    pub(crate) shift_enter: bool,
+}
+
+/// Own the terminal for `run`: palette, alternate screen, mouse, paste and keyboard modes
+/// on the way in, all of it undone on the way out, whatever `run` returns. Document and
+/// code reviews both start here.
+pub(crate) fn with_terminal<T>(
+    run: impl FnOnce(&mut ratatui::DefaultTerminal, Session) -> Result<T>,
+) -> Result<T> {
     // Settle the palette before the screen is ours: the background-colour query talks to
     // the terminal directly, and it must not race the alternate screen or the event loop.
     // A config that fails to parse never kept the plain TUI from starting; it still does
@@ -490,6 +614,7 @@ fn run_review(build: impl FnOnce(usize) -> Result<App>) -> Result<Option<Decisio
         &config.colors,
     );
     let mut terminal = ratatui::init();
+    crate::layout::keep_hook_off_layout_threads();
     #[cfg(unix)]
     crate::hangup::watch();
     execute!(stdout(), EnableMouseCapture)?;
@@ -498,14 +623,7 @@ fn run_review(build: impl FnOnce(usize) -> Result<App>) -> Result<Option<Decisio
     // gates the compose box's hint so it never advertises a key that cannot arrive.
     let shift_enter = ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
     claim_input(shift_enter);
-    let width = doc_width(terminal.size().map_or(120, |s| s.width));
-    let result = build(width).and_then(|mut app| {
-        app.shift_enter = shift_enter;
-        app.keys = config.keys;
-        app.ui = config.ui;
-        app.editor = crate::editor::from_env(|key| std::env::var(key).ok());
-        event_loop(&mut terminal, app)
-    });
+    let result = run(&mut terminal, Session { config, shift_enter });
     release_input(shift_enter);
     ratatui::restore();
     result
@@ -559,6 +677,7 @@ fn run_editor(
 
 fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<Option<Decision>> {
     app.clipboard = true;
+    app.start_pi_link();
     let mut dirty = true;
     while !app.quit {
         if let Some(request) = app.take_editor_request() {
@@ -566,15 +685,14 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<O
             app.editor_returned(&request, outcome);
             dirty = true;
         }
-        dirty |= app.poll_file_search();
-        dirty |= app.poll_disk();
+        dirty |= app.poll_background();
         if dirty {
             let started = Instant::now();
             terminal.draw(|frame| app.draw(frame))?;
             app.record_frame(started.elapsed().as_secs_f64() * 1000.0);
             dirty = false;
         }
-        let wait_ms = if app.file_search_scanning() { 25 } else { 250 };
+        let wait_ms = if app.background_pending() { 25 } else { 250 };
         if event::poll(Duration::from_millis(wait_ms))? {
             app.handle_event(&event::read()?)?;
             dirty = true;
@@ -588,13 +706,20 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<O
     Ok(app.take_decision())
 }
 
-/// Headless timing of the expensive paths: parse, per-block render + align, and reflow.
+/// Headless timing of the expensive paths: parse, per-block render + align, reflow, and search.
 fn bench(path: &PathBuf) -> Result<()> {
     let source = open_file(path)?;
     let bytes = source.content.len();
     let t = Instant::now();
     let doc = Document::parse(source.content);
     let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+    let t = Instant::now();
+    let mut lazy = DocLayout::start(&doc, 100);
+    let start_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let (first_blocks, first_rows) = (lazy.blocks.len(), lazy.total_rows);
+    lazy.finish();
+    let finish_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     let t = Instant::now();
     let mut layout = DocLayout::build(&doc, 100);
@@ -613,15 +738,32 @@ fn bench(path: &PathBuf) -> Result<()> {
     let hits = (0..layout.total_rows).step_by(7).filter(|&row| layout.block_at_row(row).is_some()).count();
     let lookup_us = t.elapsed().as_secs_f64() * 1e6 / (layout.total_rows / 7).max(1) as f64;
 
+    let t = Instant::now();
+    let index = crate::doc_search::Index::of(&layout);
+    let index_ms = t.elapsed().as_secs_f64() * 1000.0;
+    // What each keystroke of a typed query costs: one search of the whole text.
+    let searches: Vec<String> = ["e", "th", "the", "plugin", "Plugin", "no such text anywhere"]
+        .into_iter()
+        .map(|query| {
+            let t = Instant::now();
+            let found = index.find(query).len();
+            format!("{query:?} {found}→{:.1}ms", t.elapsed().as_secs_f64() * 1000.0)
+        })
+        .collect();
+
     let cells: usize = layout.blocks.iter().flat_map(|b| b.rows.iter()).map(|r| r.cells.len()).sum();
     let mapped: usize =
         layout.blocks.iter().flat_map(|b| b.rows.iter()).flat_map(|r| r.cells.iter()).flatten().count();
 
     println!("{}: {bytes} bytes, {} blocks", path.display(), doc.blocks.len());
     println!("parse+split          {parse_ms:8.1} ms");
+    println!("first screens        {start_ms:8.1} ms  ({first_blocks} blocks, {first_rows} rows)");
+    println!("  rest in background {finish_ms:8.1} ms  (until every block is laid out)");
     println!("render+align+wrap    {build_ms:8.1} ms  ({} rows)", layout.total_rows);
     println!("reflow               {}", reflow.join("  "));
     println!("row lookup           {lookup_us:8.3} µs avg ({hits} hits)");
+    println!("search index         {index_ms:8.1} ms");
+    println!("search               {}", searches.join("  "));
     println!("cells mapped         {mapped}/{cells} ({:.1}%)", mapped as f64 * 100.0 / cells.max(1) as f64);
     Ok(())
 }
@@ -639,7 +781,7 @@ fn snapshot(
     use ratatui::backend::TestBackend;
     use ratatui::style::Modifier;
     let mut terminal = ratatui::Terminal::new(TestBackend::new(cols, rows))?;
-    let mut app = open_app(path, doc_width(cols), false)?;
+    let mut app = open_app(path, doc_width(cols, &crate::config::UiConfig::default()), false)?;
     terminal.draw(|frame| app.draw(frame))?;
     app.scroll_for_snapshot(scroll);
     if let Some(quote) = select {
@@ -680,4 +822,31 @@ fn snapshot(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "tests assert by panicking")]
+mod tests {
+    use super::{doc_width, last_options};
+    use crate::config::UiConfig;
+    use crate::notes_rail::RailStart;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|&arg| arg.to_owned()).collect()
+    }
+
+    #[test]
+    fn last_offers_the_configured_count_and_pick_overrides_it() {
+        assert_eq!(last_options(&args(&["--newest"]), 60).expect("parses").pick, 60);
+        assert_eq!(last_options(&args(&["--pick", "5"]), 60).expect("parses").pick, 5);
+    }
+
+    #[test]
+    fn the_first_frames_width_leaves_out_a_rail_unless_it_always_shows() {
+        let fill = UiConfig { doc_width: 0, ..UiConfig::default() };
+        assert_eq!(doc_width(120, &UiConfig { notes_rail: RailStart::Shown, ..fill }), 120 - 2 - 1 - 36);
+        assert_eq!(doc_width(120, &UiConfig { notes_rail: RailStart::Hidden, ..fill }), 118);
+        assert_eq!(doc_width(120, &fill), 118, "when-notes: the rail comes with the first note");
+        assert_eq!(doc_width(120, &UiConfig::default()), 80);
+    }
 }

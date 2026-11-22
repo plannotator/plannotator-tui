@@ -1,5 +1,6 @@
-//! Where the review opens: a split beside the agent's block, or a floating layer over its
-//! window. Both are built here as API arguments; only `open` calls Rex.
+//! Where the review opens: a split beside the agent's block, a floating layer over its window,
+//! or a tab (a Rex window) of its own. Each is built here as API arguments; only `open` calls
+//! Rex.
 
 use std::path::Path;
 
@@ -12,13 +13,15 @@ use crate::config::RexPlacement;
 /// The popup's `[x, y, w, h]`, as fractions of the window: the size Herdr's popup defaults to.
 const POPUP_BOUNDS: [f64; 4] = [0.05, 0.075, 0.9, 0.85];
 
-/// Open a block running `argv` in `cwd` beside or over `block`, and focus it.
+/// Open a block running `argv` in `cwd` beside or over `block`, or in a tab called `label`,
+/// and focus it.
 pub(crate) fn open(
     rex: &Rex,
     block: &str,
     placement: RexPlacement,
     cwd: Option<&Path>,
     argv: &[String],
+    label: &str,
 ) -> Result<()> {
     let review = review_block(cwd, argv);
     match placement {
@@ -29,6 +32,7 @@ pub(crate) fn open(
             let window = window.with_context(|| format!("block {block} is not in a window"))?;
             rex.api("session.new_layer", &layer(window, &review))?
         }
+        RexPlacement::Tab => rex.api("session.new_window", &tab(label, &review))?,
     };
     Ok(())
 }
@@ -55,6 +59,35 @@ fn layer(window: &str, review: &Value) -> Value {
     json!({ "window_id": window, "bounds": POPUP_BOUNDS, "focus": true, "layout": review })
 }
 
+/// `session.new_window` arguments: a tab in the agent's session holding only `review`, shown
+/// at once. Rex closes the tab when the review exits; the review then shows the agent again.
+fn tab(label: &str, review: &Value) -> Value {
+    json!({ "window_label": label, "focus": true, "layout": review })
+}
+
+/// After a review in a tab of its own ends, show `block`, the pane it was opened from, and so
+/// its tab. Only while the review's own tab (`own` is the review's block) is the one showing:
+/// a review that ends while you are elsewhere moves nobody.
+pub(crate) fn show_again(rex: &Rex, own: &str, block: &str) {
+    let view = rex.api("session.view", &json!({}));
+    if view.is_ok_and(|view| showing(&view, own)) {
+        let _ = rex.api("session.focus_block", &json!({ "block_id": block }));
+    }
+}
+
+/// Whether `block` is in the session's active window, from `session.view`.
+fn showing(view: &Value, block: &str) -> bool {
+    let active = view.get("active_window_id").and_then(Value::as_str);
+    let windows = view.get("windows").and_then(Value::as_array).into_iter().flatten();
+    let blocks = windows
+        .filter(|w| active.is_some() && w.get("window_id").and_then(Value::as_str) == active)
+        .filter_map(|w| w.get("layers").and_then(Value::as_array))
+        .flatten()
+        .filter_map(|layer| layer.get("blocks").and_then(Value::as_array))
+        .flatten();
+    blocks.into_iter().any(|b| b.get("block_id").and_then(Value::as_str) == Some(block))
+}
+
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, reason = "tests assert by panicking")]
 mod tests {
@@ -79,5 +112,33 @@ mod tests {
         let fits = matches!(bounds[..], [x, y, w, h] if x >= 0.0 && y >= 0.0 && x + w <= 1.0 && y + h <= 1.0);
         assert!(fits, "four bounds inside the window: {bounds:?}");
         assert_eq!(layer["layout"]["block"]["label"], "Annotate");
+    }
+
+    #[test]
+    fn a_tab_holds_only_the_review_is_named_for_it_and_is_shown_at_once() {
+        let tab = tab("Annotate · claude", &review_block(Some(Path::new("/tmp")), &["/bin/pt".to_owned()]));
+        assert_eq!(tab["window_label"], "Annotate · claude");
+        assert_eq!(tab["focus"], true);
+        assert_eq!(tab["layout"]["block"]["options"]["command"], json!(["/bin/pt"]));
+        assert_eq!(tab["layout"]["block"]["options"]["cwd"], "/tmp");
+        assert_eq!(tab["layout"].get("split"), None, "the review is the tab's only block");
+    }
+
+    /// `session.view` as Rex 2063 returns it, cut to what `showing` reads.
+    fn view(active: &str) -> Value {
+        json!({
+            "active_window_id": active,
+            "windows": [
+                { "window_id": "window:agent", "layers": [{ "kind": "tiled", "blocks": [{ "block_id": "block:claude" }] }] },
+                { "window_id": "window:review", "layers": [{ "kind": "tiled", "blocks": [{ "block_id": "block:review" }] }] }
+            ]
+        })
+    }
+
+    #[test]
+    fn the_agent_is_shown_again_only_while_the_reviews_tab_is_showing() {
+        assert!(showing(&view("window:review"), "block:review"));
+        assert!(!showing(&view("window:agent"), "block:review"), "you moved to another tab: stay there");
+        assert!(!showing(&json!({}), "block:review"));
     }
 }

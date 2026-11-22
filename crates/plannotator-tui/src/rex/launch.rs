@@ -1,6 +1,7 @@
-//! `plannotator-tui rex last|open|terminal|find`: find the agent in a Rex block and open
-//! plannotator-tui beside it (a split) or over it (a popup), wired to send feedback back to
-//! the block. Either is an ordinary pane, so it keeps Rex's frame and theme. `foreground`,
+//! `plannotator-tui rex last|open|terminal|find|review`: find the agent in a Rex block and open
+//! plannotator-tui in a tab of its own, beside the block (a split) or over it (a popup), wired
+//! to send feedback back to the block. Each is an ordinary pane, so it keeps Rex's frame and
+//! theme. `foreground`,
 //! `reported_host` and `argv` are pure; only `run` touches Rex.
 
 use std::path::{Path, PathBuf};
@@ -27,6 +28,10 @@ pub(crate) enum Review {
     /// The newest Markdown file named in the block's last `lines` lines of output. `run`
     /// turns it into an `Open`.
     Find { lines: u32 },
+    /// A code review of the repository at `repo`, already checked to have changes in `scope`
+    /// (as [`crate::review::scope`] writes it).
+    #[cfg_attr(not(unix), allow(dead_code, reason = "code review is unix only"))]
+    Code { scope: String, repo: PathBuf },
 }
 
 /// `rex open --gate`: Approve beside Send, and where the decision is published.
@@ -143,6 +148,9 @@ pub(crate) fn argv(
             args.push(lines.to_string());
         }
         Review::Find { .. } => anyhow::bail!("a find review is resolved to an open before the split"),
+        Review::Code { scope, repo } => {
+            args.extend(["review".to_owned(), scope.clone(), repo.display().to_string()]);
+        }
     }
     Ok(args)
 }
@@ -157,8 +165,18 @@ fn newest_markdown(rex: &Rex, block: &str, fg: &Foreground, lines: u32) -> Resul
         .with_context(|| format!("no Markdown file named in the last {lines} lines of block {block}"))
 }
 
-/// Open the review beside or over `block`. The agent is the one its status report names, else
+/// The program in the foreground of `block`. The agent is the one its status report names, else
 /// the one its process names; a status Rex cannot give leaves the process to decide.
+pub(crate) fn agent(rex: &Rex, block: &str) -> Result<Foreground> {
+    let process = rex.terminal_method(block, "process")?;
+    let mut fg = foreground(&process).with_context(|| format!("block {block} has no foreground process"))?;
+    if let Ok(status) = rex.terminal_method(block, "program_status") {
+        fg.host = reported_host(&status, fg.pid).or(fg.host);
+    }
+    Ok(fg)
+}
+
+/// Open the review beside or over `block`.
 pub(crate) fn run(
     rex: &Rex,
     block: &str,
@@ -166,22 +184,63 @@ pub(crate) fn run(
     handoff: Handoff,
     placement: RexPlacement,
 ) -> Result<()> {
-    let process = rex.terminal_method(block, "process")?;
-    let mut fg = foreground(&process).with_context(|| format!("block {block} has no foreground process"))?;
-    if let Ok(status) = rex.terminal_method(block, "program_status") {
-        fg.host = reported_host(&status, fg.pid).or(fg.host);
-    }
-    let exe = std::env::current_exe().context("finding the plannotator-tui binary")?;
+    let fg = agent(rex, block)?;
     let review = match review {
         Review::Find { lines } => Review::Open(Some(newest_markdown(rex, block, &fg, *lines)?), None),
         other => other.clone(),
     };
-    let pi_session = match (&review, fg.host) {
+    open(rex, block, &fg, &review, handoff, placement)
+}
+
+/// Open `review`, resolved, beside or over `block`, where `fg` runs. A code review starts in the
+/// repository's root; anything else in the block's folder.
+pub(crate) fn open(
+    rex: &Rex,
+    block: &str,
+    fg: &Foreground,
+    review: &Review,
+    handoff: Handoff,
+    placement: RexPlacement,
+) -> Result<()> {
+    let exe = std::env::current_exe().context("finding the plannotator-tui binary")?;
+    let pi_session = match (review, fg.host) {
         (Review::Last { .. }, Some("pi")) => Some(super::pi::current_session(fg.pid)?),
         _ => None,
     };
-    let args = argv(&exe, block, &fg, &review, handoff, pi_session.as_ref())?;
-    super::place::open(rex, block, placement, fg.cwd.as_deref(), &args)
+    let mut args = argv(&exe, block, fg, review, handoff, pi_session.as_ref())?;
+    if placement == RexPlacement::Tab {
+        returning_to(&mut args, block);
+    }
+    let cwd = match review {
+        Review::Code { repo, .. } => Some(repo.as_path()),
+        _ => fg.cwd.as_deref(),
+    };
+    super::place::open(rex, block, placement, cwd, &args, &tab_label(fg, review))
+}
+
+/// The block a review in a tab of its own shows again when it ends: when a tab closes, Rex
+/// shows a neighbouring tab, which need not be the agent's.
+pub(crate) const RETURN_VAR: &str = "PLANNOTATOR_TUI_REX_RETURN";
+
+/// Have the pane `args` runs (`/usr/bin/env …`) show `block` again when the review ends.
+fn returning_to(args: &mut Vec<String>, block: &str) {
+    args.insert(1, format!("{RETURN_VAR}={block}"));
+}
+
+/// A tab's label: `Annotate · ` and the file or folder an `open` reviews, else the agent,
+/// else the block's folder.
+fn tab_label(fg: &Foreground, review: &Review) -> String {
+    let name = |path: &Path| path.file_name().map(|n| n.to_string_lossy().into_owned());
+    let what = match review {
+        Review::Open(path, _) => path.as_deref().or(fg.cwd.as_deref()).and_then(name),
+        Review::Code { repo, .. } => fg.host.map(str::to_owned).or_else(|| name(repo)),
+        _ => fg.host.map(str::to_owned).or_else(|| fg.cwd.as_deref().and_then(name)),
+    };
+    // Rex takes a window label of up to 128 characters.
+    what.map_or_else(
+        || "Annotate".to_owned(),
+        |what| format!("Annotate · {what}").chars().take(128).collect(),
+    )
 }
 
 #[cfg(test)]
@@ -385,6 +444,34 @@ mod tests {
     }
 
     #[test]
+    fn a_code_review_names_its_scope_and_repository_and_sends_to_the_blocks_agent() {
+        let review = Review::Code { scope: "base:origin/main".to_owned(), repo: PathBuf::from("/p/repo") };
+        let args = argv(Path::new("/bin/pt"), "block:b", &parse(CLAUDE), &review, Handoff::Send, None)
+            .expect("argv");
+        assert_eq!(
+            args,
+            [
+                "/usr/bin/env",
+                "PLANNOTATOR_TUI_REX_BLOCK=block:b",
+                "PLANNOTATOR_TUI_DELIVER_AGENT=claude",
+                "PLANNOTATOR_TUI_REX_PID=60223",
+                "/bin/pt",
+                "rex",
+                "pane",
+                "review",
+                "base:origin/main",
+                "/p/repo"
+            ]
+        );
+        let shell =
+            argv(Path::new("/bin/pt"), "block:b", &parse(SHELL), &review, Handoff::Send, None).expect("argv");
+        assert_eq!(
+            shell,
+            ["/usr/bin/env", "/bin/pt", "rex", "pane", "review", "base:origin/main", "/p/repo"]
+        );
+    }
+
+    #[test]
     fn a_terminal_review_reads_the_block_from_inside_the_split() {
         let args = argv(
             Path::new("/bin/pt"),
@@ -399,5 +486,33 @@ mod tests {
             args,
             ["/usr/bin/env", "/bin/pt", "rex", "pane", "terminal", "--block", "block:b", "--lines", "80"]
         );
+    }
+
+    #[test]
+    fn a_review_in_a_tab_knows_the_block_to_show_again_when_it_ends() {
+        let review = Review::Open(Some(PathBuf::from("/Users/me/project/plan.md")), Some(Gate::default()));
+        let mut args = argv(Path::new("/bin/pt"), "block:b", &parse(CLAUDE), &review, Handoff::Send, None)
+            .expect("argv");
+        returning_to(&mut args, "block:b");
+        assert_eq!(
+            args.get(..3),
+            Some(
+                &["/usr/bin/env", "PLANNOTATOR_TUI_REX_RETURN=block:b", "PLANNOTATOR_TUI_REX_BLOCK=block:b"]
+                    .map(String::from)[..]
+            )
+        );
+        assert_eq!(args.iter().rev().take(2).collect::<Vec<_>>(), ["--gate", "/Users/me/project/plan.md"]);
+    }
+
+    #[test]
+    fn a_tab_is_named_for_the_file_it_opens_else_the_agent_else_the_folder() {
+        let open = |path: Option<&str>| Review::Open(path.map(PathBuf::from), None);
+        assert_eq!(tab_label(&parse(CLAUDE), &open(Some("/Users/me/project/plan.md"))), "Annotate · plan.md");
+        assert_eq!(tab_label(&parse(CLAUDE), &open(None)), "Annotate · project");
+        assert_eq!(tab_label(&parse(CLAUDE), &Review::Last { newest: false }), "Annotate · claude");
+        let code = Review::Code { scope: "uncommitted".to_owned(), repo: PathBuf::from("/p/repo") };
+        assert_eq!(tab_label(&parse(CLAUDE), &code), "Annotate · claude");
+        assert_eq!(tab_label(&parse(SHELL), &code), "Annotate · repo");
+        assert_eq!(tab_label(&parse(SHELL), &Review::Terminal { lines: 80 }), "Annotate · me");
     }
 }

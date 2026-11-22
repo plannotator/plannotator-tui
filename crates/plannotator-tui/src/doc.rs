@@ -7,7 +7,8 @@
 
 use std::ops::Range;
 
-use pulldown_cmark::{Event, Options, Parser, Tag};
+use plannotator_tui_schema::{DocumentSource, Provenance};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlockKind {
@@ -17,10 +18,9 @@ pub(crate) enum BlockKind {
     CodeBlock,
     BlockQuote,
     Table,
+    DefinitionList,
     Rule,
     Html,
-    /// YAML front matter; parsed for correct boundaries but never shown.
-    Metadata,
     Other,
 }
 
@@ -35,16 +35,37 @@ impl BlockKind {
 pub(crate) struct Block {
     pub(crate) range: Range<usize>,
     pub(crate) kind: BlockKind,
+    pub(crate) opening: Opening,
 }
 
-#[derive(Debug)]
+/// What a block's opening tag says beyond its kind, passed on for the renderer's house style.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum Opening {
+    #[default]
+    Plain,
+    /// A heading's level, 1 to 6.
+    Heading(u8),
+    /// A code block's info string: the words after the opening fence, empty for none.
+    Code(Box<str>),
+}
+
+fn opening_of(tag: &Tag<'_>) -> Opening {
+    match tag {
+        Tag::Heading { level, .. } => Opening::Heading(*level as u8),
+        Tag::CodeBlock(CodeBlockKind::Fenced(info)) => Opening::Code(info.trim().into()),
+        Tag::CodeBlock(CodeBlockKind::Indented) => Opening::Code("".into()),
+        _ => Opening::Plain,
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct Document {
     pub(crate) source: String,
     pub(crate) blocks: Vec<Block>,
 }
 
 /// The option set `tui-markdown` enables, so block boundaries agree with its renderer.
-fn parse_options() -> Options {
+pub(crate) fn parse_options() -> Options {
     Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_HEADING_ATTRIBUTES
@@ -59,9 +80,19 @@ fn parse_options() -> Options {
 }
 
 impl Document {
+    /// A file's text: YAML front matter at the top is metadata and is not shown.
     pub(crate) fn parse(source: String) -> Self {
-        let blocks = split_blocks(&source);
+        let blocks = split_blocks(&source, true);
         Self { source, blocks }
+    }
+
+    /// The document for `source`. Only a file or a Workspaces document can carry front
+    /// matter; an agent's message or piped text is all content, even when it opens with `---`.
+    pub(crate) fn of(source: &DocumentSource) -> Self {
+        let front_matter =
+            matches!(source.provenance, Provenance::File { .. } | Provenance::Workspace { .. });
+        let blocks = split_blocks(&source.content, front_matter);
+        Self { source: source.content.clone(), blocks }
     }
 
     /// Source text of block `index`. Empty for an out-of-range index.
@@ -84,36 +115,56 @@ fn kind_of(tag: &Tag<'_>) -> BlockKind {
         Tag::BlockQuote(_) => BlockKind::BlockQuote,
         Tag::Table(_) => BlockKind::Table,
         Tag::HtmlBlock => BlockKind::Html,
-        Tag::MetadataBlock(_) => BlockKind::Metadata,
+        Tag::DefinitionList => BlockKind::DefinitionList,
         _ => BlockKind::Other,
     }
 }
 
-/// Walk the event stream and cut the source at depth-zero block boundaries.
-fn split_blocks(source: &str) -> Vec<Block> {
+/// Bytes of the YAML front matter that opens `source`, or 0 when it has none. Front matter
+/// starts on the first line and must close; `pulldown-cmark` takes a metadata block at any
+/// unindented `---` line, so it is only asked about the first one.
+fn front_matter_len(source: &str) -> usize {
+    if !source.starts_with("---") {
+        return 0;
+    }
+    match Parser::new_ext(source, Options::ENABLE_YAML_STYLE_METADATA_BLOCKS).into_offset_iter().next() {
+        Some((Event::Start(Tag::MetadataBlock(_)), range)) if range.start == 0 => range.end,
+        _ => 0,
+    }
+}
+
+/// Walk the event stream and cut the source at depth-zero block boundaries. Front matter,
+/// when `front_matter` allows it, is never a block; every later `---` is Markdown.
+fn split_blocks(source: &str, front_matter: bool) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut depth = 0usize;
-    let mut open: Option<(usize, BlockKind)> = None;
+    let mut open: Option<(usize, BlockKind, Opening)> = None;
 
-    for (event, range) in Parser::new_ext(source, parse_options()).into_offset_iter() {
+    let body = if front_matter { front_matter_len(source) } else { 0 };
+    let mut options = parse_options();
+    options.remove(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
+    for (event, range) in Parser::new_ext(&source[body..], options).into_offset_iter() {
+        let range = range.start + body..range.end + body;
         match event {
             Event::Start(tag) => {
                 if depth == 0 {
-                    open = Some((range.start, kind_of(&tag)));
+                    open = Some((range.start, kind_of(&tag), opening_of(&tag)));
                 }
                 depth += 1;
             }
             Event::End(_) => {
                 depth = depth.saturating_sub(1);
                 if depth == 0
-                    && let Some((start, kind)) = open.take()
+                    && let Some((start, kind, opening)) = open.take()
                 {
-                    blocks.push(Block { range: start..range.end, kind });
+                    blocks.push(Block { range: start..range.end, kind, opening });
                 }
             }
-            Event::Rule if depth == 0 => blocks.push(Block { range, kind: BlockKind::Rule }),
+            Event::Rule if depth == 0 => {
+                blocks.push(Block { range, kind: BlockKind::Rule, opening: Opening::Plain });
+            }
             // Any other depth-zero leaf (rare: stray html/text) becomes its own block.
-            _ if depth == 0 => blocks.push(Block { range, kind: BlockKind::Other }),
+            _ if depth == 0 => blocks.push(Block { range, kind: BlockKind::Other, opening: Opening::Plain }),
             _ => {}
         }
     }
@@ -125,7 +176,7 @@ fn split_blocks(source: &str) -> Vec<Block> {
         let trimmed = text.trim_end_matches(['\n', '\r']);
         block.range.end = block.range.start + trimmed.len();
     }
-    blocks.retain(|b| !b.range.is_empty() && b.kind != BlockKind::Metadata);
+    blocks.retain(|b| !b.range.is_empty());
     blocks
 }
 
@@ -158,5 +209,74 @@ mod tests {
         let doc = Document::parse("---\ntitle: X\n---\n\n- a\n  - nested\n- b\n".to_owned());
         assert_eq!(doc.blocks.len(), 1);
         assert_eq!(doc.blocks.first().map(|b| b.kind), Some(BlockKind::List));
+    }
+
+    fn texts(doc: &Document) -> Vec<&str> {
+        (0..doc.blocks.len()).map(|i| doc.block_text(i)).collect()
+    }
+
+    /// Issue #162: a pair of rules mid-document is two rules, not front matter.
+    #[test]
+    fn rule_pair_mid_document_keeps_the_text_between() {
+        let src = "# Title\n\nIntro paragraph.\n\n---\n**Draft**\n\nThis paragraph is not shown.\n\n- neither is this list\n\n---\n\nClosing paragraph.\n";
+        let doc = Document::parse(src.to_owned());
+        assert_eq!(
+            texts(&doc),
+            [
+                "# Title",
+                "Intro paragraph.",
+                "---",
+                "**Draft**",
+                "This paragraph is not shown.",
+                "- neither is this list",
+                "---",
+                "Closing paragraph."
+            ]
+        );
+    }
+
+    #[test]
+    fn front_matter_at_the_top_is_dropped_and_later_rules_stay() {
+        let src = "---\ntitle: X\n---\n# Heading\n\n---\nkept: yes\n---\n";
+        let doc = Document::parse(src.to_owned());
+        assert_eq!(texts(&doc), ["# Heading", "---", "kept: yes\n---"]);
+        let kinds: Vec<_> = doc.blocks.iter().map(|b| b.kind).collect();
+        assert_eq!(kinds, [BlockKind::Heading, BlockKind::Rule, BlockKind::Heading]);
+        // Ranges index the whole source, front matter included.
+        assert_eq!(doc.blocks.first().map(|b| b.range.clone()), Some(17..26));
+        assert_eq!(src.find("# Heading"), Some(17));
+        assert_eq!(doc.block_containing(3), None);
+    }
+
+    #[test]
+    fn unclosed_rule_at_the_top_is_content() {
+        let doc = Document::parse("---\ntitle: X\n\nBody.\n".to_owned());
+        assert_eq!(texts(&doc), ["---", "title: X", "Body."]);
+        // A blank second line is not front matter either, and does not move it further down.
+        let doc = Document::parse("---\n\nBody.\n\n---\nmiddle\n---\n".to_owned());
+        assert_eq!(texts(&doc), ["---", "Body.", "---", "middle\n---"]);
+    }
+
+    #[test]
+    fn rule_under_a_paragraph_is_a_setext_heading() {
+        let doc = Document::parse("Intro\n---\nbody\n\nMore\n---\n".to_owned());
+        assert_eq!(texts(&doc), ["Intro\n---", "body", "More\n---"]);
+        let kinds: Vec<_> = doc.blocks.iter().map(|b| b.kind).collect();
+        assert_eq!(kinds, [BlockKind::Heading, BlockKind::Paragraph, BlockKind::Heading]);
+    }
+
+    #[test]
+    fn an_agent_message_has_no_front_matter() {
+        let text = "---\ntitle: X\n---\nReply.\n";
+        let message = |provenance| DocumentSource::new(text.to_owned(), "m", true, provenance);
+        let reply = Document::of(&message(Provenance::AgentMessage {
+            host: "claude-code".into(),
+            session: None,
+            message_id: None,
+        }));
+        assert_eq!(texts(&reply), ["---", "title: X\n---", "Reply."]);
+        assert_eq!(texts(&Document::of(&message(Provenance::Stdin))), ["---", "title: X\n---", "Reply."]);
+        let file = Document::of(&DocumentSource::file("a.md".into(), text.to_owned()));
+        assert_eq!(texts(&file), ["Reply."]);
     }
 }

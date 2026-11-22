@@ -450,7 +450,7 @@ documentation only.
 
 **Required change.** Do not claim native Windows clipboard fallback, mouse selection,
 overlay restoration, popup modality, resize behavior, or Unicode rendering until the live
-checklist passes. A failed OSC 52 check is a real product bug because blocked/unavailable agent
+checklist passes. A failed OSC 52 check is a real product bug because unavailable agent
 delivery relies on clipboard fallback; record it before release rather than weakening the
 contract silently.
 

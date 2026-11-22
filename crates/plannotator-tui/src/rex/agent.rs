@@ -95,6 +95,20 @@ impl RexAgent {
             notice: RefCell::default(),
         })
     }
+
+    /// The agent `agent` (its host label), process `pid`, that the agent picker found in
+    /// `block`. A send presses Enter, as a launcher's target does.
+    pub(crate) fn picked(rex: Rex, block: String, agent: String, pid: u32) -> Self {
+        Self {
+            rex,
+            block,
+            agent: Some(agent),
+            pid,
+            pi_session_guard: PiSessionGuard::NotRequired,
+            submit: true,
+            notice: RefCell::default(),
+        }
+    }
 }
 
 impl Delivery for RexAgent {

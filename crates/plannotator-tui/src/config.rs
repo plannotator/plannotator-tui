@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::keys::Keymap;
+use crate::notes_rail::RailStart;
 use crate::theme::{Colors, ThemeSetting};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -19,11 +20,18 @@ use crate::theme::{Colors, ThemeSetting};
 pub(crate) struct Config {
     pub(crate) herdr: HerdrConfig,
     pub(crate) rex: RexConfig,
+    pub(crate) deliver: DeliverConfig,
     pub(crate) ui: UiConfig,
     pub(crate) last: LastConfig,
     pub(crate) keys: Keymap,
     pub(crate) colors: Colors,
 }
+
+/// The reading column a document gets unless `[ui] doc_width` says otherwise: eighty columns,
+/// list markers and quote bars included, which keeps prose near the seventy characters a line
+/// reads best at. Tables and code fit it too: a table's cells wrap, a long code line continues
+/// on the next row.
+pub(crate) const DOC_WIDTH: u16 = 80;
 
 /// Which palette the app starts from; `[colors]` adjusts individual roles of it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,12 +44,17 @@ pub(crate) struct UiConfig {
     pub(crate) horizontal_margin: u16,
     /// Widest the app gets, centered in the terminal. Zero fills the terminal.
     pub(crate) max_width: u16,
-    /// Widest the document's text gets; spare columns sit between it and the rail. Zero
-    /// lets the document take every column the rail leaves.
+    /// Widest the document's text gets: the reading column, centred in the columns the tree
+    /// and the rail leave. Zero lets the text take every column the rail leaves.
     pub(crate) doc_width: u16,
     /// Copy a mouse selection to the clipboard on release. Off leaves the clipboard alone
     /// until `copy` (`y`) on the waiting selection.
     pub(crate) copy_on_select: bool,
+    /// Widest the comment box gets, borders included; a narrower pane narrows it further.
+    pub(crate) comment_width: u16,
+    /// How the notes rail starts: `when-notes`, `shown` or `hidden`. A choice made with
+    /// `toggle-notes` (`z`) is remembered and wins over it; see `notes_rail`.
+    pub(crate) notes_rail: RailStart,
 }
 
 impl Default for UiConfig {
@@ -50,19 +63,38 @@ impl Default for UiConfig {
             theme: ThemeSetting::default(),
             horizontal_margin: 0,
             max_width: 0,
-            doc_width: 0,
+            doc_width: DOC_WIDTH,
             copy_on_select: true,
+            comment_width: 48,
+            notes_rail: RailStart::default(),
         }
     }
 }
 
-/// How `plannotator-tui last` finds a session.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+/// How `plannotator-tui last` finds a session and its messages.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct LastConfig {
     /// Claude Code config dirs to also search for a known session id, in order, for agents
     /// whose `CLAUDE_CONFIG_DIR` does not reach this process. `~/` means the home directory.
     pub(crate) claude_profile_dirs: Vec<String>,
+    /// How many recent messages the picker offers; `--pick` overrides it.
+    pub(crate) pick: usize,
+}
+
+impl Default for LastConfig {
+    fn default() -> Self {
+        Self { claude_profile_dirs: Vec::new(), pick: 25 }
+    }
+}
+
+/// Where feedback goes when no Herdr, Rex or hc launcher named an agent.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct DeliverConfig {
+    /// A command line that takes the feedback on stdin; see `delivery::command`.
+    /// `PLANNOTATOR_TUI_DELIVER_CMD` overrides it.
+    pub(crate) command: Option<String>,
 }
 
 /// How plannotator-tui opens inside Herdr.
@@ -136,15 +168,19 @@ pub(crate) struct RexConfig {
     pub(crate) placement: RexPlacement,
 }
 
-/// Where a Rex review opens. Rex has no overlay; a popup is a floating layer.
+/// Where a Rex review opens. Rex has no overlay; a popup is a floating layer, and a tab is a
+/// Rex window of its own (the Mac app shows a session's windows as tabs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum RexPlacement {
     /// A split to the right of the agent's block, so the agent stays in view.
-    #[default]
     Split,
     /// A floating layer over the agent's window.
     Popup,
+    /// A new tab holding only the review, at full size, as Herdr's overlay is. Closing the
+    /// review closes the tab and shows the agent's pane again.
+    #[default]
+    Tab,
 }
 
 impl FromStr for RexPlacement {
@@ -154,7 +190,8 @@ impl FromStr for RexPlacement {
         match s {
             "split" => Ok(Self::Split),
             "popup" => Ok(Self::Popup),
-            other => anyhow::bail!("unknown Rex placement {other:?}; expected split or popup"),
+            "tab" => Ok(Self::Tab),
+            other => anyhow::bail!("unknown Rex placement {other:?}; expected split, popup or tab"),
         }
     }
 }
@@ -245,8 +282,14 @@ mod tests {
     }
 
     #[test]
-    fn rex_opens_in_a_split_unless_a_popup_is_asked_for_and_has_no_overlay() {
-        assert_eq!(Config::default().rex.placement, RexPlacement::Split);
+    fn rex_opens_in_a_tab_unless_a_split_or_popup_is_asked_for_and_has_no_overlay() {
+        assert_eq!(Config::default().rex.placement, RexPlacement::Tab);
+        let split = Config::parse("[rex]\nplacement = \"split\"\n").expect("parses");
+        assert_eq!(
+            split.rex.placement,
+            RexPlacement::Split,
+            "a setting written for the old default still holds"
+        );
         let popup = Config::parse("[rex]\nplacement = \"popup\"\n").expect("parses");
         assert_eq!(popup.rex.placement, RexPlacement::Popup);
         assert_eq!(popup.herdr, HerdrConfig::default());
@@ -256,11 +299,29 @@ mod tests {
     }
 
     #[test]
+    fn rex_opens_full_size_in_a_tab_of_its_own_when_asked() {
+        let tab = Config::parse("[rex]\nplacement = \"tab\"\n").expect("parses");
+        assert_eq!(tab.rex.placement, RexPlacement::Tab);
+        assert_eq!("tab".parse::<RexPlacement>().ok(), Some(RexPlacement::Tab));
+        let err = "full".parse::<RexPlacement>().expect_err("rejected").to_string();
+        assert_eq!(err, "unknown Rex placement \"full\"; expected split, popup or tab");
+    }
+
+    #[test]
     fn partial_file_keeps_other_defaults() {
         let config = Config::parse("[herdr]\nplacement = \"split\"\n").expect("parses");
         assert_eq!(config.herdr.placement, Placement::Split);
         assert_eq!(config.herdr.split_direction, SplitDirection::Right);
         assert_eq!(config.herdr.popup_width, "90%");
+    }
+
+    #[test]
+    fn a_delivery_command_is_optional_and_read_from_deliver() {
+        assert_eq!(Config::default().deliver.command, None);
+        let config = Config::parse("[deliver]\ncommand = \"tmux-send %1\"\n").expect("parses");
+        assert_eq!(config.deliver.command.as_deref(), Some("tmux-send %1"));
+        let shown = config.to_toml().expect("toml");
+        assert!(shown.contains("[deliver]\ncommand = \"tmux-send %1\""), "{shown}");
     }
 
     #[cfg(windows)]
@@ -322,10 +383,10 @@ mod tests {
     }
 
     #[test]
-    fn widths_default_to_filling_the_terminal_and_roundtrip() {
+    fn widths_default_to_a_reading_column_in_a_full_terminal_and_roundtrip() {
         assert_eq!(Config::default().ui.horizontal_margin, 0);
         assert_eq!(Config::default().ui.max_width, 0);
-        assert_eq!(Config::default().ui.doc_width, 0);
+        assert_eq!(Config::default().ui.doc_width, DOC_WIDTH);
         let config =
             Config::parse("[ui]\nhorizontal_margin = 2\nmax_width = 168\ndoc_width = 120\n").expect("parses");
         assert_eq!((config.ui.horizontal_margin, config.ui.max_width, config.ui.doc_width), (2, 168, 120));
@@ -337,6 +398,32 @@ mod tests {
         assert_eq!(Config::default().last.claude_profile_dirs, Vec::<String>::new());
         let config = Config::parse("[last]\nclaude_profile_dirs = [\"~/b\", \"/a\"]\n").expect("parses");
         assert_eq!(config.last.claude_profile_dirs, ["~/b", "/a"]);
+    }
+
+    #[test]
+    fn comment_width_defaults_to_48_and_can_be_set() {
+        assert_eq!(Config::default().ui.comment_width, 48);
+        assert_eq!(Config::parse("[ui]\ncomment_width = 72\n").expect("parses").ui.comment_width, 72);
+    }
+
+    #[test]
+    fn the_notes_rail_waits_for_notes_unless_set_and_a_bad_value_is_named() {
+        assert_eq!(Config::default().ui.notes_rail, RailStart::WhenNotes);
+        for (text, start) in
+            [("shown", RailStart::Shown), ("hidden", RailStart::Hidden), ("when-notes", RailStart::WhenNotes)]
+        {
+            let config = Config::parse(&format!("[ui]\nnotes_rail = \"{text}\"\n")).expect("parses");
+            assert_eq!(config.ui.notes_rail, start);
+            assert_eq!(Config::parse(&config.to_toml().expect("serializes")).expect("parses"), config);
+        }
+        let err = Config::parse("[ui]\nnotes_rail = \"off\"\n").expect_err("rejected");
+        assert!(err.to_string().contains("off"), "{err}");
+    }
+
+    #[test]
+    fn the_picker_offers_25_messages_unless_set() {
+        assert_eq!(Config::default().last.pick, 25);
+        assert_eq!(Config::parse("[last]\npick = 60\n").expect("parses").last.pick, 60);
     }
 
     #[test]

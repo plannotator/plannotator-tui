@@ -4,21 +4,17 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 use unicode_width::UnicodeWidthStr;
 
 use super::App;
-use super::send::SendState;
 use crate::gate::Gate;
 use crate::keys::Action;
 use crate::theme::palette;
 
-// These three set their own foreground as well as their background, so they read the same
-// on a light terminal as on a dark one; only the idle button borrows the theme's grey.
-const SEND_BG: Color = Color::Indexed(30);
-const SENT_BG: Color = Color::Indexed(22);
-const BLOCKED_BG: Color = Color::Indexed(58);
+// Sets its own foreground as well as its background, so it reads the same on a light
+// terminal as on a dark one.
 const APPROVE_BG: Color = Color::Indexed(28);
 
 const REVIEW_LABEL: &str = "Review \u{25be}";
@@ -100,15 +96,7 @@ impl App {
         }
     }
 
-    /// At zero the button is still drawn and clickable; it reports the no-op in the footer.
     fn button_style(&self) -> Style {
-        match &self.send_state {
-            SendState::Ready if self.send_count() == 0 => {
-                Style::new().fg(palette().idle_fg).bg(palette().toolbar_bg).add_modifier(Modifier::DIM)
-            }
-            SendState::Ready => Style::new().fg(Color::Black).bg(SEND_BG).bold(),
-            SendState::Sent => Style::new().fg(Color::Black).bg(SENT_BG).bold(),
-            SendState::Blocked(_) => Style::new().fg(Color::Black).bg(BLOCKED_BG).bold(),
-        }
+        crate::ui::send_button::style(&self.send_state, self.send_count())
     }
 }

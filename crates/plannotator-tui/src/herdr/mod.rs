@@ -3,6 +3,7 @@
 //! Nothing here draws. `context` reads the environment Herdr sets; `launch` turns it into
 //! one `herdr plugin pane open` invocation.
 
+pub(crate) mod agents;
 pub(crate) mod context;
 pub(crate) mod launch;
 pub(crate) mod terminal;

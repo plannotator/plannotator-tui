@@ -65,6 +65,11 @@ pub(crate) struct HerdrEnv {
     pub(crate) gate: bool,
     /// `PLANNOTATOR_TUI_RESULT_FILE`: where a gated review publishes its decision.
     pub(crate) result_file: Option<PathBuf>,
+    /// `PLANNOTATOR_TUI_REVIEW`: open a code review in this scope instead of a file, from
+    /// `herdr review`: `uncommitted`, `staged`, `base:<ref>` or `commit:<rev>`.
+    pub(crate) review: Option<String>,
+    /// `PLANNOTATOR_TUI_REPO`: the repository that code review is of.
+    pub(crate) repo: Option<PathBuf>,
 }
 
 impl HerdrEnv {
@@ -95,6 +100,8 @@ impl HerdrEnv {
             terminal_lines: non_empty("PLANNOTATOR_TUI_TERMINAL_LINES").and_then(|v| v.parse().ok()),
             gate: env("PLANNOTATOR_TUI_GATE").as_deref() == Some("1"),
             result_file: non_empty("PLANNOTATOR_TUI_RESULT_FILE").map(PathBuf::from),
+            review: non_empty("PLANNOTATOR_TUI_REVIEW"),
+            repo: non_empty("PLANNOTATOR_TUI_REPO").map(PathBuf::from),
         }
     }
 
@@ -257,6 +264,13 @@ mod tests {
             env(&[("PLANNOTATOR_TUI_TERMINAL_PANE", "w1:p2"), ("PLANNOTATOR_TUI_TERMINAL_LINES", "80")]);
         assert_eq!(env.terminal_pane.as_deref(), Some("w1:p2"));
         assert_eq!(env.terminal_lines, Some(80));
+    }
+
+    #[test]
+    fn a_code_review_scope_and_repository_come_from_the_launcher() {
+        let env = env(&[("PLANNOTATOR_TUI_REVIEW", "commit:HEAD"), ("PLANNOTATOR_TUI_REPO", "/work/app")]);
+        assert_eq!(env.review.as_deref(), Some("commit:HEAD"));
+        assert_eq!(env.repo, Some(PathBuf::from("/work/app")));
     }
 
     #[test]

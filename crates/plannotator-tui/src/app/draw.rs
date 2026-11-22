@@ -14,6 +14,7 @@ use super::{App, Focus, GUTTER, Geometry, Mode, TOOLBAR, glyph, label};
 use crate::gate::Gate;
 use crate::keys::Action;
 use crate::theme::palette;
+use crate::ui::compose;
 use crate::wrap::wrap_line;
 
 const RAIL_WIDTH: u16 = 36;
@@ -23,7 +24,6 @@ const RAIL_MIN_TOTAL_WIDTH: u16 = 80;
 const TREE_WIDTH: u16 = 28;
 /// Below this the tree is hidden unless toggled on; Tab still reaches it.
 pub(super) const TREE_MIN_TOTAL_WIDTH: u16 = 120;
-const COMPOSE_WIDTH: u16 = 48;
 
 fn accent(kind: Kind) -> Color {
     match kind {
@@ -48,41 +48,53 @@ impl App {
         let [header, body, footer] = Layout::vertical([
             Constraint::Length(self.header_height(area.width)),
             Constraint::Min(1),
-            Constraint::Length(1),
+            Constraint::Length(self.footer_height(area.width)),
         ])
         .areas(area);
 
         let show_tree = self.tree_shown(area.width) || (self.tree.is_some() && self.focus == Focus::Tree);
         let tree_width = if show_tree { TREE_WIDTH } else { 0 };
-        let rail_width = if area.width.saturating_sub(tree_width) >= RAIL_MIN_TOTAL_WIDTH {
+        // A hidden rail gives its columns to the text, which reflows below as on a resize.
+        let rail_fits = area.width.saturating_sub(tree_width) >= RAIL_MIN_TOTAL_WIDTH;
+        let rail_width = if self.rail_shown() && rail_fits {
             (area.width * 3 / 10).clamp(RAIL_MIN_WIDTH, RAIL_WIDTH)
         } else {
             0
         };
-        // `[ui] doc_width` caps the text; the columns it leaves sit between it and the rail.
-        // Only a cap that binds changes the split, so an unset or roomy cap lays out as before.
+        // `[ui] doc_width` is the reading column: text wraps to it, and it sits centred in the
+        // columns the tree and the rail leave. Only a cap that binds moves anything.
         let gap = u16::from(rail_width > 0);
         let room = body.width.saturating_sub(tree_width + GUTTER + gap + rail_width);
         let cap = self.ui.doc_width.max(20);
-        let (text, spare) = if self.ui.doc_width > 0 && room > cap {
-            (Constraint::Length(cap), Constraint::Min(gap))
+        let (margin, text, spare) = if self.ui.doc_width > 0 && room > cap {
+            ((room - cap) / 2, Constraint::Length(cap), Constraint::Min(gap))
         } else {
-            (Constraint::Min(20), Constraint::Length(gap))
+            (0, Constraint::Min(20), Constraint::Length(gap))
         };
-        let [tree, gutter, doc, _gap, rail] = Layout::horizontal([
+        let [tree, _margin, gutter, doc, _spare, rail] = Layout::horizontal([
             Constraint::Length(tree_width),
+            Constraint::Length(margin),
             Constraint::Length(GUTTER),
             text,
             spare,
             Constraint::Length(rail_width),
         ])
         .areas(body);
-        self.geometry = Geometry { tree, doc, ..Geometry::default() };
+        let old_height = self.geometry.doc.height;
+        self.geometry = Geometry { tree, doc, width: area.width, column_room: room, ..Geometry::default() };
+        self.settle_layout_for_view();
 
-        if self.open.layout.width != usize::from(doc.width) {
-            self.open.layout.reflow(usize::from(doc.width));
+        // A layout is at least one column wide, so an empty pane must not count as a resize.
+        let layout_width = usize::from(doc.width).max(1);
+        if self.open.layout.width != layout_width {
+            self.open.layout.reflow(layout_width);
             self.clear_selection();
             self.scroll_by(0);
+            // Clearing the selection can change the footer's height, so lay out again.
+            return self.draw(frame);
+        }
+        if doc.height < old_height {
+            self.keep_focus_in_view(old_height);
         }
 
         self.draw_header(frame, header);
@@ -107,7 +119,8 @@ impl App {
             Mode::FileSearch => self.draw_file_search(frame),
             Mode::Archive => self.draw_archive(frame),
             Mode::ReviewMenu => self.draw_review_menu(frame),
-            Mode::Browse | Mode::ConfirmQuit | Mode::ConfirmClearAll => {}
+            Mode::PickTarget => self.draw_pi_picker(frame),
+            Mode::Browse | Mode::ConfirmQuit | Mode::ConfirmClearAll | Mode::Search => {}
         }
     }
 
@@ -170,9 +183,13 @@ impl App {
         for y in 0..doc.height {
             let row_index = self.scroll + usize::from(y);
             let Some(block) = self.open.layout.block_at_row(row_index) else { continue };
-            let Some(row) = self.open.layout.row(row_index) else { continue };
+            let (Some(row), Some(line)) =
+                (self.open.layout.row(row_index), self.open.layout.drawn_line(row_index))
+            else {
+                continue;
+            };
             let screen_y = doc.y + y;
-            buf.set_line(doc.x, screen_y, &row.line, doc.width);
+            buf.set_line(doc.x, screen_y, &line, doc.width);
 
             if block == self.selected && !text_selection_active && self.pending.is_none() && doc_focused {
                 buf.set_style(
@@ -199,6 +216,19 @@ impl App {
                     }
                 };
                 buf.set_style(Rect { x: doc.x + col as u16, y: screen_y, width: 1, height: 1 }, style);
+            }
+
+            // Search matches paint over the annotation tints, in a colour of their own, and
+            // under the selection and the cursor.
+            if let Some(styles) = self.search_styles(&row.cells) {
+                for (col, style) in styles.iter().enumerate().take(usize::from(doc.width)) {
+                    if let Some(style) = style {
+                        buf.set_style(
+                            Rect { x: doc.x + col as u16, y: screen_y, width: 1, height: 1 },
+                            *style,
+                        );
+                    }
+                }
             }
 
             if let Some(cols) = self.selection.and_then(|s| s.columns_on(row_index, row.cells.len().max(1))) {
@@ -275,50 +305,43 @@ impl App {
         self.geometry.toolbar = Some((rect, spans));
     }
 
-    /// The compose box: at the pending selection when there is one, else over the rail
-    /// bubble being edited, else centered.
-    /// The compose box title; the Shift+Enter hint appears only when the terminal
-    /// actually distinguishes it, so the hint is never a lie.
+    /// The compose box title, or its discard question.
     fn compose_title(&self, verb: &str) -> String {
-        let newline = if self.shift_enter { "shift+enter new line" } else { "alt+enter new line" };
-        format!(" {verb} \u{b7} enter saves \u{b7} {newline} \u{b7} esc cancels ")
+        self.compose.heading(verb, self.shift_enter, &self.keys)
     }
 
-    fn draw_compose(&self, frame: &mut Frame, title: &str) {
-        let wrap_width = usize::from(COMPOSE_WIDTH.saturating_sub(3));
-        let (lines, cursor_row, cursor_col) = self.compose.wrapped(wrap_width);
-        let content_rows = lines.len().clamp(1, 8);
-        let height = content_rows as u16 + 2;
-        let rect = self
-            .float_origin(height, COMPOSE_WIDTH)
-            .or_else(|| self.edit_origin(height, COMPOSE_WIDTH))
-            .unwrap_or_else(|| {
-                let area = self.viewport(frame.area());
-                let width = COMPOSE_WIDTH.min(area.width);
-                Rect { x: area.x + (area.width - width) / 2, y: area.y + area.height / 2, width, height }
-            });
-        frame.render_widget(Clear, rect);
-        let boxed = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::new().fg(palette().comment))
-            .title(Span::styled(title.to_owned(), Style::new().dim()));
-        let inner = boxed.inner(rect);
-        frame.render_widget(boxed, rect);
-        // Keep the cursor's row visible when the comment is taller than the box.
-        let scroll = cursor_row.saturating_sub(content_rows - 1);
-        for (i, line) in lines.iter().skip(scroll).take(content_rows).enumerate() {
-            let row = Rect {
-                x: inner.x + 1,
-                y: inner.y + i as u16,
-                width: inner.width.saturating_sub(1),
-                height: 1,
-            };
-            frame.render_widget(Paragraph::new(Line::from(line.clone())), row);
+    /// `[ui] comment_width`, raised to where the title still fits on the box's two borders.
+    fn compose_width(&self) -> u16 {
+        self.ui.comment_width.max(38)
+    }
+
+    /// The columns the compose box wraps to: as last drawn or, for keys that arrive before
+    /// its first frame, as configured.
+    pub(super) fn compose_wrap(&self) -> usize {
+        match self.geometry.compose_wrap {
+            0 => usize::from(self.compose_width().saturating_sub(compose::CHROME)),
+            drawn => drawn,
         }
-        let cursor_x = inner.x + 1 + cursor_col as u16;
-        let cursor_y = inner.y + (cursor_row - scroll) as u16;
-        frame.set_cursor_position((cursor_x.min(inner.right().saturating_sub(1)), cursor_y));
+    }
+
+    /// The compose box: at the pending selection when there is one, else over the rail
+    /// bubble being edited, else centered. `[ui] comment_width` caps its width; a narrower
+    /// pane narrows it further.
+    fn compose_rect(&self, area: Rect, height: u16) -> Rect {
+        let width = self.compose_width();
+        self.float_origin(height, width).or_else(|| self.edit_origin(height, width)).unwrap_or_else(|| {
+            let area = self.viewport(area);
+            let width = width.min(area.width);
+            Rect { x: area.x + (area.width - width) / 2, y: area.y + area.height / 2, width, height }
+        })
+    }
+
+    fn draw_compose(&mut self, frame: &mut Frame, title: &str) {
+        let width = self.compose_rect(frame.area(), 1).width;
+        let wrap_width = usize::from(width.saturating_sub(compose::CHROME));
+        self.geometry.compose_wrap = wrap_width;
+        let rect = self.compose_rect(frame.area(), compose::height(&self.compose, wrap_width));
+        compose::draw(frame, rect, &self.compose, title);
     }
 
     fn edit_origin(&self, height: u16, width: u16) -> Option<Rect> {
@@ -375,8 +398,12 @@ impl App {
                 1 => " · 1 image".to_owned(),
                 n => format!(" · {n} images"),
             };
+            let from = match &placed.annotation.author_name {
+                Some(name) => format!(" · {name}"),
+                None => String::new(),
+            };
             let title = Span::styled(
-                format!(" {} {}{images}{sent} ", glyph(kind), short_id(&placed.annotation.id)),
+                format!(" {} {}{from}{images}{sent} ", glyph(kind), short_id(&placed.annotation.id)),
                 Style::new().fg(accent(kind)),
             );
             let bubble = Block::default()
@@ -411,6 +438,10 @@ impl App {
             frame.render_widget(Paragraph::new(Line::from(Span::raw(question).bold())), area);
             return;
         }
+        if self.mode == Mode::Search {
+            self.draw_search_prompt(frame, area);
+            return;
+        }
         if self.mode == Mode::ConfirmClearAll {
             let answers = [(Action::Yes, "clear"), (Action::No, "cancel")]
                 .into_iter()
@@ -422,20 +453,59 @@ impl App {
             frame.render_widget(Paragraph::new(Line::from(Span::raw(question).bold())), area);
             return;
         }
-        if self.mode == Mode::Browse && !self.undo_archive.is_empty() {
-            let label = self.keys.labelled(Action::UndoFinish, "Undo finish");
-            let label = format!(" {} ", label.as_deref().unwrap_or("Undo finish"));
+        let (text, hint_rows) = self.footer_text(area.width);
+        // A pane too short for any footer has no row to put the button on.
+        if let Some(label) = self.undo_label().filter(|_| area.height > 0) {
             let width = (label.width() as u16).min(area.width);
-            let rect = Rect { x: area.right() - width, y: area.y, width, height: area.height };
+            let y = area.bottom().saturating_sub(1);
+            let rect = Rect { x: area.right() - width, y, width, height: 1 };
             frame
                 .render_widget(Paragraph::new(label.as_str()).style(Style::new().fg(palette().accent)), rect);
             self.geometry.undo_button = Some(rect);
             area.width = area.width.saturating_sub(width);
         }
+        // Paired from the bottom, so a pane too short for every row keeps the one with the text.
+        for (index, (hints, y)) in hint_rows.iter().rev().zip((area.y..area.bottom()).rev()).enumerate() {
+            let row = Rect { y, height: 1, ..area };
+            let hints = if hints.is_empty() { String::new() } else { format!("{hints} ") };
+            let help_area = if index == 0 {
+                let [text_area, help_area] =
+                    Layout::horizontal([Constraint::Min(0), Constraint::Length(hints.width() as u16)])
+                        .areas(row);
+                frame.render_widget(Paragraph::new(Line::from(Span::raw(text.as_str()).dim())), text_area);
+                help_area
+            } else {
+                row
+            };
+            frame
+                .render_widget(Paragraph::new(Line::from(Span::raw(hints).dim()).right_aligned()), help_area);
+        }
+    }
+
+    /// The footer's rows at `width`; the questions that take it over need one.
+    fn footer_height(&self, width: u16) -> u16 {
+        if matches!(self.mode, Mode::ConfirmQuit | Mode::ConfirmClearAll | Mode::Search) {
+            return 1;
+        }
+        self.footer_text(width).1.len() as u16
+    }
+
+    /// The button that undoes a finished review, as drawn at the end of the footer.
+    fn undo_label(&self) -> Option<String> {
+        if self.mode != Mode::Browse || self.undo_archive.is_empty() {
+            return None;
+        }
+        let label = self.keys.labelled(Action::UndoFinish, "Undo finish");
+        Some(format!(" {} ", label.as_deref().unwrap_or("Undo finish")))
+    }
+
+    /// The footer's left text and its key hints in rows; the last row sits beside the text.
+    fn footer_text(&self, viewport_width: u16) -> (String, Vec<String>) {
         let orphans = self.open.store.orphans();
         // The status leads: it is the transient half of the line, and the name and counters
         // it pushes right are on screen for the whole session anyway.
         let mut parts: Vec<String> = self.status.iter().cloned().collect();
+        parts.extend(self.search_label());
         parts.extend([
             self.open.source.name.clone(),
             format!(
@@ -448,29 +518,32 @@ impl App {
                     let chars = self.open.doc.source.get(p.range.clone()).map_or(0, |s| s.chars().count());
                     format!("selected {chars} chars")
                 }
+                None if self.open.doc.blocks.is_empty() => "empty document".to_owned(),
                 None => format!("block {}/{}", self.selected + 1, self.open.doc.blocks.len()),
             },
         ]);
-        if self.viewport(frame.area()).width < RAIL_MIN_TOTAL_WIDTH {
+        if self.notes_rail.closed() {
+            parts.push(match self.keys.hint(Action::ToggleNotes) {
+                key if key.is_empty() => "notes hidden".to_owned(),
+                key => format!("notes hidden: {key} shows them"),
+            });
+        } else if self.rail_shown() && viewport_width < RAIL_MIN_TOTAL_WIDTH {
             parts.push("rail hidden: widen to ≥80 cols".into());
         }
-        let help = self.footer_help();
-        let help = if help.is_empty() { String::new() } else { format!("{} ", help.join(" · ")) };
-        // The status must stay readable at any width, so the key help yields columns to it
-        // (and is clipped) rather than the other way round.
-        let status_width = self.status.as_ref().map_or(0, |s| s.width() + 1) as u16;
-        let help_width = (help.width() as u16).min(area.width.saturating_sub(status_width.max(10)));
-        let [left_area, right_area] =
-            Layout::horizontal([Constraint::Min(10), Constraint::Length(help_width)]).areas(area);
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::raw(format!(" {}", parts.join(" · "))).dim())),
-            left_area,
-        );
-        frame.render_widget(Paragraph::new(Line::from(Span::raw(help).dim()).right_aligned()), right_area);
+        let text = format!(" {}", parts.join(" · "));
+        let undo = self.undo_label().map_or(0, |label| label.width());
+        // One column stays free after the hints, and one between them and the text.
+        let width = usize::from(viewport_width).saturating_sub(undo + 1);
+        let beside_text = width.saturating_sub(text.width() + 1);
+        (text, crate::ui::hints::flow(&self.footer_help(), width, beside_text))
     }
 
     /// The key help for the focused pane, in the user's keys.
     fn footer_help(&self) -> Vec<String> {
+        // A text box takes every key and its border names the ones it answers.
+        if matches!(self.mode, Mode::Compose | Mode::Edit(_) | Mode::AttachImage(_)) {
+            return Vec::new();
+        }
         // Each hint names its action's first key; an unbound action drops out of the line.
         let key = |action, label| self.keys.labelled(action, label);
         let bare = |hint: String| (!hint.is_empty()).then_some(hint);
@@ -501,6 +574,19 @@ impl App {
             .collect::<Vec<_>>()
             .join("/");
         let marks = bare(marks).map(|keys| format!("{keys} mark"));
+        // While a search is shown its steps lead, and its Esc clears it; `/` starts one
+        // otherwise.
+        let search_steps = self.has_search().then(|| {
+            let keys = [Action::NextMatch, Action::PreviousMatch]
+                .map(|action| self.keys.hint(action))
+                .into_iter()
+                .filter(|hint| !hint.is_empty())
+                .collect::<Vec<_>>()
+                .join("/");
+            bare(keys).map(|keys| format!("{keys} match"))
+        });
+        let search_steps = search_steps.flatten();
+        let clear_search = self.has_search().then(|| key(Action::Back, "clear search")).flatten();
         let help: Vec<Option<String>> = match self.focus {
             _ if self.pending.is_some() => vec![
                 key(Action::LooksGood, "looks good"),
@@ -524,6 +610,7 @@ impl App {
                 key(Action::Remove, "remove"),
                 key(Action::AttachImage, "image"),
                 remove_image,
+                key(Action::ToggleNotes, "hide"),
                 tab,
             ]
             .into_iter()
@@ -539,6 +626,8 @@ impl App {
             .chain(quit)
             .collect(),
             Focus::Document => [
+                search_steps,
+                clear_search,
                 key(Action::MoveCursor, "move"),
                 key(Action::Visual, "select"),
                 key(Action::Comment, "comment"),
@@ -547,6 +636,7 @@ impl App {
                 remove_image,
                 key(Action::Send, "send"),
                 approve,
+                (!self.has_search()).then(|| key(Action::Search, "search")).flatten(),
                 tab,
             ]
             .into_iter()
@@ -565,11 +655,4 @@ impl App {
 fn short_id(id: &str) -> String {
     let tail: Vec<char> = id.chars().rev().take(5).collect();
     tail.into_iter().rev().collect()
-}
-
-/// A picker's bottom help: the arrows that move its cursor, then the bound keys.
-pub(super) fn picker_help(moves: &str, keys: impl IntoIterator<Item = Option<String>>) -> String {
-    let parts: Vec<String> =
-        std::iter::once(format!("\u{2191}\u{2193} {moves}")).chain(keys.into_iter().flatten()).collect();
-    format!(" {} ", parts.join(" \u{b7} "))
 }

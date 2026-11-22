@@ -29,6 +29,8 @@ pub(crate) fn watch() {
         // Not `restore`: it reports a failure on stderr, which is the hung-up terminal too,
         // and that print panics inside ratatui's panic hook and aborts.
         let _ = ratatui::try_restore();
+        // `exit` skips `Drop`, so the Pi link's registry entry goes here.
+        crate::pi::link::remove_entry();
         std::process::exit(HANGUP_STATUS);
     });
 }

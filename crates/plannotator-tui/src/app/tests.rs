@@ -30,7 +30,8 @@ fn scratch_data_dir() -> PathBuf {
 }
 
 /// A transient source: the app runs exactly as it does on a file, but nothing is written
-/// to the Plannotator data directory.
+/// to the Plannotator data directory. "Plan" draws on row 1 and its title rule on row 2,
+/// so "first thing" is on row 4.
 fn app(delivery: Box<dyn Delivery>) -> App {
     let source =
         DocumentSource::new("# Plan\n\nfirst thing\n".to_owned(), "plan.md", true, Provenance::Stdin);
@@ -247,7 +248,8 @@ fn a_status_leads_the_footer_and_the_name_counters_and_key_help_stay() {
         footer.trim_start().starts_with("comment saved · plan.md · 1 annotations · block 1/"),
         "footer was {footer:?}"
     );
-    assert!(footer.trim_end().ends_with("· q quit"), "key help is still drawn: {footer:?}");
+    let help = row(&rows, 18);
+    assert!(help.trim_end().ends_with("· q quit"), "key help is still drawn: {help:?}");
     // Once the status is cleared the same line continues with the name.
     app.status = None;
     let rows = draw_sized(&mut app, 140, 20);
@@ -280,6 +282,60 @@ fn newest_opens_the_newest_reply_and_leaves_the_picker_on_p() {
     app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Esc))).expect("esc");
     assert_eq!(app.mode, Mode::Browse);
     assert_eq!(app.open.doc.source, "# Third\n\nnewest message\n", "esc returns to what was open");
+}
+
+#[test]
+fn the_picker_scrolls_to_keep_the_cursor_in_view() {
+    let mut app = picker_of_replies(30);
+    for _ in 0..20 {
+        app.handle_event(&Event::Key(KeyEvent::from(KeyCode::Char('j')))).expect("j");
+    }
+    let rows = draw_sized(&mut app, 80, 14);
+    let drawn = |app: &App, wanted: usize| {
+        app.geometry.pick_rows.iter().find(|(_, index)| *index == wanted).map(|(rect, _)| *rect)
+    };
+    let cursor = drawn(&app, 20).expect("cursor row drawn");
+    assert!(row(&rows, usize::from(cursor.y)).contains("reply 20"), "{rows:#?}");
+    // A row above the cursor, so a click that opened the cursor's message would fail.
+    let above = drawn(&app, 15).expect("rows above the cursor drawn too");
+    click(&mut app, MouseEventKind::Down(MouseButton::Left), above.x, above.y);
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.doc.source, "reply 15\n");
+}
+
+/// A picker over `count` replies, `reply 0` the newest.
+fn picker_of_replies(count: usize) -> App {
+    use plannotator_tui_hosts::{Message, Role};
+    let messages: Vec<Message> = (0..count)
+        .map(|index| Message {
+            id: format!("m{index}"),
+            role: Role::Assistant,
+            text: format!("reply {index}\n"),
+            at: Some("2026-08-28T12:00:00.000Z".to_owned()),
+        })
+        .collect();
+    let mut app =
+        App::open_message("claude", "/tmp/transcript.jsonl", None, messages, 60, Box::new(Discard), false)
+            .expect("opens");
+    app.data_dir = scratch_data_dir();
+    app
+}
+
+#[test]
+fn page_keys_move_the_picker_half_a_list_and_home_and_end_to_either_end() {
+    let mut app = picker_of_replies(30);
+    draw_sized(&mut app, 80, 14);
+    let page = app.geometry.pick_rows.len() / 2;
+    assert!(page > 1, "the list shows a few rows");
+    let mut press = |code: KeyCode| {
+        app.handle_event(&Event::Key(KeyEvent::from(code))).expect("key");
+        (app.pick_cursor, app.open.doc.source.clone())
+    };
+    assert_eq!(press(KeyCode::PageDown), (page, format!("reply {page}\n")), "the preview follows");
+    assert_eq!(press(KeyCode::PageUp).0, 0);
+    assert_eq!(press(KeyCode::End), (29, "reply 29\n".to_owned()));
+    assert_eq!(press(KeyCode::PageDown).0, 29, "paging stops at the oldest");
+    assert_eq!(press(KeyCode::Home).0, 0);
 }
 
 #[test]
@@ -361,8 +417,9 @@ fn a_centered_app_leaves_both_margins_blank_and_its_buttons_still_click() {
 #[test]
 fn margins_yield_before_the_app_drops_below_80_columns_and_default_to_none() {
     let mut app = app(Box::new(Discard));
+    app.ui.doc_width = 0;
     draw_sized(&mut app, 180, 20);
-    assert_eq!(app.geometry.doc.x, 2, "full width by default");
+    assert_eq!(app.geometry.doc.x, 2, "full width without a reading column");
     app.ui.horizontal_margin = 4;
     app.ui.max_width = 120;
     for (width, left, viewport_width) in [(180, 30, 120), (100, 4, 92), (84, 2, 80), (60, 0, 60)] {
@@ -375,19 +432,50 @@ fn margins_yield_before_the_app_drops_below_80_columns_and_default_to_none() {
 }
 
 #[test]
-fn doc_width_caps_the_text_and_spare_columns_sit_before_the_rail() {
+fn doc_width_is_a_reading_column_centred_in_what_the_rail_leaves() {
     let mut app = app(Box::new(Discard));
+    app.notes_rail = crate::notes_rail::NotesRail::new(crate::notes_rail::RailStart::Shown);
     app.ui.doc_width = 100;
-    // (terminal, document): the cap holds when wide; when narrow the rail keeps its width
-    // and the document absorbs the shortfall.
-    for (width, doc_width) in [(250, 100), (140, 100), (120, 81), (90, 59)] {
+    // (terminal, column, left margin): the cap holds when wide, centred between the gutter
+    // and the rail; when narrow the rail keeps its width and the column absorbs the shortfall.
+    for (width, column, margin) in [(250, 100, 55), (140, 100, 0), (120, 81, 0), (90, 59, 0)] {
         draw_sized(&mut app, width, 20);
-        assert_eq!(app.geometry.doc.width, doc_width, "terminal {width}");
-        assert_eq!(app.open.layout.width, usize::from(doc_width));
+        let doc = app.geometry.doc;
+        assert_eq!((doc.x, doc.width), (margin + 2, column), "terminal {width}");
+        assert_eq!(app.open.layout.width, usize::from(column));
+        let rail = width - if width < 100 { 28 } else { 36 };
+        let spare = rail - 1 - doc.right();
+        assert!(spare.abs_diff(margin) <= 1, "terminal {width}: {margin} left, {spare} right");
     }
     app.ui.doc_width = 0;
     draw_sized(&mut app, 250, 20);
     assert_eq!(app.geometry.doc.width, 250 - 2 - 1 - 36, "zero takes every column the rail leaves");
+}
+
+#[test]
+fn the_reading_column_widens_and_narrows_by_eight_from_what_is_on_screen() {
+    let mut app = app(Box::new(Discard));
+    app.notes_rail = crate::notes_rail::NotesRail::new(crate::notes_rail::RailStart::Shown);
+    draw_sized(&mut app, 250, 20);
+    assert_eq!(app.open.layout.width, usize::from(crate::config::DOC_WIDTH));
+    press_char(&mut app, '>');
+    draw_sized(&mut app, 250, 20);
+    assert_eq!(app.open.layout.width, 88);
+    press_char(&mut app, '<');
+    press_char(&mut app, '<');
+    draw_sized(&mut app, 250, 20);
+    assert_eq!(app.open.layout.width, 72);
+    // At 120 columns the rail leaves 81: narrowing starts from those, not from a wider cap.
+    app.ui.doc_width = 200;
+    draw_sized(&mut app, 120, 20);
+    press_char(&mut app, '<');
+    draw_sized(&mut app, 120, 20);
+    assert_eq!(app.open.layout.width, 73);
+    for _ in 0..20 {
+        press_char(&mut app, '<');
+    }
+    draw_sized(&mut app, 120, 20);
+    assert_eq!(app.open.layout.width, 20, "the column stops at twenty");
 }
 
 #[test]
@@ -508,8 +596,8 @@ fn click_at(column: u16, row: u16) -> Event {
 fn double_clicking_a_block_offers_the_toolbar_for_the_whole_block() {
     let mut app = app(Box::new(Discard));
     draw(&mut app);
-    // "first thing" is the second block; single click starts a selection, not a toolbar.
-    let (col, row) = (5, 3);
+    // "first thing" is the second block, on row 4; single click starts a selection, not a toolbar.
+    let (col, row) = (5, 4);
     app.handle_event(&click_at(col, row)).expect("first click");
     let rows = draw(&mut app);
     assert!(!rows.iter().any(|r| r.contains("looks good")), "no toolbar after one click");
@@ -528,7 +616,7 @@ fn double_clicking_a_block_offers_the_toolbar_for_the_whole_block() {
 fn a_comment_can_span_lines_and_enter_saves_it() {
     let mut app = app(Box::new(Discard));
     draw(&mut app);
-    let (col, row) = (5, 3);
+    let (col, row) = (5, 4);
     app.handle_event(&click_at(col, row)).expect("click");
     app.handle_event(&click_at(col, row)).expect("double click");
     app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("open compose");
@@ -557,13 +645,173 @@ fn a_comment_can_span_lines_and_enter_saves_it() {
 fn pasting_into_the_comment_box_keeps_newlines() {
     let mut app = app(Box::new(Discard));
     draw(&mut app);
-    app.handle_event(&click_at(5, 3)).expect("click");
-    app.handle_event(&click_at(5, 3)).expect("double click");
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
     app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
     app.handle_event(&Event::Paste("pasted one\r\npasted two".to_owned())).expect("paste");
     app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("save");
     let placed = app.open.store.placed();
     assert_eq!(placed.last().expect("annotation").annotation.body, "pasted one\npasted two");
+}
+
+#[test]
+fn a_title_too_long_for_the_box_continues_on_its_bottom_border() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    app.handle_event(&Event::Paste("draft".to_owned())).expect("paste");
+    let rows = draw(&mut app);
+    let title = rows.iter().position(|r| r.contains("enter saves")).expect("title row");
+    assert!(row(&rows, title).contains("alt+enter new line"), "{rows:#?}");
+    assert!(row(&rows, title + 1).contains("draft"), "{rows:#?}");
+    assert!(row(&rows, title + 2).contains("esc cancels"), "{rows:#?}");
+}
+
+#[test]
+fn up_and_down_move_by_row_for_keys_queued_before_the_box_is_first_drawn() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    app.handle_event(&Event::Paste("word ".repeat(12))).expect("paste");
+    app.handle_event(&key(KeyCode::Up, KeyModifiers::NONE)).expect("up");
+    assert_eq!(app.compose.wrapped(44).1, 0, "up left the second row");
+}
+
+#[test]
+fn the_cursor_shows_past_the_last_character_of_a_full_row() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    draw(&mut app);
+    let full = "a".repeat(app.geometry.compose_wrap);
+    app.handle_event(&Event::Paste(full.clone())).expect("paste");
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 20)).expect("terminal");
+    terminal.draw(|frame| app.draw(frame)).expect("draw");
+    let cursor = terminal.get_cursor_position().expect("cursor");
+    let buffer = terminal.backend().buffer();
+    let text_row: String = (0..buffer.area.width)
+        .filter_map(|x| buffer.cell((x, cursor.y)))
+        .map(|cell| cell.symbol().to_owned())
+        .collect();
+    let start = text_row.find(&full).expect("the full row is drawn whole");
+    let text_start = text_row.get(..start).unwrap_or_default().chars().count();
+    assert_eq!(usize::from(cursor.x), text_start + full.len());
+}
+
+#[test]
+fn a_wide_comment_box_keeps_its_title_on_one_row_and_wraps_to_its_width() {
+    let mut app = app(Box::new(Discard));
+    app.ui.comment_width = 60;
+    let wide = |app: &mut App| crate::app::review_test_support::draw(app, 200, 30);
+    wide(&mut app);
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    let screen = wide(&mut app);
+    assert_eq!(app.geometry.compose_wrap, 56);
+    assert!(screen.lines().any(|r| r.contains("enter saves") && r.contains("esc cancels")), "{screen}");
+}
+
+#[test]
+fn a_narrow_pane_narrows_the_comment_box_and_its_wrapping_with_it() {
+    let mut app = app(Box::new(Discard));
+    app.ui.comment_width = 500;
+    draw(&mut app);
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    draw(&mut app);
+    assert_eq!(app.geometry.compose_wrap, usize::from(app.geometry.doc.width) - 4);
+}
+
+#[test]
+fn esc_on_a_typed_comment_asks_before_discarding_it() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    app.handle_event(&Event::Paste("draft".to_owned())).expect("paste");
+
+    let press = |app: &mut App, code| app.handle_event(&key(code, KeyModifiers::NONE)).expect("key");
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.mode, Mode::Compose);
+    let rows = draw(&mut app);
+    assert!(rows.iter().any(|r| r.contains("discard comment? y discard")), "{rows:?}");
+    assert!(rows.iter().any(|r| r.contains("draft")), "the draft stays visible: {rows:?}");
+
+    // Neither a second Esc nor Enter nor a stray letter loses or changes the draft.
+    press(&mut app, KeyCode::Char('x'));
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.mode, Mode::Compose);
+    assert_eq!(app.compose.value(), "draft");
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.mode, Mode::Compose);
+    press(&mut app, KeyCode::Char('x'));
+    assert_eq!(app.compose.value(), "draftx", "esc returned to editing");
+
+    press(&mut app, KeyCode::Esc);
+    press(&mut app, KeyCode::Char('n'));
+    assert_eq!(app.mode, Mode::Compose);
+    assert_eq!(app.compose.value(), "draftx", "n returned to editing");
+
+    press(&mut app, KeyCode::Esc);
+    press(&mut app, KeyCode::Char('y'));
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.store.len(), 0, "the draft was discarded, not saved");
+}
+
+#[test]
+fn esc_closes_at_once_when_there_is_nothing_to_lose() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    assert_eq!(app.mode, Mode::Browse);
+}
+
+#[test]
+fn esc_on_an_edit_asks_only_once_the_body_changed() {
+    let mut app = app(Box::new(Discard));
+    app.add_block_annotation(0, Kind::Comment, "body".to_owned()).expect("annotation");
+    app.edit_selected_annotation();
+    assert!(matches!(app.mode, Mode::Edit(_)));
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    assert_eq!(app.mode, Mode::Browse, "an untouched edit closes at once");
+
+    app.edit_selected_annotation();
+    app.handle_event(&key(KeyCode::Char('!'), KeyModifiers::NONE)).expect("type");
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    assert!(matches!(app.mode, Mode::Edit(_)), "a changed edit asks first");
+    let rows = draw(&mut app);
+    assert!(rows.iter().any(|r| r.contains("discard edit? y discard")), "{rows:?}");
+    app.handle_event(&key(KeyCode::Char('y'), KeyModifiers::NONE)).expect("yes");
+    assert_eq!(app.mode, Mode::Browse);
+    assert_eq!(app.open.store.placed().first().expect("note").annotation.body, "body");
+}
+
+#[test]
+fn a_paste_during_the_discard_question_returns_to_editing() {
+    let mut app = app(Box::new(Discard));
+    draw(&mut app);
+    app.handle_event(&click_at(5, 4)).expect("click");
+    app.handle_event(&click_at(5, 4)).expect("double click");
+    app.handle_event(&key(KeyCode::Char('c'), KeyModifiers::NONE)).expect("compose");
+    app.handle_event(&Event::Paste("draft".to_owned())).expect("paste");
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+    app.handle_event(&Event::Paste(" more".to_owned())).expect("paste");
+    app.handle_event(&key(KeyCode::Char('y'), KeyModifiers::NONE)).expect("type");
+    assert_eq!(app.mode, Mode::Compose);
+    assert_eq!(app.compose.value(), "draft morey");
 }
 
 #[test]
@@ -612,6 +860,30 @@ fn two_row_paragraph_app() -> App {
     app.data_dir = scratch_data_dir();
     draw(&mut app);
     app
+}
+
+#[test]
+fn dragging_across_a_hanging_row_from_its_indent_selects_only_its_text() {
+    let source = DocumentSource::new(
+        "- alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron\n".to_owned(),
+        "doc.md",
+        true,
+        Provenance::Stdin,
+    );
+    let mut app = App::open(source, 60, Box::new(Discard)).expect("app opens");
+    app.data_dir = scratch_data_dir();
+    draw_sized(&mut app, 60, 20);
+    let block = &app.open.layout.blocks[0];
+    let row = block.rows.get(1).expect("the item wraps");
+    let visible = row.line.to_string();
+    assert!(visible.starts_with("  "), "{visible:?}");
+    assert_ne!(visible.trim_start(), "");
+    let (doc, y) = (app.geometry.doc, app.geometry.doc.y + u16::try_from(block.first_row + 1).expect("row"));
+    let end = doc.x + u16::try_from(row.cells.len() - 1).expect("width");
+    click(&mut app, MouseEventKind::Down(MouseButton::Left), doc.x, y);
+    click(&mut app, MouseEventKind::Drag(MouseButton::Left), end, y);
+    click(&mut app, MouseEventKind::Up(MouseButton::Left), end, y);
+    assert_eq!(selected_text(&app), Some(visible.trim_start()));
 }
 
 fn press_char(app: &mut App, c: char) {
@@ -877,6 +1149,133 @@ fn repeating_a_mark_on_the_same_selection_adds_nothing() {
         press_char(&mut app, 'a');
     }
     assert_eq!(app.open.store.len(), 1);
+}
+
+#[test]
+fn the_footer_names_no_browse_keys_while_a_text_box_is_open() {
+    let mut app = two_row_paragraph_app();
+    press_char(&mut app, 'c');
+    let screen = draw(&mut app).join("\n");
+    assert!(!screen.contains("· d delete") && !screen.contains("esc clear"), "{screen}");
+    app.handle_event(&key(KeyCode::Esc, KeyModifiers::NONE)).expect("esc");
+
+    press_char(&mut app, 'a');
+    app.handle_event(&key(KeyCode::Tab, KeyModifiers::NONE)).expect("tab");
+    let screen = draw(&mut app).join("\n");
+    assert!(screen.contains("e edit"), "the rail names its keys: {screen}");
+    press_char(&mut app, 'e');
+    let screen = draw(&mut app).join("\n");
+    assert!(!screen.contains("e edit"), "{screen}");
+}
+
+#[test]
+fn a_footer_too_long_for_one_row_flows_upward_and_loses_nothing() {
+    let mut app = two_row_paragraph_app();
+    let rows = draw_sized(&mut app, 140, 20);
+    assert_eq!(20 - app.geometry.doc.bottom(), 1, "one row while it fits: {rows:#?}");
+
+    let rows = draw_sized(&mut app, 60, 20);
+    let height = 20 - app.geometry.doc.bottom();
+    assert!(height > 1, "{rows:#?}");
+    let footer: Vec<String> = rows.iter().skip(usize::from(20 - height)).cloned().collect();
+    let text = footer.join("\n");
+    for expected in ["i move", "v select", "q quit"] {
+        assert!(text.contains(expected), "{expected} missing from {text}");
+    }
+    assert!(
+        footer.last().is_some_and(|last| last.trim_start().starts_with("doc.md · 0 annotations · block 1/")),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_footer_that_grows_keeps_the_marked_block_in_view() {
+    let mut app = long_app();
+    let mut footer_grew = false;
+    for block in 0..app.open.doc.blocks.len() {
+        app.status = None;
+        draw_sized(&mut app, 127, 11);
+        app.select_block(block);
+        draw_sized(&mut app, 127, 11);
+        let rendered = &app.open.layout.blocks[block];
+        let last = rendered.first_row + rendered.rows.len() - 1;
+        let before = app.geometry.doc.height;
+        let shown_before = last < app.scroll + usize::from(before);
+        press_char(&mut app, 'a');
+        draw_sized(&mut app, 127, 11);
+        footer_grew |= app.geometry.doc.height < before;
+        if shown_before {
+            let shown = last < app.scroll + usize::from(app.geometry.doc.height);
+            assert!(shown, "block {block}: row {last} left the view at scroll {}", app.scroll);
+        }
+    }
+    assert!(footer_grew, "the status never grew the footer, so this tested nothing");
+}
+
+#[test]
+fn a_footer_that_grows_leaves_a_block_the_reader_scrolled_away_from() {
+    let mut app = long_app();
+    draw_sized(&mut app, 127, 11);
+    app.scroll_by(6);
+    let scroll = app.scroll;
+    let before = app.geometry.doc.height;
+    app.set_status("a status long enough to push the key hints up onto a row of their own".to_owned());
+    draw_sized(&mut app, 127, 11);
+    assert!(app.geometry.doc.height < before, "the status grew the footer");
+    assert_eq!(app.scroll, scroll);
+}
+
+#[test]
+fn a_footer_that_grows_keeps_the_toolbar_on_screen() {
+    let mut app = long_app();
+    draw_sized(&mut app, 127, 11);
+    app.select_block(4);
+    press_char(&mut app, 'v');
+    press_char(&mut app, 'e');
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("enter");
+    draw_sized(&mut app, 127, 11);
+    assert!(app.geometry.toolbar.is_some());
+    app.set_status("a status long enough to push the key hints up onto a row of their own".to_owned());
+    draw_sized(&mut app, 127, 11);
+    assert!(app.geometry.toolbar.is_some(), "the selection is still waiting for an action");
+}
+
+#[test]
+fn a_pane_too_narrow_for_the_document_still_draws() {
+    let mut app = two_row_paragraph_app();
+    draw_sized(&mut app, 0, 5);
+    assert_eq!(app.geometry.doc.width, 0);
+}
+
+fn long_app() -> App {
+    let text = (1..=12).map(|n| format!("para {n}")).collect::<Vec<_>>().join("\n\n");
+    let source = DocumentSource::new(text, "doc.md", true, Provenance::Stdin);
+    let mut app = App::open(source, 60, Box::new(Discard)).expect("app opens");
+    app.data_dir = scratch_data_dir();
+    app
+}
+
+#[test]
+fn a_resize_that_clears_the_selection_sizes_the_footer_without_it() {
+    let mut app = two_row_paragraph_app();
+    draw_sized(&mut app, 100, 20);
+    press_char(&mut app, 'v');
+    press_char(&mut app, 'e');
+    app.handle_event(&key(KeyCode::Enter, KeyModifiers::NONE)).expect("enter");
+    draw_sized(&mut app, 100, 20);
+    assert!(app.pending.is_some());
+    draw_sized(&mut app, 60, 20);
+    assert!(app.pending.is_none(), "the reflow cleared it");
+    let height = app.geometry.doc.height;
+    draw_sized(&mut app, 60, 20);
+    assert_eq!(app.geometry.doc.height, height);
+}
+
+#[test]
+fn the_footer_stops_at_three_rows() {
+    let mut app = two_row_paragraph_app();
+    draw_sized(&mut app, 24, 20);
+    assert_eq!(20 - app.geometry.doc.bottom(), 3);
 }
 
 #[test]
@@ -1205,8 +1604,8 @@ fn rebound_movement_keys_move_and_the_footer_names_them() {
     keys(&mut app, &[KeyCode::Esc, KeyCode::Char('k')]);
     assert_eq!(app.selected, 1);
     app.roam = true;
-    let footer = draw(&mut app).pop().expect("footer");
-    assert!(footer.contains("jkl; move"), "{footer:?}");
+    let screen = draw(&mut app).join("\n");
+    assert!(screen.contains("jkl; move"), "{screen}");
 }
 
 /// An unbound action leaves no bare label behind in the footer.
@@ -1214,16 +1613,15 @@ fn rebound_movement_keys_move_and_the_footer_names_them() {
 fn an_unbound_action_drops_out_of_the_footer() {
     let mut app = app(Box::new(Discard));
     app.keys = toml::from_str("quit = []\n").expect("keys");
-    let footer = draw(&mut app).pop().expect("footer");
-    assert!(footer.contains("S send+quit "), "{footer:?}");
-    assert!(!footer.contains("quit · ") && !footer.contains(" · quit"), "{footer:?}");
+    let screen = draw(&mut app).join("\n");
+    assert!(screen.contains("S send+quit "), "{screen}");
+    assert!(!screen.contains("quit · ") && !screen.contains(" · quit"), "{screen}");
 }
 
 /// A ctrl binding whose letter is also a plain binding earlier in the context still runs.
 #[test]
 fn a_ctrl_binding_beats_the_plain_key_it_shares_a_letter_with() {
     let mut app = app(Box::new(Discard));
-    // `up` comes before `bottom` in the document, and its plain `k` matches ctrl+k too.
     app.keys = toml::from_str("bottom = [\"ctrl+k\"]\n").expect("keys");
     app.handle_event(&Event::Key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL))).expect("key");
     assert_eq!(app.selected, 1, "ctrl+k goes to the last block instead of up");
