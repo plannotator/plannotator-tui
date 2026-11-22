@@ -1,5 +1,5 @@
-//! `--annotate-block` takes the same optional type as `--annotate`, through the real binary
-//! and a private data dir.
+//! `--annotate-block` takes the same optional type as `--annotate`, and both refuse a type
+//! they do not know, through the real binary and a private data dir.
 
 #![allow(clippy::expect_used, reason = "tests assert by panicking")]
 
@@ -80,5 +80,42 @@ fn what_annotate_refuses_after_the_type_is_refused_here_and_nothing_is_saved() {
         assert!(err.contains(wording) && err.contains("usage:"), "{extra:?}: {err}");
     }
     assert_eq!(export(&data, &doc), "No annotations.");
+    std::fs::remove_dir_all(&root).expect("cleanup");
+}
+
+/// `--annotate` on block 1's text and `--annotate-block` on block 1, with the same trailing words.
+fn both_commands(data: &Path, doc: &Path, extra: &[&str]) -> [Output; 2] {
+    let quote = bin()
+        .env("PLANNOTATOR_DATA_DIR", data)
+        .args(["--annotate", &doc.display().to_string(), "Keep this part.", "note"])
+        .args(extra)
+        .output()
+        .expect("annotate runs");
+    [quote, annotate_block(data, doc, "1", "note", extra)]
+}
+
+#[test]
+fn an_unknown_type_fails_names_the_accepted_words_and_saves_nothing() {
+    let (root, doc, data) = scratch("unknown");
+    for word in ["bogus", "looks-good", "Comment", ""] {
+        for out in both_commands(&data, &doc, &[word]) {
+            assert!(!out.status.success(), "{word:?} was accepted");
+            let err = String::from_utf8_lossy(&out.stderr);
+            let wording = format!("unknown type {word:?}: use comment, looks_good or delete");
+            assert!(err.contains(&wording) && err.contains("usage:"), "{word:?}: {err}");
+        }
+    }
+    assert_eq!(export(&data, &doc), "No annotations.");
+    std::fs::remove_dir_all(&root).expect("cleanup");
+}
+
+#[test]
+fn approve_still_means_looks_good() {
+    let (root, doc, data) = scratch("approve");
+    for out in both_commands(&data, &doc, &["approve"]) {
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let text = export(&data, &doc);
+    assert_eq!(text.matches("Looks good: \"Keep this part.\"").count(), 2, "{text}");
     std::fs::remove_dir_all(&root).expect("cleanup");
 }
