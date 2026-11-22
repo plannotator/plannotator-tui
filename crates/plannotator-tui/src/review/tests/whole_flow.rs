@@ -6,6 +6,7 @@ use std::time::Duration;
 use plannotator_tui_review::{NoteScope, Side, Status};
 use ratatui::crossterm::event::KeyCode;
 
+use super::viewed_flow::ticked;
 use super::*;
 use crate::review::Mode;
 
@@ -99,6 +100,9 @@ fn o_shows_the_file_now_at_the_same_line_with_changed_lines_marked_and_o_goes_ba
     assert_eq!((back.path.as_str(), back.side, back.first), ("long.py", Side::New, 20), "where it was");
     let rows = frame(&mut screen, 120, 40);
     assert!(rows[0].starts_with(" Uncommitted"), "{:?}", rows[0]);
+    // The diff's file list ticks the file marked in the whole-file view.
+    assert!(ticked(&mut screen, 160, "long.py"), "the list ticks it");
+    assert!(!ticked(&mut screen, 160, "app.py"));
 }
 
 #[test]
