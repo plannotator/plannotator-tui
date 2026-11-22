@@ -186,8 +186,11 @@ pub(crate) fn open(
     if placement == RexPlacement::Tab {
         returning_to(&mut args, block);
     }
-    if let Some(session) = pi_session(fg, review) {
+    // The pane checks the session in the registry the launcher found it in.
+    let registry = crate::pi::root();
+    if let Some(session) = pi_session(fg, review, &registry) {
         args.insert(1, format!("{PI_SESSION_VAR}={session}"));
+        args.insert(1, format!("{}={}", crate::pi::SESSIONS_DIR_VAR, registry.display()));
     }
     let cwd = match review {
         Review::Code { repo, .. } => Some(repo.as_path()),
@@ -196,13 +199,13 @@ pub(crate) fn open(
     super::place::open(rex, block, placement, cwd, &args, &tab_label(fg, review))
 }
 
-/// The Pi session a `last` review of a Pi shows, when the Pi link registry lists one for its
+/// The Pi session a `last` review of a Pi shows, when `registry` lists a running one for its
 /// process. The pane checks Pi is still in it before sending.
-fn pi_session(fg: &Foreground, review: &Review) -> Option<String> {
+fn pi_session(fg: &Foreground, review: &Review, registry: &Path) -> Option<String> {
     if fg.host != Some("pi") || !matches!(review, Review::Last { .. }) {
         return None;
     }
-    crate::pi::entry_for_pid(&crate::pi::root(), fg.pid).map(|entry| entry.id)
+    crate::pi::live_entry_for_pid(registry, fg.pid).map(|entry| entry.id)
 }
 
 /// The block a review in a tab of its own shows again when it ends: when a tab closes, Rex
@@ -234,6 +237,24 @@ fn tab_label(fg: &Foreground, review: &Review) -> String {
 #[allow(clippy::expect_used, reason = "tests assert by panicking")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_last_review_of_a_running_registered_pi_is_pinned_to_its_session() {
+        let registry = std::env::temp_dir().join(format!("plannotator-tui-rex-pin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&registry);
+        crate::pi::write_test_entry(&registry, "session-1", 73139, true);
+        crate::pi::write_test_entry(&registry, "gone", 73140, false);
+        let pi = |pid| Foreground { pid, cwd: None, host: Some("pi") };
+        let last = Review::Last { newest: false };
+        assert_eq!(pi_session(&pi(73139), &last, &registry).as_deref(), Some("session-1"));
+        assert_eq!(pi_session(&pi(73140), &last, &registry), None, "a Pi that is gone pins nothing");
+        assert_eq!(pi_session(&pi(73141), &last, &registry), None, "no extension: no pin");
+        let open = Review::Open(Some(PathBuf::from("/p/plan.md")), None);
+        assert_eq!(pi_session(&pi(73139), &open, &registry), None, "a file review is not pinned");
+        let claude = Foreground { pid: 73139, cwd: None, host: Some("claude") };
+        assert_eq!(pi_session(&claude, &last, &registry), None);
+        std::fs::remove_dir_all(registry).ok();
+    }
 
     /// `com.superlogical.terminal.process` for a block running Claude Code, as Rex reports it.
     const CLAUDE: &str = r#"{"last_exit":null,"child":{"pid":59515,"name":"login"},"foreground":{"pid":60223,"name":"2.1.308","path":"/Users/me/.local/share/claude/versions/2.1.308","invoked_path":"/Users/me/.local/bin/claude","argv0":"claude","cwd":"/Users/me/project"}}"#;

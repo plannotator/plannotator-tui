@@ -25,9 +25,9 @@ same folder and rename it over the entry. Each side removes its own entry when i
 Paths in entries are as each process saw them. Resolve both sides to real paths before
 comparing them (on macOS `/var/…` is `/private/var/…`).
 
-Entries can be stale (a crash or `kill -9` leaves them). A reader treats an entry as live
-only if its `pid` is running; for a stale entry the reader may delete it. A refused
-connection also means stale.
+Entries can be stale (a crash or `kill -9` leaves them). plannotator-tui treats a Pi entry
+as live only if its port answers a `ping`; a refused connection means stale, and it deletes
+that entry. (The extension checks a plannotator-tui entry's `pid` the same way.)
 
 ### Pi entry
 
@@ -52,10 +52,20 @@ Pi has appended since, every append moves its leaf to the new entry, and the new
 branch is the one. An entry without `tip` (an older extension) says nothing about the tree.
 
 `plannotator-tui last --pid <pid>` (the Rex, Herdr and herdr-core launchers pass it) reads
-the transcript of the entry with that pid, and says so when that transcript has no reply
-saved yet rather than open another session's. A Rex `last` review of a Pi records the
-entry's session `id`; Send checks the entry for that pid still has it, and refuses if the
-session changed (`/new`, `/resume`) or the entry is gone.
+the transcript of the live entry with that pid, and takes the tree position from that same
+entry: two Pis can resume one session file, each at its own place. When that session has
+no reply saved yet, or is not saved at all (`pi --no-session`), `last` says so rather than
+open another session's transcript. A transcript read without a pid takes the position from
+the live entry written last that names it.
+
+A Rex `last` review of a Pi records the live entry's session `id`, and the registry root it
+was found in, for the review pane. Send checks the live entry for that pid still has that
+id. If Pi moved to another session it refuses: `/new` and `/resume` obviously, and `/fork`
+and `/clone` too, since Pi gives both a new session (reason `fork`, a new file whose header
+names the old one) and whether it holds the reviewed reply depends on where it branched.
+If no live entry answers (Pi reloading, the extension removed), it refuses and says to
+retry or reinstall. Either refusal copies nothing and keeps the notes pending for `E`, as
+for an agent at a dialog. A registry folder the pane cannot read at all means no check.
 
 ### plannotator-tui entry
 

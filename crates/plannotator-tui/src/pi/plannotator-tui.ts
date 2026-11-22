@@ -297,11 +297,11 @@ export default function plannotatorTui(pi: ExtensionAPI) {
 
 	const writeEntry = () => {
 		if (stopped || !ctx || !entryPath || !port) return;
-		// `/tree` moves Pi's leaf without writing to the transcript, so plannotator-tui
-		// would read the newest entry's branch. `tip` lets it tell whether `leaf` is still
-		// current: once Pi appends, the newest entry is the leaf again.
-		const entries = ctx.sessionManager.getEntries();
 		try {
+			// `/tree` moves Pi's leaf without writing to the transcript, so plannotator-tui
+			// would read the newest entry's branch. `tip` lets it tell whether `leaf` is
+			// still current: once Pi appends, the newest entry is the leaf again.
+			const entries = ctx.sessionManager.getEntries();
 			writeAtomic(
 				entryPath,
 				`${JSON.stringify({
@@ -332,7 +332,8 @@ export default function plannotatorTui(pi: ExtensionAPI) {
 	};
 
 	// Last resort for an exit that skips session_shutdown. (Signals that kill the
-	// process outright still leave the entry; readers check the pid.)
+	// process outright still leave the entry; plannotator-tui pings an entry before
+	// trusting it, and deletes it when its port refuses.)
 	const onExit = () => removeQuietly(entryPath);
 
 	const stop = () => {
