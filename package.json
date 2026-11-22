@@ -1,7 +1,0 @@
-{
-  "name": "plannotator-tui",
-  "private": true,
-  "pi": {
-    "extensions": ["./pi/index.js"]
-  }
-}

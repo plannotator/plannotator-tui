@@ -297,6 +297,10 @@ export default function plannotatorTui(pi: ExtensionAPI) {
 
 	const writeEntry = () => {
 		if (stopped || !ctx || !entryPath || !port) return;
+		// `/tree` moves Pi's leaf without writing to the transcript, so plannotator-tui
+		// would read the newest entry's branch. `tip` lets it tell whether `leaf` is still
+		// current: once Pi appends, the newest entry is the leaf again.
+		const entries = ctx.sessionManager.getEntries();
 		try {
 			writeAtomic(
 				entryPath,
@@ -308,6 +312,8 @@ export default function plannotatorTui(pi: ExtensionAPI) {
 					cwd: ctx.cwd,
 					name: sessionName(),
 					transcript: ctx.sessionManager.getSessionFile() ?? null,
+					leaf: ctx.sessionManager.getLeafId() ?? null,
+					tip: entries.at(-1)?.id ?? null,
 					port,
 					token,
 					busy,
@@ -418,6 +424,7 @@ export default function plannotatorTui(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_info_changed", async () => writeEntry());
+	pi.on("session_tree", async () => writeEntry());
 
 	pi.registerTool({
 		name: "plannotator_tui_note",

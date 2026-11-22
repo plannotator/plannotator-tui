@@ -34,13 +34,28 @@ connection also means stale.
 ```json
 { "v": 1, "host": "pi", "id": "<session id>", "pid": 4121, "cwd": "/abs/dir",
   "name": "api-refactor", "transcript": "/abs/session.jsonl",
+  "leaf": "0c0c0c0c", "tip": "0c0c0c0c",
   "port": 50123, "token": "<64 hex chars>", "busy": false, "updated": 1763190000000 }
 ```
 
 `name` and `transcript` may be `null`. `busy` is true from `agent_start` until
 `agent_settled` (or `agent_end` where there is no `agent_settled`). `updated` is epoch
-milliseconds of the last rewrite. The entry is rewritten when busy or the name changes, and
-on every `session_start` (a `/new`, `/resume` or `/fork` removes the old entry first).
+milliseconds of the last rewrite. The entry is rewritten when busy or the name changes, on
+`/tree` navigation (`session_tree`), and on every `session_start` (a `/new`, `/resume` or
+`/fork` removes the old entry first).
+
+`leaf` is the session's current entry id (`null` before the first) and `tip` the id of its
+newest entry, both as of the last rewrite. `/tree` moves the leaf without writing to the
+transcript, so the transcript's newest entry can be on another branch. A reader that finds
+the transcript's newest entry is still `tip` reads the branch ending at `leaf`; otherwise
+Pi has appended since, every append moves its leaf to the new entry, and the newest entry's
+branch is the one. An entry without `tip` (an older extension) says nothing about the tree.
+
+`plannotator-tui last --pid <pid>` (the Rex, Herdr and herdr-core launchers pass it) reads
+the transcript of the entry with that pid, and says so when that transcript has no reply
+saved yet rather than open another session's. A Rex `last` review of a Pi records the
+entry's session `id`; Send checks the entry for that pid still has it, and refuses if the
+session changed (`/new`, `/resume`) or the entry is gone.
 
 ### plannotator-tui entry
 

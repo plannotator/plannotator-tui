@@ -66,7 +66,13 @@ pub(super) fn read(
         Host::Pi => {
             // A Pi running our extension lists its pid and transcript in the Pi link
             // registry: that is the session, even when another Pi shares the folder.
-            if let Some(path) = options.pid.and_then(registered_pi_transcript) {
+            // Until that session has written a reply, the folder's newest transcript is
+            // another session's, so say so rather than open it.
+            if let Some(entry) = options.pid.and_then(|pid| crate::pi::entry_for_pid(&crate::pi::root(), pid))
+            {
+                let path = entry.transcript.filter(|path| path.is_file()).with_context(|| {
+                    format!("Pi session {} (pid {}) has not saved a reply yet", entry.id, entry.pid)
+                })?;
                 let messages = readers::pi_messages(&path, pick)?;
                 return Ok((path, messages, Discovery::Exact));
             }
@@ -201,16 +207,6 @@ fn find_pi_transcript(cwd: &Path, roots: &Roots, default_agent_dir: &str, label:
     pi::find_transcript(&sessions_dir, cwd).ok_or_else(|| {
         anyhow::anyhow!("no {label} session for {} (looked in {})", cwd.display(), sessions_dir.display())
     })
-}
-
-/// The transcript the Pi session with this pid registered, newest entry first.
-fn registered_pi_transcript(pid: u32) -> Option<PathBuf> {
-    crate::pi::pi_entries(&crate::pi::root())
-        .into_iter()
-        .rev()
-        .filter(|entry| entry.pid == pid)
-        .find_map(|entry| entry.transcript)
-        .filter(|path| path.is_file())
 }
 
 fn find_commandcode_transcript(cwd: &Path, roots: &Roots) -> Result<PathBuf> {

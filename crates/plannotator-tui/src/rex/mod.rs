@@ -14,6 +14,5 @@ pub(crate) mod command;
 pub(crate) mod install;
 pub(crate) mod launch;
 pub(crate) mod paths;
-pub(crate) mod pi;
 pub(crate) mod place;
 pub(crate) mod terminal;

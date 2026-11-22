@@ -210,14 +210,24 @@ pub fn parse_messages(jsonl: &str, n: usize) -> Vec<Message> {
     messages_on_branch(&entries, n, &active)
 }
 
-/// Messages on the branch ending at `leaf_id`, newest first, through the `n`th newest
-/// reply. `None` selects an empty branch; an unknown leaf or unreconstructable chain
-/// yields nothing rather than falling back to another branch.
-pub fn parse_messages_at_leaf(jsonl: &str, n: usize, leaf_id: Option<&str>) -> Vec<Message> {
-    let Some(leaf_id) = leaf_id else { return Vec::new() };
+/// Messages on the branch a running pi stands on, newest first, through the `n`th newest
+/// reply. pi moves its leaf in memory when you navigate with `/tree` and writes nothing,
+/// so the newest entry on disk can be on another branch; its registry entry records the
+/// `leaf` and the newest entry (`tip`) it had at the time. While the newest entry on disk
+/// is still `tip`, the branch ends at `leaf` (`None`: before the first entry, an empty
+/// branch). Once pi has appended, the newest entry wins as in [`parse_messages`]: every
+/// append moves pi's leaf to the new entry. An unknown leaf or an unreconstructable chain
+/// yields nothing rather than another branch.
+pub fn parse_messages_at(jsonl: &str, n: usize, tip: &str, leaf: Option<&str>) -> Vec<Message> {
     let entries = parse_entries(jsonl);
-    let Some(active) = branch_at_leaf(&entries, leaf_id) else { return Vec::new() };
-    messages_on_branch(&entries, n, &active)
+    let newest = entries.iter().rev().find(|e| e.id.is_some());
+    let start = if newest.and_then(|e| e.id.as_deref()) == Some(tip) {
+        leaf.and_then(|leaf| entries.iter().rev().find(|e| e.id.as_deref() == Some(leaf)))
+    } else {
+        newest
+    };
+    let Some(branch) = start.and_then(|start| branch_from_entry(&entries, start)) else { return Vec::new() };
+    messages_on_branch(&entries, n, &branch)
 }
 
 fn parse_entries(jsonl: &str) -> Vec<Entry> {
@@ -250,11 +260,6 @@ fn messages_on_branch(
 fn active_branch(entries: &[Entry]) -> Option<std::collections::HashSet<String>> {
     let newest = entries.iter().rev().find(|e| e.id.is_some())?;
     branch_from_entry(entries, newest)
-}
-
-fn branch_at_leaf(entries: &[Entry], leaf_id: &str) -> Option<std::collections::HashSet<String>> {
-    let leaf = entries.iter().rev().find(|e| e.id.as_deref() == Some(leaf_id))?;
-    branch_from_entry(entries, leaf)
 }
 
 fn branch_from_entry(entries: &[Entry], leaf: &Entry) -> Option<std::collections::HashSet<String>> {

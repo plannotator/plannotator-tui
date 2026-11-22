@@ -9,9 +9,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde_json::Value;
 
-use super::agent::{AGENT_VAR, BLOCK_VAR, PI_SESSION_ID_VAR, PI_SESSION_PATH_VAR, PID_VAR, SUBMIT_VAR};
+use super::agent::{AGENT_VAR, BLOCK_VAR, PI_SESSION_VAR, PID_VAR, SUBMIT_VAR};
 use super::command::Rex;
-use super::pi::PiSession;
 use crate::config::RexPlacement;
 use crate::herdr::launch::known_host;
 
@@ -93,24 +92,12 @@ pub(crate) fn argv(
     fg: &Foreground,
     review: &Review,
     handoff: Handoff,
-    pi_session: Option<&PiSession>,
 ) -> Result<Vec<String>> {
-    let pi_last_session = if fg.host == Some("pi") && matches!(review, Review::Last { .. }) {
-        Some(pi_session.context(
-            "Pi Rex last needs a live session endpoint; install and enable the Plannotator Pi extension (`pi/index.js`), then start a Pi TUI session",
-        )?)
-    } else {
-        None
-    };
     let mut args = vec!["/usr/bin/env".to_owned()];
     if let Some(host) = fg.host {
         args.push(format!("{BLOCK_VAR}={block}"));
         args.push(format!("{AGENT_VAR}={host}"));
         args.push(format!("{PID_VAR}={}", fg.pid));
-        if let Some(session) = pi_last_session {
-            args.push(format!("{PI_SESSION_ID_VAR}={}", session.session_id));
-            args.push(format!("{PI_SESSION_PATH_VAR}={}", session.session_path.display()));
-        }
         if handoff == Handoff::Paste {
             args.push(format!("{SUBMIT_VAR}=0"));
         }
@@ -121,14 +108,6 @@ pub(crate) fn argv(
             let host = fg.host.context("no supported agent runs in this block")?;
             args.extend(["last".to_owned(), "--pid".to_owned(), fg.pid.to_string()]);
             args.extend(["--host".to_owned(), host.to_owned()]);
-            if host == "pi" {
-                let session = pi_last_session.context(
-                    "Pi Rex last needs a live session endpoint; install and enable the Plannotator Pi extension (`pi/index.js`), then start a Pi TUI session",
-                )?;
-                args.extend(["--session".to_owned(), session.session_path.display().to_string()]);
-                args.extend(["--session-id".to_owned(), session.session_id.clone()]);
-                args.extend(["--pi-leaf-id".to_owned(), session.leaf_id.clone().unwrap_or_default()]);
-            }
             if *newest {
                 args.push("--newest".to_owned());
             }
@@ -203,19 +182,27 @@ pub(crate) fn open(
     placement: RexPlacement,
 ) -> Result<()> {
     let exe = std::env::current_exe().context("finding the plannotator-tui binary")?;
-    let pi_session = match (review, fg.host) {
-        (Review::Last { .. }, Some("pi")) => Some(super::pi::current_session(fg.pid)?),
-        _ => None,
-    };
-    let mut args = argv(&exe, block, fg, review, handoff, pi_session.as_ref())?;
+    let mut args = argv(&exe, block, fg, review, handoff)?;
     if placement == RexPlacement::Tab {
         returning_to(&mut args, block);
+    }
+    if let Some(session) = pi_session(fg, review) {
+        args.insert(1, format!("{PI_SESSION_VAR}={session}"));
     }
     let cwd = match review {
         Review::Code { repo, .. } => Some(repo.as_path()),
         _ => fg.cwd.as_deref(),
     };
     super::place::open(rex, block, placement, cwd, &args, &tab_label(fg, review))
+}
+
+/// The Pi session a `last` review of a Pi shows, when the Pi link registry lists one for its
+/// process. The pane checks Pi is still in it before sending.
+fn pi_session(fg: &Foreground, review: &Review) -> Option<String> {
+    if fg.host != Some("pi") || !matches!(review, Review::Last { .. }) {
+        return None;
+    }
+    crate::pi::entry_for_pid(&crate::pi::root(), fg.pid).map(|entry| entry.id)
 }
 
 /// The block a review in a tab of its own shows again when it ends: when a tab closes, Rex
@@ -303,7 +290,6 @@ mod tests {
             &parse(CLAUDE),
             &Review::Last { newest: true },
             Handoff::Send,
-            None,
         )
         .expect("argv");
         assert_eq!(
@@ -330,101 +316,25 @@ mod tests {
                 "block:b",
                 &parse(SHELL),
                 &Review::Last { newest: false },
-                Handoff::Send,
-                None
+                Handoff::Send
             )
             .is_err()
         );
     }
 
     #[test]
-    fn pi_last_passes_the_live_session_and_nullable_leaf_to_the_pane() {
-        let fg = Foreground { pid: 73139, cwd: None, host: Some("pi") };
-        let session = PiSession {
-            session_id: "session-1".to_owned(),
-            session_path: PathBuf::from("/sessions/session-1.jsonl"),
-            leaf_id: None,
-        };
-        let args = argv(
-            Path::new("/bin/pt"),
-            "block:b",
-            &fg,
-            &Review::Last { newest: false },
-            Handoff::Send,
-            Some(&session),
-        )
-        .expect("argv");
-        assert_eq!(
-            args,
-            [
-                "/usr/bin/env",
-                "PLANNOTATOR_TUI_REX_BLOCK=block:b",
-                "PLANNOTATOR_TUI_DELIVER_AGENT=pi",
-                "PLANNOTATOR_TUI_REX_PID=73139",
-                "PLANNOTATOR_TUI_REX_PI_SESSION_ID=session-1",
-                "PLANNOTATOR_TUI_REX_PI_SESSION_PATH=/sessions/session-1.jsonl",
-                "/bin/pt",
-                "rex",
-                "pane",
-                "last",
-                "--pid",
-                "73139",
-                "--host",
-                "pi",
-                "--session",
-                "/sessions/session-1.jsonl",
-                "--session-id",
-                "session-1",
-                "--pi-leaf-id",
-                "",
-            ]
-        );
-    }
-
-    #[test]
-    fn a_pi_file_review_does_not_pin_the_delivery_to_a_session() {
-        let fg = Foreground { pid: 73139, cwd: None, host: Some("pi") };
-        let args = argv(
-            Path::new("/bin/pt"),
-            "block:b",
-            &fg,
-            &Review::Open(Some(PathBuf::from("/plans/plan.md")), None),
-            Handoff::Send,
-            None,
-        )
-        .expect("file reviews do not need a Pi session snapshot");
-
-        assert_eq!(args.last().map(String::as_str), Some("/plans/plan.md"));
-        assert!(!args.iter().any(|arg| arg.starts_with(&format!("{PI_SESSION_ID_VAR}="))));
-        assert!(!args.iter().any(|arg| arg.starts_with(&format!("{PI_SESSION_PATH_VAR}="))));
-    }
-
-    #[test]
     fn open_without_an_agent_reviews_the_blocks_folder_and_copies_to_the_clipboard() {
-        let args = argv(
-            Path::new("/bin/pt"),
-            "block:b",
-            &parse(SHELL),
-            &Review::Open(None, None),
-            Handoff::Send,
-            None,
-        )
-        .expect("argv");
+        let args =
+            argv(Path::new("/bin/pt"), "block:b", &parse(SHELL), &Review::Open(None, None), Handoff::Send)
+                .expect("argv");
         assert_eq!(args, ["/usr/bin/env", "/bin/pt", "rex", "pane", "open", "/Users/me"]);
     }
 
     #[test]
     fn pasting_is_passed_on_only_where_there_is_an_agent_to_paste_into() {
         let paste = |json| {
-            argv(
-                Path::new("/bin/pt"),
-                "block:b",
-                &parse(json),
-                &Review::Open(None, None),
-                Handoff::Paste,
-                None,
-            )
-            .expect("argv")
+            argv(Path::new("/bin/pt"), "block:b", &parse(json), &Review::Open(None, None), Handoff::Paste)
+                .expect("argv")
         };
         assert!(paste(CLAUDE).contains(&"PLANNOTATOR_TUI_REX_SUBMIT=0".to_owned()));
         assert!(!paste(SHELL).iter().any(|arg| arg.starts_with("PLANNOTATOR_TUI_REX")));
@@ -434,7 +344,7 @@ mod tests {
     fn a_gated_open_hands_the_gate_and_its_result_file_to_the_pane() {
         let gated = |gate| {
             let review = Review::Open(Some(PathBuf::from("/p/plan.md")), Some(gate));
-            argv(Path::new("/bin/pt"), "block:b", &parse(CLAUDE), &review, Handoff::Send, None).expect("argv")
+            argv(Path::new("/bin/pt"), "block:b", &parse(CLAUDE), &review, Handoff::Send).expect("argv")
         };
         let tail = |args: &[String]| args.iter().skip_while(|a| *a != "open").cloned().collect::<Vec<_>>();
         assert_eq!(tail(&gated(Gate::default())), ["open", "/p/plan.md", "--gate"]);
@@ -446,8 +356,8 @@ mod tests {
     #[test]
     fn a_code_review_names_its_scope_and_repository_and_sends_to_the_blocks_agent() {
         let review = Review::Code { scope: "base:origin/main".to_owned(), repo: PathBuf::from("/p/repo") };
-        let args = argv(Path::new("/bin/pt"), "block:b", &parse(CLAUDE), &review, Handoff::Send, None)
-            .expect("argv");
+        let args =
+            argv(Path::new("/bin/pt"), "block:b", &parse(CLAUDE), &review, Handoff::Send).expect("argv");
         assert_eq!(
             args,
             [
@@ -464,7 +374,7 @@ mod tests {
             ]
         );
         let shell =
-            argv(Path::new("/bin/pt"), "block:b", &parse(SHELL), &review, Handoff::Send, None).expect("argv");
+            argv(Path::new("/bin/pt"), "block:b", &parse(SHELL), &review, Handoff::Send).expect("argv");
         assert_eq!(
             shell,
             ["/usr/bin/env", "/bin/pt", "rex", "pane", "review", "base:origin/main", "/p/repo"]
@@ -479,7 +389,6 @@ mod tests {
             &parse(SHELL),
             &Review::Terminal { lines: 80 },
             Handoff::Send,
-            None,
         )
         .expect("argv");
         assert_eq!(
@@ -491,8 +400,8 @@ mod tests {
     #[test]
     fn a_review_in_a_tab_knows_the_block_to_show_again_when_it_ends() {
         let review = Review::Open(Some(PathBuf::from("/Users/me/project/plan.md")), Some(Gate::default()));
-        let mut args = argv(Path::new("/bin/pt"), "block:b", &parse(CLAUDE), &review, Handoff::Send, None)
-            .expect("argv");
+        let mut args =
+            argv(Path::new("/bin/pt"), "block:b", &parse(CLAUDE), &review, Handoff::Send).expect("argv");
         returning_to(&mut args, "block:b");
         assert_eq!(
             args.get(..3),

@@ -100,6 +100,35 @@ pub(crate) fn pi_entries(root: &Path) -> Vec<PiEntry> {
     entries
 }
 
+/// The entry the Pi session with this pid wrote last.
+pub(crate) fn entry_for_pid(root: &Path, pid: u32) -> Option<PiEntry> {
+    pi_entries(root).into_iter().rev().find(|entry| entry.pid == pid)
+}
+
+/// Where a Pi session stands in its tree, from two more fields of its entry. `/tree` moves
+/// Pi's leaf without writing to the transcript.
+#[derive(Debug, Deserialize)]
+pub(crate) struct TreePosition {
+    /// The newest entry in the session when `leaf` was recorded. While it is still the
+    /// transcript's newest entry, `leaf` is current.
+    pub(crate) tip: String,
+    /// Pi's current entry; `None` before the first.
+    #[serde(default)]
+    pub(crate) leaf: Option<String>,
+}
+
+/// The tree position the Pi session whose transcript is `transcript` recorded last, or
+/// `None` when no entry names it or its extension records none.
+pub(crate) fn tree_position(root: &Path, transcript: &Path) -> Option<TreePosition> {
+    let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let wanted = real(transcript);
+    let entry = pi_entries(root)
+        .into_iter()
+        .rev()
+        .find(|entry| entry.transcript.as_deref().is_some_and(|path| real(path) == wanted))?;
+    serde_json::from_str(&std::fs::read_to_string(&entry.path).ok()?).ok()
+}
+
 /// The Pi sessions that answer a ping, with their busy flag and name fresh from the
 /// answer. An entry whose port refuses the connection is left behind by a session that
 /// ended without cleaning up, and is deleted.

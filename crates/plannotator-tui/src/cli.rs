@@ -64,7 +64,7 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui hc review [--staged | --base REF | --commit SHA | PR] [--terminal <t>] [--placement P]
   plannotator-tui hc pane (open <path> [--gate [--result-file <path>]] | last <last args> | review <scope> <repo>)
   plannotator-tui last [--host claude|codex|pi|omp|copilot|droid|hermes|opencode|cmd|agy] [--pid N] [--session <transcript>]
-                       [--session-id <id>] [--pi-leaf-id <id>] [--stdin] [--print] [--pick N] [--newest]";
+                       [--session-id <id>] [--stdin] [--print] [--pick N] [--newest]";
 
 /// Width the document gets when nothing else is known: the gutter subtracted, and the rail
 /// and its gap when `[ui] notes_rail` always shows it, then held to the reading column
@@ -534,11 +534,6 @@ fn last_options(args: &[String], pick: usize) -> Result<crate::last::LastOptions
             }
             "--session-id" => {
                 options.session_id = Some(rest.next().context("--session-id needs a value")?.clone());
-            }
-            "--pi-leaf-id" => {
-                anyhow::ensure!(options.pi_leaf_id.is_none(), "--pi-leaf-id may be used only once");
-                let value = rest.next().filter(|value| !value.starts_with("--"));
-                options.pi_leaf_id = Some(value.context("--pi-leaf-id needs a value")?.clone());
             }
             "--stdin" => options.stdin = true,
             "--print" => options.print = true,
