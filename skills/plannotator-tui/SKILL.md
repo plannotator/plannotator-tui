@@ -43,6 +43,11 @@ same.
    headed `# Approved with Notes` whose notes are guidance, not a request to revise. Numbered
    feedback still means revise; no message means they closed it without deciding.
 
+In a code review (`plannotator-tui review`), a comment on code arrives as
+`### Lines 8-10 (new)` (or `(old)`) under its file, with the code of those lines quoted under
+`**Highlighted text:**`. Those are the lines the human selected, with `v` or by dragging
+with the mouse.
+
 When you list files you want the human to open, print them as `file://` hyperlinks (OSC 8)
 so Ctrl-click in Herdr opens them in plannotator-tui:
 
