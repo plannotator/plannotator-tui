@@ -5,7 +5,7 @@
 use plannotator_tui_review::Side;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
-use ratatui::style::Color;
+use ratatui::style::Modifier;
 
 use super::whole_flow::settle_whole;
 use super::*;
@@ -141,23 +141,57 @@ fn a_new_press_clears_the_last_selection() {
     assert_eq!(selection(&screen), None);
 }
 
+/// The new-side pane of the row holding `needle`: from the cell after the split's middle
+/// line to the frame's edge.
+fn new_pane(buffer: &Buffer, (x, y): (u16, u16)) -> std::ops::Range<u16> {
+    let middle = (0..x).rev().find(|&c| buffer[(c, y)].symbol() == "\u{2502}").expect("a split row");
+    middle + 1..COLS
+}
+
+/// Each of `rows` is one block of the selection colour on its new side, edge to edge: no
+/// bar in the gutter, no underline, and the old side and the middle line left alone.
+fn assert_selected_block(buffer: &Buffer, rows: &[(u16, u16)]) {
+    let tint = crate::review::mouse::selection_bg();
+    for &at in rows {
+        let y = at.1;
+        let pane = new_pane(buffer, at);
+        assert_eq!(buffer[(pane.start, y)].symbol(), " ", "no bar on row {y}");
+        for x in pane.clone() {
+            let cell = &buffer[(x, y)];
+            assert_eq!(cell.bg, tint, "row {y} column {x} is filled");
+            assert!(!cell.modifier.contains(Modifier::UNDERLINED), "row {y} column {x} has no underline");
+        }
+        assert_ne!(buffer[(pane.start - 1, y)].bg, tint, "the middle line of row {y}");
+        assert_ne!(buffer[(pane.start - 2, y)].bg, tint, "the old side of row {y}");
+    }
+}
+
 #[test]
-fn the_rows_being_dragged_over_are_tinted_and_the_others_are_not() {
+fn a_selection_is_one_block_of_colour_while_dragging_after_the_release_and_with_v() {
     let fixture = Fixture::new("mouse-tint");
     let mut screen = fixture.open();
-    let from = locate(&mut screen, "def add(a, b):", true);
-    let to = locate(&mut screen, "return total", true);
+    let rows = ["def add(a, b):", "total = a + b", "return total"];
+    let marks: Vec<(u16, u16)> = rows.iter().map(|r| locate(&mut screen, r, true)).collect();
     let outside = locate(&mut screen, "def main():", true);
-    drag(&mut screen, from, to);
+    let tint = crate::review::mouse::selection_bg();
+
+    drag(&mut screen, marks[0], marks[2]);
     let buffer = draw(&mut screen);
-    let tint = crate::theme::palette().selection.bg.unwrap_or(Color::Indexed(239));
-    for y in from.1..=to.1 {
-        assert_eq!(buffer[(from.0, y)].bg, tint, "row {y} is selected");
-    }
+    assert_selected_block(&buffer, &marks);
     assert_ne!(buffer[(outside.0, outside.1)].bg, tint);
-    // The old side of the same rows is not.
-    let old = locate(&mut screen, "def add(a, b):", false);
-    assert_ne!(buffer[(old.0, old.1)].bg, tint);
+
+    release(&mut screen, marks[2]);
+    assert_selected_block(&draw(&mut screen), &marks);
+
+    // The keyboard's selection looks the same, the cursor's row included.
+    press(&mut screen, KeyCode::Esc);
+    assert_eq!(selection(&screen), None);
+    at(&mut screen, 8);
+    keys(&mut screen, "vjj");
+    assert_eq!(selection(&screen), Some(lines(Side::New, 8, 10)));
+    let buffer = draw(&mut screen);
+    assert_selected_block(&buffer, &marks);
+    assert_ne!(buffer[(outside.0, outside.1)].bg, tint);
 }
 
 #[test]
@@ -244,6 +278,15 @@ fn a_drag_in_the_whole_file_selects_its_lines_for_a_comment() {
     let to = locate(&mut screen, "print(\"hello,\", name)", true);
     drag(&mut screen, from, to);
     release(&mut screen, to);
+    // Drawn as in the diff: a block of colour with no bar and no underline.
+    let buffer = draw(&mut screen);
+    for (x, y) in [from, to] {
+        let row: String = (0..COLS).map(|c| buffer[(c, y)].symbol()).collect();
+        assert!(!row.contains(['\u{2503}', '\u{258e}']), "no bar: {row}");
+        let cell = &buffer[(x, y)];
+        assert_eq!(cell.bg, crate::review::mouse::selection_bg(), "{row}");
+        assert!(!cell.modifier.contains(Modifier::UNDERLINED), "{row}");
+    }
     let whole = screen.whole.as_ref().expect("still open");
     assert_eq!(whole.target().expect("target"), Some((4, 5)));
     press(&mut screen, KeyCode::Char('c'));

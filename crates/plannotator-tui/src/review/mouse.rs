@@ -266,34 +266,52 @@ impl Screen {
     }
 }
 
-/// Tint the selected rows the viewer drew in `area`: each side of a row that starts with the
-/// viewer's selection bar or the drag's bold mark, and the cursor's row when
-/// `cursor_selected`, from that cell to the side's end. The viewer marks a selection only
-/// with that bar and an underline; this makes it read as one at a glance.
+/// The background of selected lines: the theme's selection colour, or on the dark theme
+/// (whose selection is reversed video) a grey that keeps every syntax colour readable and
+/// is neither the added nor the removed tint.
+pub(super) fn selection_bg() -> Color {
+    palette().selection.bg.unwrap_or(Color::Indexed(239))
+}
+
+/// Draw the selected rows the viewer drew in `area` as one block of background colour.
+///
+/// A pane of a row (the whole row, or one side of a split row) starts at the pane's edge or
+/// after a `│`. It is selected when its first cell holds the viewer's selection bar, the
+/// drag's bold mark, or the cursor's bar while `cursor_selected`. That cell is blanked, the
+/// selection's underline is taken off (a search match, bold as well, keeps its own), and
+/// the pane takes the selection background up to its end: the split's middle line, which
+/// the viewer draws `(width - 1) / 2` cells into the code area, or else the pane's edge.
 pub(super) fn tint_selection(buf: &mut Buffer, area: Rect, cursor_selected: bool) {
-    let style = Style::new().bg(palette().selection.bg.unwrap_or(Color::Indexed(239)));
+    let bg = selection_bg();
+    let bar = |buf: &Buffer, x: u16, y: u16| buf.cell((x, y)).is_some_and(|c| c.symbol() == "\u{2502}");
     for y in area.top()..area.bottom() {
-        let mut starts_side = true;
-        let mut tinting = false;
-        for x in area.left()..area.right() {
-            let Some(cell) = buf.cell_mut((x, y)) else { continue };
-            if cell.symbol() == "\u{2502}" {
-                starts_side = true;
-                tinting = false;
-                continue;
-            }
-            if starts_side {
-                let bold = cell.modifier.contains(Modifier::BOLD);
-                tinting = match cell.symbol() {
-                    "\u{2503}" | "\u{258c}" => bold,
+        let mut x = area.left();
+        while x < area.right() {
+            let starts_pane = x == area.left() || bar(buf, x - 1, y);
+            let selected = starts_pane
+                && buf.cell((x, y)).is_some_and(|cell| match cell.symbol() {
+                    "\u{2503}" | "\u{258c}" => cell.modifier.contains(Modifier::BOLD),
                     "\u{258e}" => cursor_selected,
                     _ => false,
-                };
-                starts_side = false;
+                });
+            if !selected {
+                x += 1;
+                continue;
             }
-            if tinting {
-                cell.set_style(style);
+            let middle = x + (area.right() - x).saturating_sub(1) / 2;
+            let end = if bar(buf, middle, y) { middle } else { area.right() };
+            for col in x..end {
+                let Some(cell) = buf.cell_mut((col, y)) else { continue };
+                if col == x {
+                    cell.set_symbol(" ");
+                    cell.modifier.remove(Modifier::BOLD);
+                }
+                if !cell.modifier.contains(Modifier::BOLD) {
+                    cell.modifier.remove(Modifier::UNDERLINED);
+                }
+                cell.set_bg(bg);
             }
+            x = end;
         }
     }
 }
