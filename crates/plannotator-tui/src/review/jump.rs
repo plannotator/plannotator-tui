@@ -135,12 +135,13 @@ impl Screen {
             self.status = Some("move the cursor onto a line first".into());
             return Ok(());
         };
-        let mut words: Vec<String> = Vec::new();
-        for ident in codenav::identifiers_on_line(&text, Language::from_path(&file)) {
-            if !words.iter().any(|w| w == ident.text) {
-                words.push(ident.text.to_owned());
-            }
-        }
+        // A set beside the list: a long line from anyone's diff can hold many thousand names.
+        let mut seen = std::collections::HashSet::new();
+        let words: Vec<String> = codenav::identifiers_on_line(&text, Language::from_path(&file))
+            .into_iter()
+            .filter(|ident| seen.insert(ident.text))
+            .map(|ident| ident.text.to_owned())
+            .collect();
         match words.as_slice() {
             [] => self.status = Some("no identifier on this line".into()),
             [word] => {

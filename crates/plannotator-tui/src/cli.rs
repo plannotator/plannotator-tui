@@ -34,7 +34,7 @@ pub(crate) const USAGE: &str = "usage:
   plannotator-tui --bench <file.md>
   plannotator-tui --blocks <file.md>
   plannotator-tui --annotate <file.md> <quote> <text> [comment|looks_good|delete] [--occurrence N]
-  plannotator-tui --annotate-block <file.md> <block> <text>
+  plannotator-tui --annotate-block <file.md> <block> <text> [comment|looks_good|delete]
   plannotator-tui --snapshot <file.md> [cols rows scroll] [select-quote] [menu]
   plannotator-tui review [--staged | --base REF | --commit SHA | PR] [DIR]
   plannotator-tui config
@@ -140,23 +140,29 @@ fn open_review(path: &PathBuf, width: usize, delivery: Box<dyn Delivery>) -> Res
     }
 }
 
-fn parse_kind(s: Option<&str>) -> Kind {
-    match s {
-        Some("looks_good" | "approve") => Kind::LooksGood,
-        Some("delete") => Kind::Delete,
-        _ => Kind::Comment,
+/// The type word of `--annotate` and `--annotate-block`. `approve` is an older spelling of
+/// `looks_good`, kept for callers that still pass it. Any other word is refused: a typo that
+/// quietly became a comment would save the wrong kind of note.
+fn parse_kind(word: &str) -> Result<Kind> {
+    match word {
+        "comment" => Ok(Kind::Comment),
+        "looks_good" | "approve" => Ok(Kind::LooksGood),
+        "delete" => Ok(Kind::Delete),
+        other => anyhow::bail!("unknown type {other:?}: use comment, looks_good or delete\n{USAGE}"),
     }
 }
 
 /// What follows `--annotate <file> <quote> <text>`: an optional kind and `--occurrence N`
-/// (1-based; the first occurrence when absent), in either order.
-fn annotate_options(rest: &[String]) -> Result<(Kind, usize)> {
+/// (1-based; the first occurrence when absent), in either order. `--annotate-block` reads
+/// its kind the same way; a block is one place, so `occurrences` is false there and
+/// `--occurrence` is an unknown flag.
+fn annotate_options(rest: &[String], occurrences: bool) -> Result<(Kind, usize)> {
     let mut kind = None;
     let mut occurrence = 1;
     let mut items = rest.iter().map(String::as_str);
     while let Some(item) = items.next() {
         match item {
-            "--occurrence" => {
+            "--occurrence" if occurrences => {
                 occurrence = items
                     .next()
                     .and_then(|n| n.parse::<usize>().ok())
@@ -164,7 +170,7 @@ fn annotate_options(rest: &[String]) -> Result<(Kind, usize)> {
                     .context("--occurrence takes a number from 1")?;
             }
             flag if flag.starts_with("--") => anyhow::bail!("unknown flag {flag}\n{USAGE}"),
-            other if kind.is_none() => kind = Some(parse_kind(Some(other))),
+            other if kind.is_none() => kind = Some(parse_kind(other)?),
             other => anyhow::bail!("unexpected argument {other:?}\n{USAGE}"),
         }
     }
@@ -217,14 +223,15 @@ fn tool(args: &[String]) -> Result<()> {
             let mut app = open_app(&path(1)?, 100, false)?;
             let quote = arg(2).context(USAGE)?;
             let body = arg(3).context(USAGE)?.to_owned();
-            let (kind, occurrence) = annotate_options(args.get(4..).unwrap_or_default())?;
+            let (kind, occurrence) = annotate_options(args.get(4..).unwrap_or_default(), true)?;
             app.add_quote_annotation_at(quote, occurrence, kind, body)
         }
         Some("--annotate-block") => {
             let mut app = open_app(&path(1)?, 100, false)?;
             let block: usize = arg(2).and_then(|s| s.parse().ok()).context(USAGE)?;
             let body = arg(3).context(USAGE)?.to_owned();
-            app.add_block_annotation(block, Kind::Comment, body)
+            let (kind, _) = annotate_options(args.get(4..).unwrap_or_default(), false)?;
+            app.add_block_annotation(block, kind, body)
         }
         Some("--snapshot") => {
             let cols: u16 = arg(2).and_then(|s| s.parse().ok()).unwrap_or(140);

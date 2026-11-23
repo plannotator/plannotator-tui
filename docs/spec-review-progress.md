@@ -142,6 +142,7 @@ off, marks last for the session only, and no records are read.
 file", skipping the viewed ones. Most terminals send Ctrl+Shift+N as Ctrl+N, so the
 backward jump has no default key.
 
-The header counts the marks (`3/12 viewed`). The footer shows `✓ viewed` when the file
-under the cursor is marked. The diff viewer (diffs-rs) draws the file list and has no way
-to decorate a file yet, so the tick cannot appear in that list.
+The header counts the marks (`3/12 viewed`). The file list (`f`) shows `✓` after a viewed
+file's counts and dims its row; a folder gets the tick when every file in it is viewed,
+also when it is collapsed. The footer shows `✓ viewed` when the file under the cursor is
+marked.

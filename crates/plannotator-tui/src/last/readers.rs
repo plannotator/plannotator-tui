@@ -4,15 +4,18 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use plannotator_tui_hosts::{
-    Host, Message, antigravity, claude, codex, commandcode, copilot, droid, hermes, omp, opencode, pi,
+    Host, Message, Role, antigravity, claude, codex, commandcode, copilot, droid, hermes, omp, opencode, pi,
 };
 
 use super::exact::ExactSession;
 
+/// `pid` is the agent's process when the launcher named it; a Pi reads its place in the
+/// session tree from that process's own registry entry.
 pub(super) fn explicit(
     host: Host,
     path: &Path,
     session_id: Option<&str>,
+    pid: Option<u32>,
     pick: usize,
 ) -> Result<(PathBuf, Vec<Message>)> {
     match host {
@@ -24,7 +27,7 @@ pub(super) fn explicit(
         }
         Host::Copilot => Ok((path.to_path_buf(), copilot_messages(path, pick)?)),
         Host::Droid => Ok((path.to_path_buf(), droid_messages(path, pick)?)),
-        Host::Pi => Ok((path.to_path_buf(), pi_messages(path, pick)?)),
+        Host::Pi => Ok((path.to_path_buf(), pi_messages(path, pid, pick)?)),
         Host::Omp => Ok((path.to_path_buf(), omp_messages(path, pick)?)),
         Host::CommandCode => Ok((path.to_path_buf(), commandcode_messages(path, pick)?)),
         Host::Antigravity => Ok((path.to_path_buf(), antigravity_messages(path, pick)?)),
@@ -44,6 +47,7 @@ pub(super) fn exact(
     host: Host,
     session_id: &str,
     exact: ExactSession,
+    pid: Option<u32>,
     pick: usize,
 ) -> Result<(PathBuf, Vec<Message>)> {
     match (host, exact) {
@@ -61,7 +65,7 @@ pub(super) fn exact(
             Ok((path, messages))
         }
         (Host::Pi, ExactSession::File(path)) => {
-            let messages = pi_messages(&path, pick)?;
+            let messages = pi_messages(&path, pid, pick)?;
             Ok((path, messages))
         }
         (Host::Omp, ExactSession::File(path)) => {
@@ -159,7 +163,22 @@ pub(super) fn antigravity_messages(path: &Path, pick: usize) -> Result<Vec<Messa
     Ok(antigravity::parse_messages(&text, pick))
 }
 
-pub(super) fn pi_messages(path: &Path, pick: usize) -> Result<Vec<Message>> {
+/// A Pi transcript's messages on the branch the session stands on. A running Pi with our
+/// extension records its place in the tree in its link registry entry, since `/tree`
+/// writes nothing to the transcript; `pid` picks that Pi's own entry. Without an entry,
+/// the newest entry's branch.
+pub(super) fn pi_messages(path: &Path, pid: Option<u32>, pick: usize) -> Result<Vec<Message>> {
     let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    Ok(pi::parse_messages(&text, pick))
+    let entry = crate::pi::live_entry_for_transcript(&crate::pi::root(), path, pid);
+    let Some(at) = entry.as_ref().and_then(crate::pi::tree_position) else {
+        return Ok(pi::parse_messages(&text, pick));
+    };
+    let messages = pi::parse_messages_at(&text, pick, &at.tip, at.leaf.as_deref());
+    let replies = |messages: &[Message]| messages.iter().any(|m| m.role == Role::Assistant);
+    if !replies(&messages) && replies(&pi::parse_messages(&text, pick)) {
+        bail!(
+            "Pi stands before the first reply of its session tree (moved there with /tree); choose a reply in /tree, or send a message, then try again"
+        );
+    }
+    Ok(messages)
 }

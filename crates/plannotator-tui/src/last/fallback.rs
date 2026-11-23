@@ -45,7 +45,7 @@ pub(super) fn read(
             #[cfg(target_os = "linux")]
             if let Some(pid) = options.pid {
                 let path = find_codex_transcript(pid)?;
-                let (path, messages) = readers::explicit(host, &path, None, pick)?;
+                let (path, messages) = readers::explicit(host, &path, None, options.pid, pick)?;
                 return Ok((path, messages, Discovery::Exact));
             }
             let thread = std::env::var("CODEX_THREAD_ID").ok().filter(|thread| !thread.is_empty());
@@ -64,14 +64,28 @@ pub(super) fn read(
             Ok((path, messages, Discovery::Folder))
         }
         Host::Pi => {
-            // A Pi running our extension lists its pid and transcript in the Pi link
+            // A running Pi with our extension lists its pid and transcript in the Pi link
             // registry: that is the session, even when another Pi shares the folder.
-            if let Some(path) = options.pid.and_then(registered_pi_transcript) {
-                let messages = readers::pi_messages(&path, pick)?;
+            // Until that session has a saved reply, the folder's newest transcript is
+            // another session's, so say why instead of opening it.
+            let registered =
+                options.pid.and_then(|pid| crate::pi::live_entry_for_pid(&crate::pi::root(), pid));
+            if let Some(entry) = registered {
+                let (id, pid) = (&entry.id, entry.pid);
+                let path = match entry.transcript {
+                    None => bail!(
+                        "Pi session {id} (pid {pid}) is not being saved (pi --no-session): it has no transcript to read"
+                    ),
+                    Some(path) if !path.is_file() => {
+                        bail!("Pi session {id} (pid {pid}) has not saved a reply yet")
+                    }
+                    Some(path) => path,
+                };
+                let messages = readers::pi_messages(&path, Some(pid), pick)?;
                 return Ok((path, messages, Discovery::Exact));
             }
             let path = find_pi_transcript(cwd, roots, ".pi/agent", "pi")?;
-            let messages = readers::pi_messages(&path, pick)?;
+            let messages = readers::pi_messages(&path, None, pick)?;
             Ok((path, messages, Discovery::Folder))
         }
         Host::CommandCode => {
@@ -85,7 +99,7 @@ pub(super) fn read(
                 std::env::var(antigravity::CONVERSATION_ENV).ok().filter(|id| !id.trim().is_empty());
             if let Some(id) = conversation {
                 let session = exact::resolve(host, &id, cwd, roots)?;
-                let (path, messages) = readers::exact(host, &id, session, pick)?;
+                let (path, messages) = readers::exact(host, &id, session, options.pid, pick)?;
                 return Ok((path, messages, Discovery::Exact));
             }
             let path = antigravity::find_transcript(&roots.antigravity_home, cwd)?;
@@ -201,16 +215,6 @@ fn find_pi_transcript(cwd: &Path, roots: &Roots, default_agent_dir: &str, label:
     pi::find_transcript(&sessions_dir, cwd).ok_or_else(|| {
         anyhow::anyhow!("no {label} session for {} (looked in {})", cwd.display(), sessions_dir.display())
     })
-}
-
-/// The transcript the Pi session with this pid registered, newest entry first.
-fn registered_pi_transcript(pid: u32) -> Option<PathBuf> {
-    crate::pi::pi_entries(&crate::pi::root())
-        .into_iter()
-        .rev()
-        .filter(|entry| entry.pid == pid)
-        .find_map(|entry| entry.transcript)
-        .filter(|path| path.is_file())
 }
 
 fn find_commandcode_transcript(cwd: &Path, roots: &Roots) -> Result<PathBuf> {

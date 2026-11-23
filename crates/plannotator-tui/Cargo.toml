@@ -14,9 +14,9 @@ name = "plannotator-tui"
 path = "src/main.rs"
 
 [dependencies]
-plannotator-tui-schema = { path = "../plannotator-tui-schema", version = "0.10.0" }
-plannotator-tui-hosts = { path = "../plannotator-tui-hosts", version = "0.10.0" }
-plannotator-tui-review = { path = "../plannotator-tui-review", version = "0.10.0" }
+plannotator-tui-schema = { path = "../plannotator-tui-schema", version = "0.11.0" }
+plannotator-tui-hosts = { path = "../plannotator-tui-hosts", version = "0.11.0" }
+plannotator-tui-review = { path = "../plannotator-tui-review", version = "0.11.0" }
 anyhow.workspace = true
 # The Pi link's per-process token (src/pi.rs). Already in the tree through dev-dependencies.
 getrandom = "0.3"
@@ -46,7 +46,7 @@ rustix = { version = "1", features = ["event", "fs", "stdio", "termios"] }
 # The diff viewer behind `plannotator-tui review` (src/review/). Unix only: its patch reader is.
 # Default features off: `dev-tty` would switch crossterm, for this whole build, to reading
 # /dev/tty, and `clipboard` is its own macOS clipboard; this app owns its input and copies.
-diffs-rs = { version = "0.2.0", default-features = false }
+diffs-rs = { version = "0.2.1", default-features = false }
 
 [dev-dependencies]
 rusqlite = { version = "0.31.0", features = ["bundled"] }

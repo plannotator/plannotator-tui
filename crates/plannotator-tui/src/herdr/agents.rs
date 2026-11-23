@@ -173,7 +173,6 @@ pub(crate) fn is_pi_session(agent: &PaneAgent, id: &str, transcript: Option<&Pat
 #[cfg(all(test, unix))]
 #[allow(clippy::expect_used, reason = "test fixtures assert by panicking")]
 pub(crate) fn fake_herdr(dir: &Path, agents: &Value) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt as _;
     let _ = std::fs::remove_dir_all(dir);
     std::fs::create_dir_all(dir).expect("fake herdr dir");
     let workspaces = serde_json::json!({"result": {"type": "workspace_list", "workspaces": [
@@ -192,8 +191,7 @@ pub(crate) fn fake_herdr(dir: &Path, agents: &Value) -> PathBuf {
         d = dir.display()
     );
     let bin = dir.join("herdr");
-    std::fs::write(&bin, script).expect("script");
-    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    crate::test_support::write_script(&bin, &script);
     bin
 }
 

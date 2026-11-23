@@ -10,7 +10,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::SyncSender;
 
 use anyhow::{Context as _, Result};
-use diffs_rs::engine::{self, Command, Engine, Input, InputEffect, Marker, Options};
+use diffs_rs::engine::{
+    self, Badge, BadgeColor, Command, Engine, FileMark, Input, InputEffect, Marker, Options,
+};
 use diffs_rs::reading::SourceRange;
 use diffs_rs::theme::Appearance;
 use plannotator_tui_review::{Capture, Side};
@@ -63,7 +65,10 @@ impl Diff {
             chrome: false,
             ..Options::default()
         };
-        let engine = Engine::open(input(capture)?, options, wake).context("opening the diff viewer")?;
+        let mut engine = Engine::open(input(capture)?, options, wake).context("opening the diff viewer")?;
+        // Draw on the terminal's own background and text colour, as the document screen does;
+        // the changed-line tints come from the light or dark palette picked above.
+        engine.set_terminal_background(true)?;
         Ok(Self { engine, paths: Vec::new(), fixed: None })
     }
 
@@ -77,7 +82,9 @@ impl Diff {
             ..Options::default()
         };
         let input = input_bytes(bytes, name.to_owned())?;
-        let engine = Engine::open(input, options, wake).context("opening the whole-file view")?;
+        let mut engine = Engine::open(input, options, wake).context("opening the whole-file view")?;
+        // The same terminal background as the diff, so both views match.
+        engine.set_terminal_background(true)?;
         Ok(Self { engine, paths: Vec::new(), fixed: Some(name.to_owned()) })
     }
 
@@ -235,6 +242,24 @@ impl Diff {
             })
             .collect();
         self.engine.set_markers(&markers)
+    }
+
+    /// Tick the viewed files in the viewer's file list and dim their rows. The viewer ticks a
+    /// folder too once every file in it is viewed.
+    pub(super) fn set_viewed(&mut self, viewed: &[String]) -> Result<()> {
+        // The viewer names a file by its own path, which for a file that has arrived can
+        // differ from the capture's (a deleted file); the others keep the capture's path.
+        let paths: Vec<String> = viewed
+            .iter()
+            .map(|path| {
+                let meta = self.index(path).and_then(|index| self.engine.file(index));
+                meta.map_or_else(|| path.clone(), |meta| meta.path.to_string())
+            })
+            .collect();
+        let tick = Badge { text: "\u{2713}", color: BadgeColor::Added };
+        let marks: Vec<FileMark<'_>> =
+            paths.iter().map(|path| FileMark { path, badge: Some(tick), dimmed: true }).collect();
+        self.engine.set_file_marks(&marks)
     }
 }
 

@@ -55,7 +55,7 @@ plannotator-tui --export <file.md>                     # all active feedback to 
 plannotator-tui --bench <file.md>                      # parse / render / reflow timings
 plannotator-tui --blocks <file.md>                     # block index, kind, first row
 plannotator-tui --annotate <file.md> <quote> <text> [comment|looks_good|delete] [--occurrence N]
-plannotator-tui --annotate-block <file.md> <block> <text>
+plannotator-tui --annotate-block <file.md> <block> <text> [comment|looks_good|delete]
 plannotator-tui --snapshot <file|folder> [cols rows scroll] [select-quote]   # one frame as text + mark map
 plannotator-tui herdr terminal [--lines N] --print     # the focused Herdr pane's recent output, as the review document
 ```

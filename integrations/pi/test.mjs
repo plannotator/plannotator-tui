@@ -216,12 +216,21 @@ async function main() {
 		PI_SKIP_VERSION_CHECK: "1",
 		PI_TELEMETRY: "0",
 	};
+	// `/tree` needs a person at the TUI; this command does what it does, from RPC.
+	const treeHelper = path.join(tmp, "tree-helper.ts");
+	fs.writeFileSync(
+		treeHelper,
+		`export default function (pi) {
+	pi.registerCommand("test-tree", { description: "navigate to an entry", handler: async (args, ctx) => { await ctx.navigateTree(args.trim(), { summarize: false }); } });
+}
+`,
+	);
 	const version = spawnSync("pi", ["--version"], { env, encoding: "utf8" });
 	console.log(`pi ${(version.stdout || version.stderr).trim()} · temp ${tmp}`);
 
 	const pi = spawn(
 		"pi",
-		["--mode", "rpc", "--provider", "fake", "--model", "fake", "--no-extensions", "--no-skills", "--no-context-files", "--offline", "--extension", EXTENSION],
+		["--mode", "rpc", "--provider", "fake", "--model", "fake", "--no-extensions", "--no-skills", "--no-context-files", "--offline", "--extension", EXTENSION, "--extension", treeHelper],
 		{ cwd: dirs.work, env, stdio: ["pipe", "pipe", "pipe"] },
 	);
 	children.push(pi);
@@ -325,6 +334,29 @@ async function main() {
 	ok(true, "set_session_name rewrites the entry name");
 	r = await wire(port, { v: 1, token, op: "ping" });
 	ok(r.name === "api-refactor", "ping reports the new name", r);
+
+	// --- /tree: the entry says where Pi stands ---------------------------------
+	const lines = () => fs.readFileSync(transcriptPath, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+	entry = read();
+	ok(entry.leaf === lines().at(-1).id && entry.tip === entry.leaf, "entry leaf and tip are the transcript's newest entry", entry);
+	const replies = lines().filter((l) => l.type === "message" && l.message.role === "assistant");
+	const earlier = replies[0].id;
+	ok(replies.length > 1, "the session has more than one reply to move between", replies.length);
+	const before = lines();
+	mark = events.length;
+	rpc({ type: "prompt", message: `/test-tree ${earlier}` });
+	await until("entry leaf after /tree", () => read().leaf === earlier);
+	entry = read();
+	ok(entry.tip === before.at(-1).id, "after /tree the entry's tip is still the newest entry on disk", entry);
+	ok(lines().length === before.length, "/tree wrote nothing to the transcript", lines().length);
+	rpc({ type: "prompt", message: "after the move" });
+	await until("agent_settled after the move", eventFrom(mark, (e) => e.type === "agent_settled"), 30_000);
+	await until("entry idle after the move", () => read().busy === false);
+	entry = read();
+	const after = lines();
+	ok(entry.leaf === after.at(-1).id && entry.tip === entry.leaf, "after the next reply leaf and tip are its newest entry again", entry);
+	const asked = after.find((l) => l.type === "message" && l.message.role === "user" && textOf(l.message.content).includes("after the move"));
+	ok(asked?.parentId === earlier, "the next message went on the branch /tree moved to", asked);
 
 	// --- note tool ------------------------------------------------------------
 	const tuiDir = path.join(dirs.registry, "tui");

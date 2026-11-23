@@ -2,10 +2,9 @@
 //! with `refs/pull/7/head`, a clone whose `origin` is the GitHub URL (rewritten to the bare
 //! repository by `insteadOf`), and a shell script standing in for `gh`. No network.
 
-use std::os::unix::fs::PermissionsExt as _;
-
 use plannotator_tui_review::{Gh, Repo, Status};
 
+use super::viewed_flow::ticked;
 use super::*;
 
 pub(super) const URL: &str = "https://github.com/o/app";
@@ -52,8 +51,7 @@ impl Pull {
         git_in(&clone, &["config", &rewrite, &format!("{URL}.git")]);
         let script = pull.dir.join("gh");
         let body = format!("#!/bin/sh\ncat '{}'\n", pull.dir.join("view.json").display());
-        std::fs::write(&script, body).expect("gh");
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        crate::test_support::write_script(&script, &body);
         pull
     }
 
@@ -161,6 +159,29 @@ fn a_reload_fetches_a_new_push_and_the_note_moves_with_its_line() {
     assert_eq!(screen.capture.pull.as_ref().map(|p| p.head.as_str()), Some(head.as_str()));
     // The person's clone kept its own branch.
     assert_eq!(git_in(&pull.clone_dir(), &["symbolic-ref", "HEAD"]), "refs/heads/mine");
+}
+
+#[test]
+fn a_pr_reviews_viewed_files_are_ticked_in_the_file_list_and_kept_in_this_apps_own_folder() {
+    let pull = Pull::new("ticks");
+    // A second file in the PR, so the viewer shows its file list.
+    std::fs::write(pull.work().join("notes.txt"), "new\n").expect("write");
+    git_in(&pull.work(), &["add", "notes.txt"]);
+    pull.push_head(AFTER);
+    let mut screen = pull.open();
+    assert_eq!(screen.capture.files.len(), 2);
+    at(&mut screen, 9);
+    keys(&mut screen, "x");
+    assert!(ticked(&mut screen, 160, "app.py"));
+    assert!(!ticked(&mut screen, 160, "notes.txt"));
+    // The marks are this app's own, never the browser's for the PR.
+    let dir = screen.progress.dir().expect("saved").to_path_buf();
+    assert!(dir.starts_with(pull.data().join("clients").join("plannotator-tui")), "{}", dir.display());
+    // Reopened, the PR reads them back and ticks the same file.
+    drop(screen);
+    let mut screen = pull.open();
+    assert!(ticked(&mut screen, 160, "app.py"));
+    assert!(!ticked(&mut screen, 160, "notes.txt"));
 }
 
 #[test]

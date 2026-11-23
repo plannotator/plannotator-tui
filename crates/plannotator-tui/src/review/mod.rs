@@ -237,6 +237,7 @@ impl Screen {
         let placed = screen.place_notes()?;
         screen.status = placed;
         screen.derive_send_state();
+        screen.sync_viewed();
         Ok(screen)
     }
 
@@ -292,6 +293,7 @@ impl Screen {
         let mut changed = false;
         if self.diff.poll(&self.capture)? {
             self.sync_markers();
+            self.sync_viewed();
             changed = true;
         }
         changed |= self.poll_pi();
@@ -367,6 +369,7 @@ impl Screen {
         }
         self.clamp_rail_cursor();
         self.sync_markers();
+        self.sync_viewed();
         self.derive_send_state();
         let empty = if self.capture.is_empty() { " · no changes left" } else { "" };
         self.status =

@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use plannotator_tui_hosts::pi::{encoded_dir, find_transcript, parse_messages};
+use plannotator_tui_hosts::pi::{encoded_dir, find_transcript, parse_messages, parse_messages_at};
 use plannotator_tui_hosts::{Host, Role, detect_host};
 
 fn fixture(name: &str) -> String {
@@ -73,6 +73,89 @@ fn the_newest_assistant_message_comes_first_and_the_later_rewind_branch_wins() {
     );
     assert_eq!(messages[0].id, "0c0c0c0c");
     assert_eq!(messages[0].at.as_deref(), Some("2026-08-28T17:27:20.000Z"));
+}
+
+#[test]
+fn a_tree_move_with_nothing_written_since_selects_the_leafs_branch() {
+    let jsonl = fixture("pi.jsonl");
+    let assistant = |tip: &str, leaf: Option<&str>| -> Vec<String> {
+        parse_messages_at(&jsonl, 25, tip, leaf)
+            .into_iter()
+            .filter(|message| message.role == Role::Assistant)
+            .map(|message| message.text)
+            .collect()
+    };
+    assert_eq!(
+        assistant("0c0c0c0c", Some("dbcc01c1")),
+        ["assistant text 2 (abandoned)", "assistant text 1"],
+        "moved to the other branch: its reply, though the newest entry is on the first",
+    );
+    assert_eq!(
+        assistant("0c0c0c0c", Some("fee500e9")),
+        ["assistant text 1"],
+        "moved back along the same branch: the reply it stands on",
+    );
+    assert_eq!(
+        assistant("0c0c0c0c", Some("0c0c0c0c")),
+        ["assistant text 3", "assistant text 1"],
+        "no move: the same as the newest entry",
+    );
+}
+
+#[test]
+fn once_pi_appends_after_the_entry_was_written_the_newest_entry_wins() {
+    let mut jsonl = fixture("pi.jsonl");
+    jsonl.push('\n');
+    jsonl.push_str(
+        r#"{"type":"message","id":"beadfeed","parentId":"dbcc01c1","timestamp":"2026-08-28T17:28:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"assistant text appended on abandoned branch"}]}}"#,
+    );
+    // The entry was last written at `0c0c0c0c`; pi has since gone to the other branch and
+    // replied there, which moved its leaf to the reply.
+    let messages = parse_messages_at(&jsonl, 25, "0c0c0c0c", Some("0c0c0c0c"));
+    assert_eq!(
+        messages.first().map(|message| message.text.as_str()),
+        Some("assistant text appended on abandoned branch"),
+    );
+    assert_eq!(messages, parse_messages(&jsonl, 25), "the same as without a registry entry");
+}
+
+#[test]
+fn an_empty_missing_dangling_or_cyclic_leaf_yields_nothing() {
+    let root = r#"{"type":"message","id":"root","parentId":null,"message":{"role":"assistant","content":[{"type":"text","text":"root reply"}]}}"#;
+    assert_eq!(
+        parse_messages_at(root, 1, "root", None),
+        Vec::<plannotator_tui_hosts::Message>::new(),
+        "None is pi before its first entry: an empty branch",
+    );
+    assert_eq!(
+        parse_messages_at(root, 1, "root", Some("missing")),
+        Vec::<plannotator_tui_hosts::Message>::new(),
+        "an unknown leaf does not fall back to the root",
+    );
+    let mut dangling = fixture("pi-dangling.jsonl");
+    dangling.push('\n');
+    dangling.push_str(r#"{"type":"label","id":"1abe1abe","parentId":"0c0c0c0c","targetId":"0c0c0c0c"}"#);
+    assert_eq!(
+        parse_messages_at(&dangling, 25, "1abe1abe", Some("deadbeef")),
+        Vec::<plannotator_tui_hosts::Message>::new(),
+        "a leaf with a missing parent fails closed",
+    );
+    assert_eq!(
+        parse_messages_at(root, 1, "root", Some("root")).first().map(|message| message.text.as_str()),
+        Some("root reply"),
+        "a root leaf with no parent is a valid branch",
+    );
+
+    let cycle = format!(
+        "{}\n{}",
+        r#"{"type":"message","id":"a","parentId":"b","message":{"role":"assistant","content":[{"type":"text","text":"a"}]}}"#,
+        r#"{"type":"message","id":"b","parentId":"a","message":{"role":"assistant","content":[{"type":"text","text":"b"}]}}"#,
+    );
+    assert_eq!(
+        parse_messages_at(&cycle, 1, "b", Some("a")),
+        Vec::<plannotator_tui_hosts::Message>::new(),
+        "a cycle fails closed instead of returning partial messages",
+    );
 }
 
 #[test]

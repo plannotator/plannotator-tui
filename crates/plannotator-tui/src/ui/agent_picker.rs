@@ -565,7 +565,6 @@ pub(crate) fn real(folder: &Path) -> PathBuf {
 #[cfg(all(test, unix))]
 #[allow(clippy::expect_used, reason = "test fixtures assert by panicking")]
 pub(crate) fn gated(bin: &Path, gate: &Path) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt as _;
     std::fs::write(gate, "").expect("gate");
     let name = bin.file_name().expect("name").to_string_lossy();
     let wrapper = bin.with_file_name(format!("gated {name}"));
@@ -574,8 +573,7 @@ pub(crate) fn gated(bin: &Path, gate: &Path) -> PathBuf {
         gate = gate.display(),
         bin = bin.display()
     );
-    std::fs::write(&wrapper, script).expect("script");
-    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    crate::test_support::write_script(&wrapper, &script);
     wrapper
 }
 

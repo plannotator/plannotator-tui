@@ -253,7 +253,8 @@ still sent, marked as outdated. `u` switches between split and unified view, `w`
 long lines, `f` lists the changed files and `?` shows every key.
 
 `x` marks the file under the cursor viewed, and `x` again unmarks it. The header counts
-them (`3/12 viewed`) and `ctrl+n` goes to the next file you have not viewed. Marks are
+them (`3/12 viewed`), the file list ticks viewed files and dims them, and `ctrl+n` goes to
+the next file you have not viewed. Marks are
 saved in the browser app's own format under the data folder (`review-progress/`), so a
 review started in the browser continues here and the other way round. A mark stops
 counting once its file changes. Set `PLANNOTATOR_REVIEW_PROGRESS=0` to keep marks for the
@@ -734,7 +735,10 @@ session, and Pi can leave notes in the file you have open. Install the extension
 plannotator-tui pi install   # copies it into ~/.pi/agent/extensions/
 ```
 
-Restart your Pi sessions, or run `/reload` in each one. Then:
+Restart your Pi sessions, or run `/reload` in each one. Run `plannotator-tui pi install`
+again after upgrading plannotator-tui: the binary does not notice an older extension, and
+some fixes need the new one (for example, `last` following Pi's place after `/tree`).
+Then:
 
 - **Send to a Pi:** press `P` (`pick-target`) to choose a session (see
   [Choosing the agent](#choosing-the-agent)). Send (`E`) then goes to that session, as a

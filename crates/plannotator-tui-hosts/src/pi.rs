@@ -205,8 +205,40 @@ fn iso_timestamp(value: &Value) -> Option<String> {
 /// `getBranch()` returns; entries orphaned by a rewind are absent. A chain that cannot be
 /// reconstructed (missing parent, cycle) yields nothing rather than the wrong messages.
 pub fn parse_messages(jsonl: &str, n: usize) -> Vec<Message> {
-    let entries: Vec<Entry> = jsonl.lines().filter_map(Entry::parse).collect();
+    let entries = parse_entries(jsonl);
     let Some(active) = active_branch(&entries) else { return Vec::new() };
+    messages_on_branch(&entries, n, &active)
+}
+
+/// Messages on the branch a running pi stands on, newest first, through the `n`th newest
+/// reply. pi moves its leaf in memory when you navigate with `/tree` and writes nothing,
+/// so the newest entry on disk can be on another branch; its registry entry records the
+/// `leaf` and the newest entry (`tip`) it had at the time. While the newest entry on disk
+/// is still `tip`, the branch ends at `leaf` (`None`: before the first entry, an empty
+/// branch). Once pi has appended, the newest entry wins as in [`parse_messages`]: every
+/// append moves pi's leaf to the new entry. An unknown leaf or an unreconstructable chain
+/// yields nothing rather than another branch.
+pub fn parse_messages_at(jsonl: &str, n: usize, tip: &str, leaf: Option<&str>) -> Vec<Message> {
+    let entries = parse_entries(jsonl);
+    let newest = entries.iter().rev().find(|e| e.id.is_some());
+    let start = if newest.and_then(|e| e.id.as_deref()) == Some(tip) {
+        leaf.and_then(|leaf| entries.iter().rev().find(|e| e.id.as_deref() == Some(leaf)))
+    } else {
+        newest
+    };
+    let Some(branch) = start.and_then(|start| branch_from_entry(&entries, start)) else { return Vec::new() };
+    messages_on_branch(&entries, n, &branch)
+}
+
+fn parse_entries(jsonl: &str) -> Vec<Entry> {
+    jsonl.lines().filter_map(Entry::parse).collect()
+}
+
+fn messages_on_branch(
+    entries: &[Entry],
+    n: usize,
+    active: &std::collections::HashSet<String>,
+) -> Vec<Message> {
     let messages =
         entries.iter().rev().filter(|e| e.id.as_ref().is_some_and(|i| active.contains(i))).filter_map(|e| {
             let (role, text) = e.message.as_ref()?;
@@ -227,10 +259,14 @@ pub fn parse_messages(jsonl: &str, n: usize) -> Vec<Message> {
 
 fn active_branch(entries: &[Entry]) -> Option<std::collections::HashSet<String>> {
     let newest = entries.iter().rev().find(|e| e.id.is_some())?;
+    branch_from_entry(entries, newest)
+}
+
+fn branch_from_entry(entries: &[Entry], leaf: &Entry) -> Option<std::collections::HashSet<String>> {
     let by_id: std::collections::HashMap<&str, &Entry> =
         entries.iter().filter_map(|e| e.id.as_deref().map(|i| (i, e))).collect();
     let mut chain = std::collections::HashSet::new();
-    let mut current = newest;
+    let mut current = leaf;
     loop {
         let id = current.id.as_deref()?;
         if !chain.insert(id.to_owned()) {
