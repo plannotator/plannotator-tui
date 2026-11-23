@@ -239,3 +239,19 @@ fn go_to_definition_is_d_with_ctrl_o_back_and_ctrl_i_forward_in_the_diff() {
     assert_eq!(keymap.hint(GoToDefinition), "");
     assert_eq!((keymap.hint(JumpBack), keymap.hint(JumpForward)), ("ctrl+o".into(), "ctrl+i".into()));
 }
+
+#[test]
+fn the_file_list_width_keys_yield_to_an_older_config_and_the_reading_column_keeps_its_own() {
+    let keymap = Keymap::default();
+    let wider = press(KeyCode::Char('>'), KeyModifiers::SHIFT);
+    assert_eq!(keymap.action(&wider, DIFF), Some(WidenFiles));
+    assert_eq!(keymap.action(&wider, FILES), Some(WidenFiles));
+    assert_eq!(keymap.action(&wider, DOCUMENT), Some(WidenColumn));
+    // Written when `>` meant nothing in the code review: it keeps the user's meaning there,
+    // and the reading column keeps `>`.
+    let keymap = parse("toggle-layout = [\">\"]\n").expect("an older config keeps loading");
+    assert_eq!(keymap.action(&wider, DIFF), Some(ToggleLayout));
+    assert_eq!(keymap.action(&wider, DOCUMENT), Some(WidenColumn));
+    assert_eq!(keymap.hint(WidenFiles), "");
+    assert_eq!(keymap.hint(NarrowFiles), "<");
+}

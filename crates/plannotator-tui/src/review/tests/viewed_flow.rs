@@ -30,11 +30,11 @@ fn x_marks_the_file_viewed_in_the_browsers_record_and_an_edit_drops_it() {
         rows.last().is_some_and(|r| r.contains("\u{2713} viewed")),
         "the footer ticks the file: {rows:#?}"
     );
-    // The viewer's file list, shown when the diff has room, ticks the file after its counts;
-    // the other file has none.
+    // The file list ticks the file after its counts, at its right edge; the other file has
+    // none.
     let rows = frame(&mut screen, 160, 40);
-    assert!(row_with(&rows, "*app.py").contains("\u{2713}  \u{2502}"), "{rows:#?}");
-    assert!(!row_with(&rows, "notes.txt  ").contains('\u{2713}'), "{rows:#?}");
+    assert!(entry(&rows, "app.py").ends_with("\u{2713} "), "{rows:#?}");
+    assert!(!entry(&rows, "notes.txt").contains('\u{2713}'), "{rows:#?}");
 
     // The record is the browser's: <data>/review-progress/<key>/<sha256(path)>.json.
     let dir = screen.progress.dir().expect("saved").to_path_buf();
@@ -77,7 +77,7 @@ fn x_marks_the_file_viewed_in_the_browsers_record_and_an_edit_drops_it() {
     assert!(record.contains(r#""viewed":false,"suppressed":true"#), "{record}");
 }
 
-/// The file list's entry for `name`: the columns left of the viewer's divider.
+/// The file list's entry for `name`: the columns left of its divider.
 pub(super) fn entry(rows: &[String], name: &str) -> String {
     rows.iter()
         .filter_map(|row| row.split('\u{2502}').next())
@@ -115,6 +115,7 @@ fn the_file_list_ticks_follow_the_marks_with_the_rail_open_or_hidden_and_across_
 
     // The rail hidden: the diff takes its columns and goes side by side; the ticks stay.
     keys(&mut screen, "z");
+    at(&mut screen, 9);
     let rows = frame(&mut screen, 160, 30);
     assert!(!rows.iter().any(|r| r.contains("name the total")), "{rows:#?}");
     assert!(row_with(&rows, "total = a + b").matches('\u{2502}').count() >= 2, "split: {rows:#?}");
@@ -122,9 +123,16 @@ fn the_file_list_ticks_follow_the_marks_with_the_rail_open_or_hidden_and_across_
     keys(&mut screen, "z");
     assert!(ticked(&mut screen, 160, "app.py") && ticked(&mut screen, 160, "notes.txt"), "shown again");
 
-    // An edit on disk: the footer says so, and the ticks stay until a reload.
-    fixture.write("app.py", &format!("{AFTER}# more\n"));
+    // An edit on disk: the footer says so, and the ticks stay until a reload. The edit
+    // waits for the watch's baseline, which a second check starting proves taken.
     screen.last_key = None;
+    let started = Instant::now();
+    while screen.watch.started < 2 {
+        screen.tick().expect("tick");
+        assert!(started.elapsed() < Duration::from_secs(10), "the watch never took its baseline");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    fixture.write("app.py", &format!("{AFTER}# more\n"));
     let started = Instant::now();
     while !screen.watch.changed() {
         screen.tick().expect("tick");

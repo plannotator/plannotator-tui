@@ -71,12 +71,21 @@ fn o_shows_the_file_now_at_the_same_line_with_changed_lines_marked_and_o_goes_ba
     assert!(rows[0].starts_with(" Whole file · new · long.py "), "{:?}", rows[0]);
     assert!(rows[1].contains(" Modified   +3 \u{2212}1 "), "{:?}", rows[1]);
     assert!(!rows[1].contains("+0"), "the file's counts in the diff, not the made-up patch's");
-    assert!(row_with(&rows, "x20 = 2000").starts_with('\u{258e}'), "the cursor is on it: {rows:#?}");
+    assert!(
+        diff_side(&screen, row_with(&rows, "x20 = 2000")).starts_with('\u{258e}'),
+        "the cursor is on it: {rows:#?}"
+    );
     keys(&mut screen, "k");
     let rows = frame(&mut screen, 120, 40);
-    assert!(row_with(&rows, "x20 = 2000").starts_with('\u{258c}'), "a bar on the changed line: {rows:#?}");
+    assert!(
+        diff_side(&screen, row_with(&rows, "x20 = 2000")).starts_with('\u{258c}'),
+        "a bar on the changed line: {rows:#?}"
+    );
     keys(&mut screen, "j");
-    assert!(!row_with(&rows, "x19 = 19").starts_with('\u{258c}'), "none on an unchanged one");
+    assert!(
+        !diff_side(&screen, row_with(&rows, "x19 = 19")).starts_with('\u{258c}'),
+        "none on an unchanged one"
+    );
     assert!(row_with(&rows, "back to the diff").contains("o/O/esc back to the diff"), "{rows:#?}");
 
     // Whole file: lines far from any hunk are there, with their numbers.
@@ -121,7 +130,10 @@ fn shifted_o_shows_the_base_at_the_matching_old_line_read_only() {
     screen.whole.as_mut().expect("open").reveal_line(20).expect("line 20");
     keys(&mut screen, "j");
     let rows = frame(&mut screen, 120, 40);
-    assert!(row_with(&rows, "x20 = 20").starts_with('\u{258c}'), "the removed line is marked: {rows:#?}");
+    assert!(
+        diff_side(&screen, row_with(&rows, "x20 = 20")).starts_with('\u{258c}'),
+        "the removed line is marked: {rows:#?}"
+    );
     keys(&mut screen, "c");
     assert_eq!(screen.mode, Mode::Browse);
     assert_eq!(screen.status.as_deref(), Some("base version: read-only for notes"));
@@ -159,7 +171,10 @@ fn notes_in_the_whole_file_go_in_the_diff_or_outside_it_and_enter_finds_them_aga
     );
     assert_eq!(outside.status(), Some(Status::NotInDiff));
     let rows = frame(&mut screen, 120, 40);
-    assert!(row_with(&rows, "x5 = 5").starts_with('\u{258c}'), "marked in the whole file: {rows:#?}");
+    assert!(
+        diff_side(&screen, row_with(&rows, "x5 = 5")).starts_with('\u{258c}'),
+        "marked in the whole file: {rows:#?}"
+    );
     let heading = rows.iter().position(|r| r.contains(" Not in the diff")).expect("its heading");
     let bubble = rows.iter().position(|r| r.contains("long.py 5 new")).expect("its bubble");
     assert!(heading < bubble, "{rows:#?}");
@@ -174,7 +189,7 @@ fn notes_in_the_whole_file_go_in_the_diff_or_outside_it_and_enter_finds_them_aga
     assert_eq!(screen.diff.cursor().expect("cursor").map(|l| l.first), Some(20), "where the diff was");
     keys(&mut screen, "j");
     let rows = frame(&mut screen, 120, 40);
-    assert!(row_with(&rows, "x20 = 2000").starts_with('\u{258c}'), "{rows:#?}");
+    assert!(diff_side(&screen, row_with(&rows, "x20 = 2000")).starts_with('\u{258c}'), "{rows:#?}");
     press(&mut screen, KeyCode::Tab);
     while screen.selected_note().is_some_and(|n| !n.outside_diff) {
         keys(&mut screen, "j");
@@ -202,12 +217,19 @@ fn added_and_deleted_files_say_what_they_lack_and_n_moves_between_files() {
     keys(&mut screen, "O");
     settle_whole(&mut screen);
     let rows = frame(&mut screen, 120, 40);
-    assert!(row_with(&rows, "new.py is added by this change: there is no base version.").starts_with(' '));
+    assert!(
+        diff_side(&screen, row_with(&rows, "new.py is added by this change: there is no base version."))
+            .starts_with(' ')
+    );
     keys(&mut screen, "O");
     keys(&mut screen, "o");
     settle_whole(&mut screen);
     let rows = frame(&mut screen, 120, 40);
-    assert!(rows[1].starts_with(" new.py ") && rows[1].contains(" Added   +1 \u{2212}0 "), "{:?}", rows[1]);
+    assert!(
+        diff_side(&screen, &rows[1]).starts_with(" new.py ") && rows[1].contains(" Added   +1 \u{2212}0 "),
+        "{:?}",
+        rows[1]
+    );
     keys(&mut screen, "o");
     screen.diff.reveal("notes.txt", Side::Old, 1).expect("in the diff");
     keys(&mut screen, "o");

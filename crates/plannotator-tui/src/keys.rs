@@ -80,8 +80,14 @@ pub(crate) enum Action {
     /// Split or unified diff.
     ToggleLayout,
     ToggleWrap,
-    /// Show or hide the diff's file list.
+    /// Show the diff's file list and move to it, or close it from there.
     ToggleFiles,
+    /// Filter the code review's file list by name.
+    FilterFiles,
+    /// Pick the kinds of file the code review shows: code, tests, docs, config, generated.
+    FilterKinds,
+    /// Hide the files marked viewed from the code review, or show them again.
+    HideViewed,
     /// Mark the file under the cursor viewed, or not (`docs/spec-review-progress.md`).
     ToggleViewed,
     /// The next or previous file not marked viewed, wrapping around.
@@ -91,6 +97,10 @@ pub(crate) enum Action {
     /// The reading column, by eight columns.
     NarrowColumn,
     WidenColumn,
+    /// The code review's file list, by four columns. Its own action, so a config that gave
+    /// `<` or `>` to a code review key before the list existed keeps the reading column's.
+    NarrowFiles,
+    WidenFiles,
     /// The whole file under the cursor as it is now, or back to the diff.
     WholeFile,
     /// The whole file as it was before the change (its base), or back to the diff.
@@ -121,8 +131,8 @@ use Action::{
     PreviousHunk, PreviousMatch, PreviousUnviewed, Search, Suggest, ToggleFiles, ToggleLayout, ToggleViewed,
     ToggleWrap, WholeBase, WholeFile,
 };
-use Action::{GoToDefinition, JumpBack, JumpForward};
-use Action::{NarrowColumn, ToggleNotes, WidenColumn};
+use Action::{FilterFiles, FilterKinds, GoToDefinition, HideViewed, JumpBack, JumpForward};
+use Action::{NarrowColumn, NarrowFiles, ToggleNotes, WidenColumn, WidenFiles};
 
 /// Browsing, before the focused pane gets the key.
 pub(crate) const GLOBAL: &[Action] = &[
@@ -234,6 +244,9 @@ pub(crate) const DIFF: &[Action] = &[
     ToggleLayout,
     ToggleWrap,
     ToggleFiles,
+    FilterFiles,
+    FilterKinds,
+    HideViewed,
     ToggleViewed,
     NextUnviewed,
     PreviousUnviewed,
@@ -242,8 +255,32 @@ pub(crate) const DIFF: &[Action] = &[
     GoToDefinition,
     JumpBack,
     JumpForward,
+    NarrowFiles,
+    WidenFiles,
     Confirm,
 ];
+/// The code review's file list.
+pub(crate) const FILES: &[Action] = &[
+    Down,
+    Up,
+    PageDown,
+    PageUp,
+    Top,
+    Bottom,
+    Confirm,
+    Back,
+    Left,
+    Right,
+    ToggleFiles,
+    FilterFiles,
+    FilterKinds,
+    HideViewed,
+    ToggleViewed,
+    NarrowFiles,
+    WidenFiles,
+];
+/// The kind picker over the file list; Space turns a row on or off.
+pub(crate) const KINDS: &[Action] = &[Down, Up, Confirm, Back, FilterKinds, Interrupt];
 /// The code review's notes rail.
 pub(crate) const NOTES: &[Action] = &[Down, Up, Confirm, Edit, Remove, Back];
 pub(crate) const REVIEW_MENU: &[Action] =
@@ -267,6 +304,8 @@ const SHARED: &[&[&[Action]]] = &[
     &[ARCHIVE],
     &[REVIEW_GLOBAL, DIFF],
     &[REVIEW_GLOBAL, NOTES],
+    &[REVIEW_GLOBAL, FILES],
+    &[KINDS],
     &[REVIEW_MENU],
     &[HELP],
 ];
@@ -438,6 +477,9 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (ToggleLayout, &[ch('u')]),
     (ToggleWrap, &[ch('w')]),
     (ToggleFiles, &[ch('f')]),
+    (FilterFiles, &[ch('/')]),
+    (FilterKinds, &[ch('t')]),
+    (HideViewed, &[ch('H')]),
     (ToggleViewed, &[ch('x')]),
     // `n` with Ctrl: the next file, skipping viewed ones. Ctrl+Shift+N reaches most
     // terminals as Ctrl+N, so the backward jump has no default key.
@@ -446,6 +488,8 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (Help, &[ch('?')]),
     (NarrowColumn, &[ch('<')]),
     (WidenColumn, &[ch('>')]),
+    (NarrowFiles, &[ch('<')]),
+    (WidenFiles, &[ch('>')]),
     (WholeFile, &[ch('o')]),
     (WholeBase, &[ch('O')]),
     (ToggleNotes, &[ch('z')]),
@@ -475,6 +519,9 @@ const LATE: &[Action] = &[
     ToggleLayout,
     ToggleWrap,
     ToggleFiles,
+    FilterFiles,
+    FilterKinds,
+    HideViewed,
     ToggleViewed,
     NextUnviewed,
     PreviousUnviewed,
@@ -482,6 +529,8 @@ const LATE: &[Action] = &[
     ChangeComment,
     NarrowColumn,
     WidenColumn,
+    NarrowFiles,
+    WidenFiles,
     WholeFile,
     WholeBase,
     ToggleNotes,
@@ -516,7 +565,7 @@ impl<'de> Deserialize<'de> for Keymap {
         for late in unset {
             let taken =
                 keymap.0.get(&late).is_some_and(|keys| keys.iter().any(|key| user_keys.contains(key)));
-            if taken && keymap.check().is_err() {
+            if taken && keymap.clashes(late) {
                 keymap.0.insert(late, Vec::new());
             }
         }
@@ -554,6 +603,18 @@ impl Keymap {
 
     fn keys(&self, action: Action) -> &[Key] {
         self.0.get(&action).map_or(&[], Vec::as_slice)
+    }
+
+    /// Whether one of `action`'s keys means another action where both read the keypress.
+    fn clashes(&self, action: Action) -> bool {
+        SHARED.iter().any(|contexts| {
+            let actions: Vec<Action> = contexts.iter().copied().flatten().copied().collect();
+            actions.contains(&action)
+                && self
+                    .keys(action)
+                    .iter()
+                    .any(|key| actions.iter().any(|&other| other != action && self.keys(other).contains(key)))
+        })
     }
 
     /// No key may mean two actions where both read the same keypress.
@@ -643,12 +704,17 @@ impl Action {
             Self::ToggleLayout => "toggle-layout",
             Self::ToggleWrap => "toggle-wrap",
             Self::ToggleFiles => "toggle-files",
+            Self::FilterFiles => "filter-files",
+            Self::FilterKinds => "filter-kinds",
+            Self::HideViewed => "hide-viewed",
             Self::ToggleViewed => "toggle-viewed",
             Self::NextUnviewed => "next-unviewed",
             Self::PreviousUnviewed => "previous-unviewed",
             Self::Help => "help",
             Self::NarrowColumn => "narrow-column",
             Self::WidenColumn => "widen-column",
+            Self::NarrowFiles => "narrow-files",
+            Self::WidenFiles => "widen-files",
             Self::WholeFile => "whole-file",
             Self::WholeBase => "whole-base",
             Self::ToggleNotes => "toggle-notes",

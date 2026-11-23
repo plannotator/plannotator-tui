@@ -144,5 +144,6 @@ backward jump has no default key.
 
 The header counts the marks (`3/12 viewed`). The file list (`f`) shows `✓` after a viewed
 file's counts and dims its row; a folder gets the tick when every file in it is viewed,
-also when it is collapsed. The footer shows `✓ viewed` when the file under the cursor is
+also when it is collapsed. `H` hides the viewed files from the list and the diff; a file
+marked while they are hidden leaves both, and the diff goes on to the next one. The footer shows `✓ viewed` when the file under the cursor is
 marked.

@@ -213,16 +213,22 @@ impl Screen {
         Ok(true)
     }
 
-    /// Go to `to` on `side`, remembering `from` to come back to.
+    /// Go to `to` on `side`, remembering `from` to come back to. A line the diff does not
+    /// show, outside its hunks or in a file the filter hides, opens in the whole-file view.
     fn jump(&mut self, to: &Candidate, side: Side, from: Place) -> anyhow::Result<()> {
         let path = self.capture_path(&to.path, side);
-        let in_diff =
-            path.as_deref().and_then(|p| self.file(p)).is_some_and(|f| f.shows(side, to.line, to.line));
+        let in_diff = path
+            .as_deref()
+            .filter(|p| self.files.is_shown(p))
+            .and_then(|p| self.file(p))
+            .is_some_and(|f| f.shows(side, to.line, to.line));
         let place =
             Place { path: path.unwrap_or_else(|| to.path.clone()), whole: !in_diff, side, line: to.line };
+        if !self.go(&place)? {
+            return Ok(());
+        }
         remember(&mut self.nav.back, from);
         self.nav.forward.clear();
-        self.go(&place)?;
         let kind = match to.kind {
             Kind::Definition => "definition",
             Kind::Reference => "use",
@@ -233,33 +239,43 @@ impl Screen {
         Ok(())
     }
 
-    /// Show `place`: a line of the diff, or of the whole file on its side.
-    fn go(&mut self, place: &Place) -> anyhow::Result<()> {
-        if place.whole {
+    /// Show `place`: a line of the diff, or of the whole file on its side, which is also
+    /// where a line of a file the filter hides shows. False, with the reason in the footer,
+    /// when the diff cannot show it.
+    fn go(&mut self, place: &Place) -> anyhow::Result<bool> {
+        if place.whole || !self.files.is_shown(&place.path) {
             self.show_whole(&place.path, Version::of(place.side), Some(place.line));
-            return Ok(());
+            return Ok(true);
         }
         self.close_whole()?;
         if let Err(err) = self.diff.reveal(&place.path, place.side, place.line) {
             self.status = Some(format!("{err:#}"));
+            return Ok(false);
         }
-        Ok(())
+        Ok(true)
     }
 
     /// `ctrl+o` (`forward: false`) and `ctrl+i`: the place before, or after, in the history.
+    /// A place that cannot be shown stays where it was in the history.
     pub(super) fn jump_history(&mut self, forward: bool) -> anyhow::Result<()> {
         let here = self.here()?;
         let nav = &mut self.nav;
-        let (from, to) =
-            if forward { (&mut nav.forward, &mut nav.back) } else { (&mut nav.back, &mut nav.forward) };
+        let from = if forward { &mut nav.forward } else { &mut nav.back };
         let Some(place) = from.pop() else {
             self.status = Some(if forward { "no later place" } else { "no earlier place" }.into());
             return Ok(());
         };
+        if !self.go(&place)? {
+            let nav = &mut self.nav;
+            let from = if forward { &mut nav.forward } else { &mut nav.back };
+            from.push(place);
+            return Ok(());
+        }
+        let nav = &mut self.nav;
+        let to = if forward { &mut nav.back } else { &mut nav.forward };
         if let Some(here) = here {
             remember(to, here);
         }
-        self.go(&place)?;
         self.status = Some(format!("{}:{}", place.path, place.line));
         Ok(())
     }
