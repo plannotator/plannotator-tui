@@ -7,6 +7,7 @@ use plannotator_tui_review::Side;
 use ratatui::crossterm::event::{Event, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 
+use super::diff::Diff;
 use super::whole::Version;
 use super::{Focus, Mode, Screen};
 use crate::keys::{self, Action};
@@ -40,17 +41,38 @@ impl Screen {
     pub(crate) fn handle_event(&mut self, event: Event) -> Result<()> {
         if matches!(event, Event::Key(_) | Event::Paste(_)) {
             self.last_key = Some(std::time::Instant::now());
+            self.toolbar = None;
         }
-        let moves = match &event {
+        // A drag ends with its release over the review. Anything else first (a key, a paste,
+        // the terminal resized or left, a second press, the pointer moving with no button
+        // held, which says the release went elsewhere, any mouse event over a box or the
+        // help) drops it unapplied, its highlight with it, so what is lit is what `c` uses.
+        let drops = match &event {
             Event::Key(key) => key.kind != KeyEventKind::Release,
-            Event::Mouse(mouse) => mouse.kind != MouseEventKind::Moved,
-            _ => false,
+            Event::Paste(_) | Event::Resize(..) | Event::FocusLost => true,
+            Event::Mouse(mouse) => {
+                self.mode != Mode::Browse
+                    || matches!(mouse.kind, MouseEventKind::Down(_) | MouseEventKind::Moved)
+            }
+            Event::FocusGained => false,
         };
+        if drops {
+            self.cancel_drags();
+        }
+        if event == Event::FocusLost {
+            self.dividers.unlight();
+        }
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => self.key(key)?,
             Event::Paste(text) if matches!(self.mode, Mode::Compose(_)) => self.compose.insert_text(&text),
             Event::Paste(text) if self.mode == Mode::FilterFiles => self.paste_filter(&text),
-            Event::Mouse(mouse) => self.mouse(mouse)?,
+            Event::Mouse(mouse) => {
+                // Nothing the mouse does may end the review: what fails is said in the footer.
+                if let Err(error) = self.mouse(mouse) {
+                    self.cancel_drags();
+                    self.status = Some(format!("{error:#}"));
+                }
+            }
             Event::Resize(..) => {
                 if let Some(whole) = &mut self.whole {
                     whole.handle_event(event.clone())?;
@@ -59,12 +81,26 @@ impl Screen {
             }
             _ => {}
         }
-        // Whatever moved the diff (a key, a note picked in the rail, a jump, the mouse), the
-        // file list and the footer follow the file its cursor is in.
-        if moves && matches!(self.mode, Mode::Browse | Mode::FilterFiles) {
-            self.track_current()?;
+        if let Some(notice) = self.active_diff_mut().and_then(Diff::take_notice) {
+            self.status = Some(notice.into());
         }
+        // A key that opened a box, the help or a menu mid-drag dropped the drag above; one
+        // that did so by the mouse (a toolbar button) leaves none behind either.
+        if self.mode != Mode::Browse {
+            self.cancel_drags();
+        }
+        // Whatever moved the diff (a key, a note picked in the rail, a jump, the mouse), the
+        // file list and the footer follow the file its cursor is in; the frame asks again.
+        self.track_current();
         Ok(())
+    }
+
+    /// Drop a drag in progress, of lines or of a pane's edge, without applying it.
+    pub(super) fn cancel_drags(&mut self) {
+        if self.drag.take().is_some() {
+            self.sync_markers();
+        }
+        self.dividers.cancel();
     }
 
     fn key(&mut self, key: KeyEvent) -> Result<()> {
@@ -185,6 +221,10 @@ impl Screen {
                 self.mode = Mode::Help;
                 return Ok(());
             }
+            Some(action @ (Action::NarrowNotes | Action::WidenNotes)) => {
+                self.resize_notes(action == Action::WidenNotes);
+                return Ok(());
+            }
             Some(Action::ToggleNotes) => {
                 self.toggle_notes();
                 return Ok(());
@@ -199,8 +239,19 @@ impl Screen {
     }
 
     fn diff_key(&mut self, key: KeyEvent) -> Result<()> {
-        let Some(action) = self.keys.action(&key, keys::DIFF) else { return Ok(()) };
+        match self.keys.action(&key, keys::DIFF) {
+            Some(action) => self.diff_action(action),
+            None => Ok(()),
+        }
+    }
+
+    /// A diff key's action, or the toolbar button for it.
+    fn diff_action(&mut self, action: Action) -> Result<()> {
         match action {
+            Action::CopyLines => {
+                self.copy_selection();
+                return Ok(());
+            }
             Action::GoToDefinition => return self.go_to_definition(),
             Action::JumpBack => return self.jump_history(false),
             Action::JumpForward => return self.jump_history(true),
@@ -233,7 +284,10 @@ impl Screen {
             Action::Visual | Action::VisualLine => return self.diff.begin_or_end_selection(),
             Action::Comment => return self.start_comment(),
             Action::Suggest => return self.start_suggestion(),
-            Action::FileComment => return self.start_file_comment(),
+            Action::FileComment => {
+                self.start_file_comment();
+                return Ok(());
+            }
             Action::WholeFile => return self.open_whole(Version::Current),
             Action::WholeBase => return self.open_whole(Version::Base),
             Action::Left => return self.go_to_side(Side::Old),
@@ -250,7 +304,10 @@ impl Screen {
             Action::PreviousFile => return self.step_file(false),
             Action::ToggleLayout => Command::ToggleLayout,
             Action::ToggleWrap => Command::ToggleWrap,
-            Action::ToggleViewed => return self.toggle_viewed(),
+            Action::ToggleViewed => {
+                self.toggle_viewed();
+                return Ok(());
+            }
             Action::NextUnviewed => return self.jump_unviewed(true),
             Action::PreviousUnviewed => return self.jump_unviewed(false),
             Action::Confirm => Command::Activate,
@@ -327,8 +384,52 @@ impl Screen {
                 self.mode = Mode::Browse;
                 return Ok(());
             }
+            Mode::Help => {
+                let room = self.help_room.get();
+                match mouse.kind {
+                    MouseEventKind::ScrollDown => self.help_scroll = (self.help_scroll + 3).min(room),
+                    MouseEventKind::ScrollUp => self.help_scroll = self.help_scroll.saturating_sub(3),
+                    _ => {}
+                }
+                return Ok(());
+            }
             Mode::Browse => {}
             _ => return Ok(()),
+        }
+        // A line between panes takes its own presses and drags; a drag that selects lines
+        // goes on wherever the pointer is, over the list, the notes or past the pane.
+        if self.divider_mouse(mouse) {
+            self.toolbar = None;
+            return Ok(());
+        }
+        if self.drag.is_some() {
+            match mouse.kind {
+                MouseEventKind::Drag(MouseButton::Left) => return self.drag_to(mouse),
+                MouseEventKind::Up(MouseButton::Left) => return self.release(mouse),
+                _ => {}
+            }
+        }
+        if self.geometry.files.contains(at) {
+            if click {
+                self.toolbar = None;
+            }
+            return self.files_mouse(mouse);
+        }
+        let toolbar = self.toolbar.is_some();
+        if click
+            && toolbar
+            && let Some(action) = self.toolbar_hit(at)
+        {
+            self.toolbar = None;
+            self.focus = Focus::Diff;
+            return self.diff_action(action);
+        }
+        // Between and beside its buttons the toolbar takes the click and does nothing.
+        if click && toolbar && inside(self.geometry.toolbar_bar) {
+            return Ok(());
+        }
+        if click || matches!(mouse.kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown) {
+            self.toolbar = None;
         }
         if click && inside(self.geometry.send_button) {
             self.send(false);
@@ -337,9 +438,6 @@ impl Screen {
         if click && inside(self.geometry.review_button) {
             self.mode = Mode::Menu(0);
             return Ok(());
-        }
-        if self.geometry.files.contains(at) {
-            return self.files_mouse(mouse);
         }
         if self.geometry.rail.contains(at) {
             match mouse.kind {
@@ -359,7 +457,7 @@ impl Screen {
         }
         if self.geometry.diff.contains(at) {
             if click {
-                self.focus = Focus::Diff;
+                return self.press(mouse);
             }
             if let Some(whole) = &mut self.whole {
                 whole.handle_event(Event::Mouse(mouse))?;

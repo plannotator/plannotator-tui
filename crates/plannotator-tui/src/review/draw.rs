@@ -20,7 +20,7 @@ use crate::theme::palette;
 use crate::ui::{chips, compose, send_button};
 
 const RAIL_WIDTH: u16 = 36;
-const RAIL_MIN_WIDTH: u16 = 28;
+pub(super) const RAIL_MIN_WIDTH: u16 = 28;
 /// Below this the rail is dropped; notes still show as gutter markers.
 pub(super) const RAIL_MIN_TOTAL_WIDTH: u16 = 80;
 /// The comment box's widest; code suggestions want the room.
@@ -31,6 +31,7 @@ const PR_TITLE_MAX: usize = 48;
 
 impl Screen {
     pub(crate) fn draw(&mut self, frame: &mut Frame) -> Result<()> {
+        self.track_current();
         let area = frame.area();
         let [header, body, footer] = Layout::vertical([
             Constraint::Length(1),
@@ -40,7 +41,8 @@ impl Screen {
         .areas(area);
         // A hidden rail gives its columns to the diff, which the viewer reflows as on a resize.
         let mut rail_width = if self.rail_shown() && area.width >= RAIL_MIN_TOTAL_WIDTH {
-            (area.width * 3 / 10).clamp(RAIL_MIN_WIDTH, RAIL_WIDTH)
+            let fitted = (area.width * 3 / 10).clamp(RAIL_MIN_WIDTH, RAIL_WIDTH);
+            self.dividers.notes_width(fitted, body.width, self.files_wanted())
         } else {
             0
         };
@@ -84,11 +86,20 @@ impl Screen {
             None => (Rect::default(), main),
         };
         self.geometry = Geometry { diff, rail, files, ..Geometry::default() };
+        self.dividers.notes_drawn(rail_width);
+        self.dividers.place(files, rail);
         self.draw_header(frame, header);
+        let cursor_selected = self.cursor_selected();
         match &mut self.whole {
             Some(whole) => whole.draw(frame, diff)?,
             None => self.diff.draw(frame, diff)?,
         }
+        let (split, code) = match self.active_diff_mut() {
+            Some(shown) => (shown.split(), (diff.top()..diff.bottom()).map(|y| shown.code_row(y)).collect()),
+            None => (false, Vec::new()),
+        };
+        let code = |y: u16| code.get(usize::from(y - diff.y)).copied().unwrap_or(true);
+        let selected = super::mouse::tint_selection(frame.buffer_mut(), diff, split, cursor_selected, code);
         if files.width > 0 {
             let listing = self.listing();
             self.draw_files(frame, files, &listing);
@@ -96,6 +107,7 @@ impl Screen {
         if rail_width > 0 {
             self.draw_rail(frame, rail);
         }
+        self.dividers.draw(frame);
         self.draw_footer(frame, footer);
         match &self.mode {
             Mode::Compose(draft) => {
@@ -112,8 +124,9 @@ impl Screen {
                 let pick = pick.clone();
                 self.draw_pick(frame, diff, &pick);
             }
+            Mode::Browse => self.draw_toolbar(frame, diff, selected),
             Mode::Kinds(cursor) => self.draw_kinds(frame, *cursor),
-            Mode::Browse | Mode::ConfirmQuit | Mode::FilterFiles => {}
+            Mode::ConfirmQuit | Mode::FilterFiles => {}
         }
         Ok(())
     }

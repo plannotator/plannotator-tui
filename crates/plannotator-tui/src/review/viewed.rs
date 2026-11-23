@@ -30,33 +30,27 @@ impl Screen {
         format!("{viewed}/{total} viewed")
     }
 
-    /// Whether the file under the cursor is marked viewed, for the footer's tick. Reads the
-    /// cursor without moving it, so on a heading it says nothing.
+    /// Whether the file under the cursor is marked viewed, for the footer's tick.
     pub(super) fn cursor_file_viewed(&self) -> bool {
-        let path = match self.diff.selection() {
-            Some(lines) => Some(lines.path),
-            None => self.diff.cursor().ok().flatten().map(|lines| lines.path),
-        };
-        path.is_some_and(|p| self.progress.is_viewed(&p))
+        self.file_under_cursor().is_some_and(|p| self.progress.is_viewed(&p))
     }
 
-    /// The file under the selection or the cursor, on a heading or a binary file's note
-    /// too (`diff::place`).
-    pub(super) fn file_under_cursor(&mut self) -> Result<Option<String>> {
+    /// The file under the selection or the cursor, on every kind of row, as the viewer says
+    /// (`diff::place`).
+    pub(super) fn file_under_cursor(&self) -> Option<String> {
         if let Some(lines) = self.diff.selection() {
-            return Ok(Some(lines.path));
+            return Some(lines.path);
         }
-        Ok(self.diff.cursor_file()?.and_then(|i| self.diff.paths().get(i).cloned()))
+        self.diff.cursor_file().and_then(|i| self.diff.paths().get(i).cloned())
     }
 
     /// `x`: flip the file's mark and save it.
-    pub(super) fn toggle_viewed(&mut self) -> Result<()> {
-        let Some(path) = self.file_under_cursor()? else {
+    pub(super) fn toggle_viewed(&mut self) {
+        let Some(path) = self.file_under_cursor() else {
             self.status = Some("move the cursor onto a line of the file first".into());
-            return Ok(());
+            return;
         };
         self.toggle_viewed_of(&path);
-        Ok(())
     }
 
     /// Flip `path`'s mark and save it; the whole-file view's `x` too.
@@ -85,20 +79,31 @@ impl Screen {
         if paths.is_empty() {
             return Ok(());
         }
-        let here = self.file_under_cursor()?.and_then(|p| paths.iter().position(|q| *q == p));
+        // By the viewer's index: a symlink replaced by a file is two files of one path, and
+        // both are where the cursor is.
+        let here = match self.diff.selection() {
+            Some(lines) => paths.iter().position(|q| *q == lines.path),
+            None => self.diff.cursor_file(),
+        };
+        let here_path = here.and_then(|i| paths.get(i));
         let count = paths.len();
         let start = here.unwrap_or(if forward { count - 1 } else { 0 });
         let target = (1..=count)
             .map(|step| if forward { (start + step) % count } else { (start + count - step % count) % count })
-            .find(|&i| paths.get(i).is_some_and(|p| !self.progress.is_viewed(p)));
-        let Some(index) = target.filter(|&i| Some(i) != here) else {
+            .find(|&i| paths.get(i).is_some_and(|p| Some(p) != here_path && !self.progress.is_viewed(p)));
+        let Some(index) = target else {
             let all = paths.iter().all(|p| self.progress.is_viewed(p));
             self.status = Some(if all { "every file is viewed" } else { "no other file to view" }.into());
             return Ok(());
         };
+        self.goto_index(index)?;
         let path = paths.get(index).cloned().unwrap_or_default();
-        self.goto_file(&path)?;
-        let left = paths.iter().filter(|p| !self.progress.is_viewed(p)).count();
+        // Each path once: its mark is one for both of its files.
+        let left = paths
+            .iter()
+            .filter(|p| !self.progress.is_viewed(p))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
         self.status = Some(format!("{path} \u{b7} {left} not viewed"));
         Ok(())
     }

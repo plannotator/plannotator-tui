@@ -46,7 +46,7 @@ rustix = { version = "1", features = ["event", "fs", "stdio", "termios"] }
 # The diff viewer behind `plannotator-tui review` (src/review/). Unix only: its patch reader is.
 # Default features off: `dev-tty` would switch crossterm, for this whole build, to reading
 # /dev/tty, and `clipboard` is its own macOS clipboard; this app owns its input and copies.
-diffs-rs = { version = "0.2.1", default-features = false }
+diffs-rs = { version = "0.2.2", default-features = false }
 
 [dev-dependencies]
 rusqlite = { version = "0.31.0", features = ["bundled"] }

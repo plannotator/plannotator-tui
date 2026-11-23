@@ -109,6 +109,8 @@ impl Screen {
                     (key(&[Action::Top, Action::Bottom]), "first / last"),
                     (key(&[Action::Left, Action::Right]), "old / new side"),
                     (key(&[Action::Visual]), "select lines (again to finish); shift-click too"),
+                    ("drag".to_owned(), "select lines with the mouse, then comment or suggest"),
+                    (key(&[Action::CopyLines]), "copy the selected lines"),
                     (key(&[Action::Comment]), "comment on the selection or line"),
                     (key(&[Action::Suggest]), "suggest code for new lines"),
                     (key(&[Action::FileComment]), "comment on the file"),
@@ -146,6 +148,7 @@ impl Screen {
                     (key(&[Action::HideViewed]), "hide viewed files"),
                     (key(&[Action::ToggleViewed]), "mark the file viewed, or not"),
                     (key(&[Action::Back]), "clear the name filter, then back to the diff"),
+                    ("drag its line".to_owned(), "wider / narrower; double-click it to fit the names again"),
                 ],
             ),
             (
@@ -166,6 +169,8 @@ impl Screen {
                 "notes",
                 vec![
                     (key(&[Action::Down, Action::Up]), "next / previous (the diff follows)"),
+                    (key(&[Action::WidenNotes, Action::NarrowNotes]), "widen / narrow the notes"),
+                    ("drag its line".to_owned(), "wider / narrower; double-click it to fit again"),
                     (key(&[Action::Confirm]), "show it; a note not in the diff opens the whole file"),
                     (key(&[Action::Edit]), "edit"),
                     (key(&[Action::Remove]), "remove"),

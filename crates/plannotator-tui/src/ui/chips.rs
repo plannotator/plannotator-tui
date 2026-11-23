@@ -30,6 +30,10 @@ pub(crate) struct Chips {
     toolbar_comment: Color,
     toolbar_looks_good: Color,
     toolbar_delete: Color,
+    /// The code review's toolbar after a mouse selection: suggest, beside comment (which
+    /// is the document toolbar's comment colour).
+    #[cfg_attr(not(unix), allow(dead_code, reason = "only the code review reads it"))]
+    pub(crate) review_suggest: Color,
 }
 
 impl Chips {
@@ -40,6 +44,12 @@ impl Chips {
             Kind::LooksGood => self.toolbar_looks_good,
             Kind::Delete => self.toolbar_delete,
         }
+    }
+
+    /// The code review toolbar's comment label: the document toolbar's.
+    #[cfg_attr(not(unix), allow(dead_code, reason = "only the code review reads it"))]
+    pub(crate) fn review_comment(&self) -> Color {
+        self.toolbar_comment
     }
 }
 
@@ -59,6 +69,7 @@ static DARK: Chips = Chips {
     toolbar_comment: Color::Indexed(221),
     toolbar_looks_good: Color::Indexed(114),
     toolbar_delete: Color::Indexed(217),
+    review_suggest: Color::Indexed(80),
 };
 
 /// Dark text on the light toolbar grey; sent turns round to a pale chip with dark green text.
@@ -72,6 +83,7 @@ static LIGHT: Chips = Chips {
     toolbar_comment: Color::Indexed(58),
     toolbar_looks_good: Color::Indexed(22),
     toolbar_delete: Color::Indexed(124),
+    review_suggest: Color::Indexed(23),
 };
 
 /// The chips of the theme in force.
@@ -131,6 +143,8 @@ mod tests {
             ("toolbar comment", on_toolbar(chips.toolbar(Kind::Comment))),
             ("toolbar looks good", on_toolbar(chips.toolbar(Kind::LooksGood))),
             ("toolbar delete", on_toolbar(chips.toolbar(Kind::Delete))),
+            ("review toolbar comment", on_toolbar(chips.review_comment())),
+            ("review toolbar suggest", on_toolbar(chips.review_suggest)),
         ];
         let styles = [
             ("cursor", palette.cursor),

@@ -98,6 +98,7 @@ pub(super) fn open(args: ReviewArgs) -> Result<()> {
         screen.start_notes_rail(session.config.ui.notes_rail);
         screen.set_keys(session.config.keys, session.shift_enter);
         screen.enable_clipboard();
+        screen.set_copy_on_select(session.config.ui.copy_on_select);
         screen.start_pi_link();
         let events = read_events(wake)?;
         let result = event_loop(terminal, &mut screen, &ready, &events);

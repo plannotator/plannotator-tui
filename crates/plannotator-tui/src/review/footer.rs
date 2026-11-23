@@ -126,7 +126,7 @@ impl Screen {
             0 => count(notes.len()),
             n => format!("{} ({n} outdated)", count(notes.len())),
         });
-        if let Some(lines) = self.diff.selection() {
+        if let Some(lines) = self.selected_lines() {
             let span = if lines.first == lines.last {
                 lines.first.to_string()
             } else {
@@ -191,6 +191,9 @@ impl Screen {
                 (!back.is_empty()).then(|| format!("{} back to the diff", back.join("/"))),
                 current.then(|| key(Action::Visual, "select")).flatten(),
                 current.then(|| key(Action::Comment, "comment")).flatten(),
+                (self.on_release == super::mouse::OnRelease::Wait && self.selected_lines().is_some())
+                    .then(|| key(Action::CopyLines, "copy"))
+                    .flatten(),
                 key(Action::GoToDefinition, "definition"),
                 pair(Action::NextHunk, Action::PreviousHunk, "change"),
                 pair(Action::NextFile, Action::PreviousFile, "file"),
@@ -216,6 +219,9 @@ impl Screen {
                 self.diff.selecting().then(|| key(Action::Visual, "end selection")).flatten(),
                 key(Action::Comment, "comment"),
                 key(Action::Suggest, "suggest"),
+                (self.on_release == super::mouse::OnRelease::Wait)
+                    .then(|| key(Action::CopyLines, "copy"))
+                    .flatten(),
                 key(Action::Back, "clear"),
             ],
             Focus::Diff => [
@@ -254,6 +260,7 @@ impl Screen {
                 pair(Action::Down, Action::Up, "move"),
                 key(Action::Edit, "edit"),
                 key(Action::Remove, "remove"),
+                pair(Action::WidenNotes, Action::NarrowNotes, "width"),
                 key(Action::ToggleNotes, "hide"),
                 key(Action::CycleFocus, "diff"),
             ]

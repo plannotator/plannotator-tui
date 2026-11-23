@@ -12,8 +12,9 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use plannotator_tui_schema::{DocumentSource, Kind};
 use ratatui::crossterm::event::{
-    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+    EnableFocusChange, EnableMouseCapture, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use ratatui::crossterm::execute;
 
@@ -616,14 +617,25 @@ pub(crate) fn with_terminal<T>(
         &config.colors,
     );
     let mut terminal = ratatui::init();
-    crate::layout::keep_hook_off_layout_threads();
     #[cfg(unix)]
     crate::hangup::watch();
+    // ratatui's hook leaves the alternate screen and raw mode on a panic. The modes this app
+    // turns on go first, or the shell is left with mouse, focus and paste reports; the hook
+    // is in place before any of them is on. Whether the keyboard flags were pushed is only
+    // known once the terminal answers below.
+    let pushed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flags = std::sync::Arc::clone(&pushed);
+    std::panic::set_hook(release_first(
+        move || release_input(flags.load(std::sync::atomic::Ordering::Acquire)),
+        std::panic::take_hook(),
+    ));
+    crate::layout::keep_hook_off_layout_threads();
     execute!(stdout(), EnableMouseCapture)?;
     // Shift+Enter is only distinguishable from Enter where the kitty keyboard protocol
     // holds end to end (terminal, and any multiplexer in between). Ask for it; the flag
     // gates the compose box's hint so it never advertises a key that cannot arrive.
     let shift_enter = ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
+    pushed.store(shift_enter, std::sync::atomic::Ordering::Release);
     claim_input(shift_enter);
     let result = run(&mut terminal, Session { config, shift_enter });
     release_input(shift_enter);
@@ -634,7 +646,9 @@ pub(crate) fn with_terminal<T>(
 /// Bracketed paste and, where the terminal has it, the kitty keyboard protocol. Mouse
 /// capture is the caller's: the first claim turns it on before the keyboard query.
 fn claim_input(shift_enter: bool) {
-    let _ = execute!(stdout(), EnableBracketedPaste);
+    // Focus changes tell the code review the pointer left, so a drag whose release went
+    // elsewhere ends; the document screen ignores them.
+    let _ = execute!(stdout(), EnableBracketedPaste, EnableFocusChange);
     if shift_enter {
         let _ = execute!(
             stdout(),
@@ -648,8 +662,18 @@ fn release_input(shift_enter: bool) {
     if shift_enter {
         let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
     }
-    let _ = execute!(stdout(), DisableBracketedPaste);
+    let _ = execute!(stdout(), DisableFocusChange, DisableBracketedPaste);
     let _ = execute!(stdout(), DisableMouseCapture);
+}
+
+type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync + 'static>;
+
+/// A panic hook that runs `release` and then `previous`.
+fn release_first(release: impl Fn() + Send + Sync + 'static, previous: PanicHook) -> PanicHook {
+    Box::new(move |info| {
+        release();
+        previous(info);
+    })
 }
 
 /// Give the terminal to the editor until it exits, then take the screen back. The outer
@@ -841,6 +865,36 @@ mod tests {
     fn last_offers_the_configured_count_and_pick_overrides_it() {
         assert_eq!(last_options(&args(&["--newest"]), 60).expect("parses").pick, 60);
         assert_eq!(last_options(&args(&["--pick", "5"]), 60).expect("parses").pick, 5);
+    }
+
+    #[test]
+    fn a_panic_turns_the_input_modes_off_before_the_hook_that_gives_the_screen_back() {
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+        // Only this thread's panic is recorded; any other test's goes to the hook as before.
+        let here = thread::current().id();
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let original: Arc<super::PanicHook> = Arc::new(std::panic::take_hook());
+        let (released, given_back, others) = (Arc::clone(&order), Arc::clone(&order), Arc::clone(&original));
+        let previous: super::PanicHook = Box::new(move |info| {
+            if thread::current().id() == here {
+                given_back.lock().expect("order").push("screen");
+            } else {
+                others(info);
+            }
+        });
+        let release = move || {
+            if thread::current().id() == here {
+                released.lock().expect("order").push("input modes");
+            }
+        };
+        std::panic::set_hook(super::release_first(release, previous));
+        #[allow(clippy::panic, reason = "the hook runs on a panic")]
+        let outcome = std::panic::catch_unwind(|| std::panic::panic_any("on purpose"));
+        drop(std::panic::take_hook());
+        std::panic::set_hook(Box::new(move |info| original(info)));
+        assert!(outcome.is_err());
+        assert_eq!(*order.lock().expect("order"), ["input modes", "screen"]);
     }
 
     #[test]

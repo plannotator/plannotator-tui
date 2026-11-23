@@ -108,7 +108,7 @@ dimmed. The keys also work without opening the menu.
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
-| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `M` note on the whole change; `o`/`O` whole file now/before; `d` go to definition, `ctrl+o`/`ctrl+i` back/forward; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` the file list; `/` filter files by name; `t` filter by kind; `H` hide viewed files; `<`/`>` list width; `z` hide or show the notes; `r` read the diff again (the footer says when it changed on disk); `?` keys |
+| code review | drag with the mouse or `v` select, `v` again to end; `c` comment; `y` copy the selected lines; `s` suggest code; `C` note on the file; `M` note on the whole change; `o`/`O` whole file now/before; `d` go to definition, `ctrl+o`/`ctrl+i` back/forward; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` the file list; `/` filter files by name; `t` filter by kind; `H` hide viewed files; `<`/`>` list width; `{`/`}` notes width (or drag the line between the panes); `z` hide or show the notes; `r` read the diff again (the footer says when it changed on disk); `?` keys |
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
 
@@ -209,6 +209,29 @@ plannotator-tui review https://github.com/owner/repo/pull/123
 - `M` writes a note on the whole change (also the first row of the Review menu). It sits
   at the top of the rail under **Whole change**, and the agent gets it first, under
   `## Global comments`, as the browser sends its global comments.
+
+The mouse works too. The wheel scrolls the diff, the file list or the notes under the
+pointer. A click puts the cursor on a line, on the old or new side you clicked; a click on a
+file in the file list goes to that file, a click on a folder opens or closes it, and a
+click on a note selects it and shows its lines. The Send and `Review ▾` buttons in the header are clickable. Drag over lines to
+select them: a selection is whole lines on the side where the drag started, as in the
+browser's code review, and the lines are shaded while you drag. Drag past the top or bottom
+of the diff to scroll. When you let go, a small toolbar next to the lines offers `💬 comment`
+and `✎ suggest` (click it, or press `c` or `s`), and the note is anchored on exactly those
+lines, with their code quoted for the agent. `Esc` clears the selection. Drag works the
+same in the whole-file view. Shift-click grows a selection to the clicked line, from the
+line the drag started on. A selection stays inside the hunk it started in, as GitHub's
+multi-line comments do: a drag or a `v` selection stops at the hunk's first or last line.
+A key, a second click, or the window losing focus before you let go drops the drag, and
+its shading with it.
+
+Drag the line between the file list and the diff, or between the diff and the notes, to
+make the list or the notes wider or narrower; the line lights up under the pointer and while
+you drag it. `<`/`>` do the same for the list and `{`/`}` for the notes, four columns at a
+time. The width you set stays for the rest of the review, through filters and `r`, and the
+diff always keeps room to show its code; a window made narrower for a while draws the panes
+narrower and gives them the width you set back when it widens. Double-click the line (two
+clicks on one cell, without moving) to let the list or the notes fit themselves again.
 
 Notes appear in the rail on the right, grouped by file, and a mark in the diff shows their
 lines. Sent notes get a dimmer mark. `Tab` moves to the rail; `j`/`k` there moves to a
@@ -457,9 +480,9 @@ and the last choice is remembered in `clients/plannotator-tui/ui-state.json` und
 folder. A remembered choice wins over `notes_rail`; with `when-notes`, a rail remembered
 open still waits for the first note before it takes any columns.
 
-A mouse selection is copied to the clipboard when you release the button. To leave the
-clipboard alone, as with Herdr's `ui.copy_on_select = false`, turn it off and press `y` on
-the selection when you want a copy:
+A mouse selection is copied to the clipboard when you release the button, in a document and
+in the code review (the selected lines' code). To leave the clipboard alone, as with Herdr's
+`ui.copy_on_select = false`, turn it off and press `y` on the selection when you want a copy:
 
 ```toml
 [ui]
@@ -513,6 +536,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `clear-all` | `X` | every annotation on the document, after `yes` |
 | `looks-good` `delete` | `a` `d` | toolbar, with `comment`; also on the selected block, unless another document action has the key |
 | `copy` | `y` | copy the selection waiting in the toolbar |
+| `copy-lines` | `y` | code review: copy the selected lines; a config that sets only `copy` gives its keys to this too |
 | `search` `next-match` `previous-match` | `/` `n` `N` | search the open document; step through the matches |
 | `yes` `no` | `y` `n`, `Y` `N` | the send-before-quitting and clear-all questions |
 | `suggest` `file-comment` | `s` `C` | code review: suggest code for the lines; a note on the whole file |
@@ -526,6 +550,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `help` | `?` | code review: every key (`j`/`k` scroll it when it does not fit) |
 | `narrow-column` `widen-column` | `<` `>` | the reading column, by eight columns |
 | `narrow-files` `widen-files` | `<` `>` | code review: the file list, by four columns |
+| `narrow-notes` `widen-notes` | `}` `{` | code review: the notes panel, by four columns |
 | `toggle-notes` | `z` | close the notes rail, or open it again; remembered for the next session |
 
 Actions forwarded by Herdr Mirror default to a split beside the invoking remote

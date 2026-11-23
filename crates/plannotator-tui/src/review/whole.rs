@@ -144,14 +144,14 @@ impl Whole {
         Self { path: path.to_owned(), version, view, opened_on: path.to_owned(), reveal, summary }
     }
 
-    fn diff(&self) -> Option<&Diff> {
+    pub(super) fn diff(&self) -> Option<&Diff> {
         match &self.view {
             View::Shown { diff, .. } => Some(&**diff),
             View::Message(_) => None,
         }
     }
 
-    fn diff_mut(&mut self) -> Option<&mut Diff> {
+    pub(super) fn diff_mut(&mut self) -> Option<&mut Diff> {
         match &mut self.view {
             View::Shown { diff, .. } => Some(&mut **diff),
             View::Message(_) => None,
@@ -347,7 +347,7 @@ impl Screen {
             };
             (path, line)
         } else {
-            let Some(path) = self.file_under_cursor()? else {
+            let Some(path) = self.file_under_cursor() else {
                 self.status = Some("move the cursor onto a file first".into());
                 return Ok(());
             };
@@ -561,6 +561,12 @@ impl Screen {
                     last: note.line_end,
                 };
                 marks.push((lines, style));
+            }
+        }
+        // The lines a drag in the view is going over, over everything else.
+        if let Some(lines) = self.drag.as_ref().and_then(super::mouse::Drag::lines) {
+            for engine_side in [Side::Old, Side::New] {
+                marks.push((Lines { side: engine_side, ..lines.clone() }, super::mouse::drag_mark()));
             }
         }
         if let Some(Err(err)) = self.whole.as_mut().and_then(Whole::diff_mut).map(|d| d.set_markers(&marks)) {

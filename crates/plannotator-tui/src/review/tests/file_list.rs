@@ -199,7 +199,7 @@ fn the_list_moves_the_diff_as_its_cursor_moves_and_enter_goes_there() {
     // The cursor starts on the file the diff shows, the guide.
     keys(&mut screen, "jj");
     assert_eq!(screen.files.current.as_deref(), Some(PANEL_TEST));
-    assert_eq!(screen.file_under_cursor().expect("cursor").as_deref(), Some(PANEL_TEST));
+    assert_eq!(screen.file_under_cursor().as_deref(), Some(PANEL_TEST));
     keys(&mut screen, "j");
     press(&mut screen, KeyCode::Enter);
     assert_eq!(screen.focus, Focus::Diff);
