@@ -252,7 +252,8 @@ still sent, marked as outdated. `u` switches between split and unified view, `w`
 long lines, `f` lists the changed files and `?` shows every key.
 
 `x` marks the file under the cursor viewed, and `x` again unmarks it. The header counts
-them (`3/12 viewed`) and `ctrl+n` goes to the next file you have not viewed. Marks are
+them (`3/12 viewed`), the file list ticks viewed files and dims them, and `ctrl+n` goes to
+the next file you have not viewed. Marks are
 saved in the browser app's own format under the data folder (`review-progress/`), so a
 review started in the browser continues here and the other way round. A mark stops
 counting once its file changes. Set `PLANNOTATOR_REVIEW_PROGRESS=0` to keep marks for the
