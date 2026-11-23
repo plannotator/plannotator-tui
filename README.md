@@ -108,7 +108,7 @@ dimmed. The keys also work without opening the menu.
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
-| code review | drag with the mouse or `v` select, `v` again to end; `c` comment; `y` copy the selected lines; `s` suggest code; `C` note on the file; `M` note on the whole change; `o`/`O` whole file now/before; `d` go to definition, `ctrl+o`/`ctrl+i` back/forward; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` the file list; `/` filter files by name; `t` filter by kind; `H` hide viewed files; `<`/`>` list width; `{`/`}` notes width (or drag the line between the panes); `z` hide or show the notes; `r` read the diff again (the footer says when it changed on disk); `?` keys |
+| code review | drag with the mouse or `v` select, `v` again to end; `c` comment; `y` copy the selected lines; `s` suggest code; `C` note on the file; `M` note on the whole change; `o`/`O` whole file now/before; `d` go to definition, `ctrl+o`/`ctrl+i` back/forward; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `(`/`)` move the line between the sides (or drag it); `,` diff settings; `f` the file list; `/` filter files by name; `t` filter by kind; `H` hide viewed files; `<`/`>` list width; `{`/`}` notes width (or drag the line between the panes); `z` hide or show the notes; `r` read the diff again (the footer says when it changed on disk); `?` keys |
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
 
@@ -275,6 +275,18 @@ pull request reviews have nothing on disk to check.
 A note whose lines changed goes to the **Outdated** group at the end of the rail; it is
 still sent, marked as outdated. `u` switches between split and unified view, `w` wraps
 long lines and `?` shows every key.
+
+The header shows the layout as a switch, `Split  Unified` with the one in force lit, and a
+`Wrap` switch beside it; a click on either does what `u` or `w` does. In a split diff, drag
+the line between the old and the new side to give one side more of the width, or press `(`
+and `)`; a double click on the line makes the sides even again. Each side keeps at least 20
+columns. `,` (or the header's `Settings` button) opens the diff settings: layout, split
+ratio, wrap, line numbers, colours and background, each with its value. `↑`/`↓` pick one,
+`←`/`→` change it, `enter` or `space` moves it on (and evens the split ratio), a click on a row
+does the same, and `esc` closes the menu. Every change applies at once and is written to the
+config file's [`[review]`](#how-diffs-open) table, so the next review opens the same way. A
+narrow header drops the key hints, the `Wrap` switch and the `Review` button first, and shows
+the switch as `S  U` last.
 
 The changed files are listed left of the diff as a folder tree. A chain of folders with
 one folder each is one row (`crates/app/src/`), and the list is as wide as its names
@@ -489,6 +501,30 @@ in the code review (the selected lines' code). To leave the clipboard alone, as 
 copy_on_select = false
 ```
 
+### How diffs open
+
+`[review]` is how the code review draws its diff. Every key is optional, and a file without
+the table opens diffs as before:
+
+```toml
+[review]
+layout = "auto"         # auto (split from 120 columns, unified below; default) | split | unified
+split_ratio = 0.5       # the old side's share of a split row, 0.1 to 0.9; the new side gets the rest
+wrap = false            # wrap long lines instead of scrolling them sideways
+line_numbers = true     # line numbers in the gutter; off keeps the +/- signs
+theme = "auto"          # the diff's colours: auto (follow [ui] theme, default) | dark | light
+background = "terminal" # terminal (the terminal's own background, default) | theme (the diff theme's)
+```
+
+The header's switches, `u`, `w`, `(`/`)`, dragging the line between the sides and the
+settings menu (`,`) all change these, and the review writes each change back to this table
+when you make it (a drag, when you let go). It writes only the keys that changed and keeps
+the rest of the file as it was, comments too. A file that does not parse is left alone and
+the footer says why; the change still applies for the session. Each side of a split row
+keeps at least 20 columns, so on a narrow screen the line may sit nearer the middle than the
+ratio says. The whole-file view is always unified. `theme` changes the diff only; the rest of
+the app keeps `[ui] theme`.
+
 ### Keys
 
 Every key is rebindable under `[keys]`: an action, and the keys that run it.
@@ -508,7 +544,9 @@ unbinds it. A key is one character (`G` is Shift+g), `ctrl+<character>`, or one 
 `Delete`, `Backspace`. An action keeps its meaning everywhere it applies, so `down` moves
 down in the document, the tree, the notes and every picker. A key bound to two actions that
 are live at the same time is an error that names both, and the hints at the bottom of the
-screen show your keys. `plannotator-tui config` prints every action with its keys.
+screen show your keys. `plannotator-tui config` prints every action with its keys. An action
+added in a later release leaves its default key to whatever your file already bound it to
+(a file that put `toggle-layout` on `(` keeps it there, and `split-left` gets no key).
 
 | Action | Default | Does |
 |---|---|---|
@@ -543,6 +581,8 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `change-comment` | `M` | code review: a note on the whole change |
 | `next-hunk` `previous-hunk` `next-file` `previous-file` | `]` `[` `n` `N` | code review: move by hunk or file |
 | `toggle-layout` `toggle-wrap` `toggle-files` | `u` `w` `f` | code review: split or unified view; wrap; open the file list and move to it, or close it from there |
+| `diff-settings` | `,` | code review: the diff settings menu, saved to [`[review]`](#how-diffs-open) |
+| `split-left` `split-right` | `(` `)` | code review: move the line between a split diff's sides by a twentieth of the width |
 | `filter-files` `filter-kinds` `hide-viewed` | `/` `t` `H` | code review: filter the file list and the diff by name; by kind; hide viewed files |
 | `toggle-viewed` `next-unviewed` `previous-unviewed` | `x` `ctrl+n`, none | code review: mark the file viewed; the next or previous file not viewed |
 | `whole-file` `whole-base` | `o` `O` | code review: the whole file as it is now, or before the change; again to go back |

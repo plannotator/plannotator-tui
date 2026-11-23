@@ -61,3 +61,10 @@ strip = true
 inherits = "release"
 debug = 1
 strip = false
+
+# The review's split ratio needs diffs-rs's `Engine::set_split_ratio`, not yet on crates.io:
+# build diffs-rs and its grammar forks from that branch until it is published.
+[patch.crates-io]
+diffs-rs = { git = "https://github.com/plannotator/diffs-rs", branch = "feat/split-ratio" }
+diffs-syntect = { git = "https://github.com/plannotator/diffs-rs", branch = "feat/split-ratio" }
+diffs-two-face = { git = "https://github.com/plannotator/diffs-rs", branch = "feat/split-ratio" }

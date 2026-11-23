@@ -124,6 +124,11 @@ pub(crate) enum Action {
     /// Back to the place before a jump, and forward again.
     JumpBack,
     JumpForward,
+    /// The code review's diff settings: layout, wrap, line numbers, colours, split ratio.
+    DiffSettings,
+    /// Move the line between a split diff's sides left or right: less or more of the old side.
+    SplitLeft,
+    SplitRight,
 }
 
 use Action::{
@@ -138,6 +143,7 @@ use Action::{
     PreviousHunk, PreviousMatch, PreviousUnviewed, Search, Suggest, ToggleFiles, ToggleLayout, ToggleViewed,
     ToggleWrap, WholeBase, WholeFile,
 };
+use Action::{DiffSettings, SplitLeft, SplitRight};
 use Action::{FilterFiles, FilterKinds, GoToDefinition, HideViewed, JumpBack, JumpForward};
 use Action::{NarrowColumn, NarrowFiles, NarrowNotes, ToggleNotes, WidenColumn, WidenFiles, WidenNotes};
 
@@ -229,6 +235,7 @@ pub(crate) const REVIEW_GLOBAL: &[Action] = &[
     ToggleNotes,
     NarrowNotes,
     WidenNotes,
+    DiffSettings,
 ];
 /// The diff. `left` and `right` pick the old and the new side.
 pub(crate) const DIFF: &[Action] = &[
@@ -266,6 +273,8 @@ pub(crate) const DIFF: &[Action] = &[
     JumpForward,
     NarrowFiles,
     WidenFiles,
+    SplitLeft,
+    SplitRight,
     Confirm,
     CopyLines,
 ];
@@ -295,6 +304,9 @@ pub(crate) const KINDS: &[Action] = &[Down, Up, Confirm, Back, FilterKinds, Inte
 pub(crate) const NOTES: &[Action] = &[Down, Up, Confirm, Edit, Remove, Back];
 pub(crate) const REVIEW_MENU: &[Action] =
     &[Down, Up, Confirm, Back, ReviewMenu, Interrupt, ChangeComment, ResendAll, FinishReview, UndoFinish];
+/// The code review's diff settings: up and down pick a setting, left and right change it,
+/// Enter (and Space) moves it on; the settings key again closes the menu.
+pub(crate) const SETTINGS: &[Action] = &[Down, Up, Left, Right, Confirm, Back, DiffSettings, Interrupt];
 /// The code review's key help: the motions scroll it when it does not fit; the rest close it.
 pub(crate) const HELP: &[Action] = &[Back, Help, Quit, Interrupt, Down, Up, PageDown, PageUp];
 
@@ -317,6 +329,7 @@ const SHARED: &[&[&[Action]]] = &[
     &[REVIEW_GLOBAL, FILES],
     &[KINDS],
     &[REVIEW_MENU],
+    &[SETTINGS],
     &[HELP],
 ];
 
@@ -513,13 +526,19 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (JumpBack, &[ctrl('o')]),
     // Ctrl+I is Tab in terminals that do not tell them apart; there `cycle-focus` gets it.
     (JumpForward, &[ctrl('i')]),
+    (DiffSettings, &[ch(',')]),
+    (SplitLeft, &[ch('(')]),
+    (SplitRight, &[ch(')')]),
 ];
 
 /// Actions added after configs were written: `approve` (live only in a gated review), `copy`
 /// (on a waiting selection), `word-end`, `visual-line`, the code review's own, the reading
-/// column's, `toggle-notes` and search. `copy-lines` comes first: it is the newest, so it
-/// yields a key before an older action does.
+/// column's, `toggle-notes` and search. The newest come first (`diff-settings`, `split-left`
+/// and `split-right`, then `copy-lines`), so they yield a key before an older action does.
 const LATE: &[Action] = &[
+    DiffSettings,
+    SplitLeft,
+    SplitRight,
     CopyLines,
     Approve,
     CopySelection,
@@ -749,6 +768,9 @@ impl Action {
             Self::GoToDefinition => "go-to-definition",
             Self::JumpBack => "jump-back",
             Self::JumpForward => "jump-forward",
+            Self::DiffSettings => "diff-settings",
+            Self::SplitLeft => "split-left",
+            Self::SplitRight => "split-right",
         }
     }
 }

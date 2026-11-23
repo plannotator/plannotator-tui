@@ -6,18 +6,13 @@
 use anyhow::Result;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Style;
-use ratatui::text::Span;
-use unicode_width::UnicodeWidthStr as _;
 
 use plannotator_tui_review::Side;
 
 use super::diff::Lines;
 use super::files::fit;
 use super::{Draft, Focus, Geometry, Mode, Screen};
-use crate::keys::Action;
-use crate::theme::palette;
-use crate::ui::{chips, compose, send_button};
+use crate::ui::compose;
 
 const RAIL_WIDTH: u16 = 36;
 pub(super) const RAIL_MIN_WIDTH: u16 = 28;
@@ -94,12 +89,15 @@ impl Screen {
             Some(whole) => whole.draw(frame, diff)?,
             None => self.diff.draw(frame, diff)?,
         }
-        let (split, code) = match self.active_diff_mut() {
-            Some(shown) => (shown.split(), (diff.top()..diff.bottom()).map(|y| shown.code_row(y)).collect()),
-            None => (false, Vec::new()),
+        let (middle, code) = match self.active_diff_mut() {
+            Some(shown) => {
+                let middle = if shown.split() { shown.split_line() } else { None };
+                (middle, (diff.top()..diff.bottom()).map(|y| shown.code_row(y)).collect())
+            }
+            None => (None, Vec::new()),
         };
         let code = |y: u16| code.get(usize::from(y - diff.y)).copied().unwrap_or(true);
-        let selected = super::mouse::tint_selection(frame.buffer_mut(), diff, split, cursor_selected, code);
+        let selected = super::mouse::tint_selection(frame.buffer_mut(), diff, middle, cursor_selected, code);
         if files.width > 0 {
             let listing = self.listing();
             self.draw_files(frame, files, &listing);
@@ -115,6 +113,7 @@ impl Screen {
                 self.draw_compose(frame, diff, &draft);
             }
             Mode::Menu(cursor) => self.draw_menu(frame, *cursor),
+            Mode::Settings(cursor) => self.draw_settings(frame, *cursor),
             Mode::PickTarget => {
                 let root = self.real_root();
                 self.picker.draw(frame, area, &self.keys, &root, self.start_delivery.as_deref());
@@ -128,6 +127,9 @@ impl Screen {
             Mode::Kinds(cursor) => self.draw_kinds(frame, *cursor),
             Mode::ConfirmQuit | Mode::FilterFiles => {}
         }
+        // Last, so whatever was drawn over the line between the sides (the toolbar, a box)
+        // keeps its cells and takes their clicks.
+        self.draw_split_line(frame, diff);
         Ok(())
     }
 
@@ -142,52 +144,6 @@ impl Screen {
         }
         let title = if title.is_empty() { String::new() } else { format!(" \u{b7} {title}") };
         format!("PR #{}{title} \u{b7} {} \u{2190} {}", view.number, view.base_ref, view.head_ref)
-    }
-
-    /// `Uncommitted · 4 files +120 −30` on the left; on the right the Review menu and the
-    /// Send button, on the edge.
-    fn draw_header(&mut self, frame: &mut Frame, area: Rect) {
-        let files = self.capture.files.len();
-        // While a filter hides files, the counts are of the files the diff shows.
-        let (added, removed) =
-            if self.files.shown().len() == files { self.capture.totals() } else { self.files.shown_totals() };
-        let count = match self.files.shown().len() {
-            shown if shown == files => format!("{files} file{}", if files == 1 { "" } else { "s" }),
-            shown => format!("{shown} of {files} files"),
-        };
-        let title = match self.whole_title() {
-            Some(whole) => format!(" {whole} "),
-            None => format!(
-                " {} \u{b7} {count} +{added} \u{2212}{removed} \u{b7} {} ",
-                self.scope_title(),
-                self.viewed_label()
-            ),
-        };
-        let send = format!(" {} ", self.send_label());
-        let review = match self.keys.hint(Action::ReviewMenu) {
-            key if key.is_empty() => " Review \u{25be} ".to_owned(),
-            key => format!(" Review \u{25be} ({key}) "),
-        };
-        let buf = frame.buffer_mut();
-        buf.set_span(
-            area.x,
-            area.y,
-            &Span::styled(title.as_str(), Style::new().fg(palette().accent).bold()),
-            area.width,
-        );
-        let send_width = (send.width() as u16).min(area.width);
-        let send_rect = Rect { x: area.right() - send_width, y: area.y, width: send_width, height: 1 };
-        let style = send_button::style(&self.send_state, self.store.pending().len());
-        buf.set_span(send_rect.x, send_rect.y, &Span::styled(send, style), send_rect.width);
-        self.geometry.send_button = Some(send_rect);
-        let review_width = review.width() as u16;
-        let room = area.width.saturating_sub(send_width + 1 + title.width() as u16);
-        if review_width <= room {
-            let rect = Rect { x: send_rect.x - 1 - review_width, y: area.y, width: review_width, height: 1 };
-            let style = Style::new().fg(chips::chips().menu_fg).bg(palette().toolbar_bg);
-            buf.set_span(rect.x, rect.y, &Span::styled(review, style), rect.width);
-            self.geometry.review_button = Some(rect);
-        }
     }
 
     /// The comment box, along the bottom of the diff, as wide as code needs.

@@ -94,7 +94,11 @@ pub(super) fn open(args: ReviewArgs) -> Result<()> {
     let data_dir = crate::workspace_paths::data_dir();
     crate::cli::with_terminal(|terminal, session| {
         let (wake, ready) = mpsc::sync_channel(1);
-        let mut screen = Screen::open(repo, capture, &data_dir, crate::cli::delivery(true), wake.clone())?;
+        // The diff draws as `[review]` says, and the review writes its changes back there.
+        let settings =
+            super::settings::Settings::new(session.config.review, Some(crate::config::Config::path()));
+        let mut screen =
+            Screen::open_with(repo, capture, &data_dir, crate::cli::delivery(true), wake.clone(), settings)?;
         screen.start_notes_rail(session.config.ui.notes_rail);
         screen.set_keys(session.config.keys, session.shift_enter);
         screen.enable_clipboard();

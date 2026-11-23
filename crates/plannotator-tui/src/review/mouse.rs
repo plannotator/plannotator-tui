@@ -342,8 +342,8 @@ pub(super) fn selection_bg() -> Color {
 /// Draw the selected rows the viewer drew in `area` as one block of background colour, and
 /// say which screen rows that block runs from and to.
 ///
-/// A row has one pane (unified) or two (split): the split's left pane ends where the viewer
-/// draws its middle line, `(width - 1) / 2` cells in, and the right one starts after it. A
+/// A row has one pane (unified) or two (split): the split's left pane ends at `middle`, the
+/// column the viewer draws the line between the sides in, and the right one starts after it. A
 /// pane is selected when its first cell holds the viewer's selection bar, the drag's bold
 /// mark, or the cursor's bar while `cursor_selected`. That cell is blanked, the selection's
 /// underline is taken off (a search match, bold as well, keeps its own), and the pane takes
@@ -357,16 +357,14 @@ pub(super) fn selection_bg() -> Color {
 pub(super) fn tint_selection(
     buf: &mut Buffer,
     area: Rect,
-    split: bool,
+    middle: Option<u16>,
     cursor_selected: bool,
     code: impl Fn(u16) -> bool,
 ) -> Option<(u16, u16)> {
     let bg = selection_bg();
-    let middle = area.x + area.width.saturating_sub(1) / 2;
-    let panes: Vec<(u16, u16)> = if split {
-        vec![(area.left(), middle), (middle + 1, area.right())]
-    } else {
-        vec![(area.left(), area.right())]
+    let panes: Vec<(u16, u16)> = match middle {
+        Some(middle) => vec![(area.left(), middle), (middle + 1, area.right())],
+        None => vec![(area.left(), area.right())],
     };
     // Each pane's selected rows.
     let mut rows: Vec<Vec<u16>> = vec![Vec::new(); panes.len()];

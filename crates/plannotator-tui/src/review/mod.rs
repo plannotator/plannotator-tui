@@ -14,8 +14,9 @@
 //! - [`herdr`]: `plannotator-tui herdr review`. [`scope`]: what it shares with `rex review`
 //!   and `hc review`, and the pane they open.
 //! - [`input`]: keys and the mouse; [`mouse`]: clicks and drags in the diff. [`draw`],
-//!   [`footer`], [`rail`] and [`overlays`]: the frame. [`divider`]: dragging the lines
-//!   between the panes.
+//!   [`header`], [`footer`], [`rail`] and [`overlays`]: the frame. [`divider`]: dragging the
+//!   lines between the panes and between a split diff's sides.
+//! - [`settings`]: how the diff is drawn (`[review]`), its menu, and writing it back.
 //! - [`send`]: send, resend, finish and undo. [`pi`]: the Pi link.
 //! - [`watch`]: noticing that the diff changed on disk, for the footer.
 //! - [`whole`]: the whole-file view (`o`, `O`), a second diffs-rs engine.
@@ -32,6 +33,7 @@ mod drafts;
 mod draw;
 mod files;
 mod footer;
+mod header;
 pub(crate) mod herdr;
 mod input;
 mod jump;
@@ -42,6 +44,7 @@ mod pi;
 mod rail;
 pub(crate) mod scope;
 mod send;
+pub(crate) mod settings;
 #[cfg(test)]
 mod tests;
 mod viewed;
@@ -100,6 +103,8 @@ enum Mode {
     FilterFiles,
     /// The kind picker, with its highlighted row.
     Kinds(usize),
+    /// The diff settings menu, with its highlighted row.
+    Settings(usize),
 }
 
 /// Which pane keys go to.
@@ -121,9 +126,16 @@ struct Geometry {
     file_rows: Vec<(u16, String)>,
     send_button: Option<Rect>,
     review_button: Option<Rect>,
+    settings_button: Option<Rect>,
+    /// The layout switch's two halves: `true` for Split.
+    layout_switch: Vec<(Rect, bool)>,
+    wrap_switch: Option<Rect>,
     /// Rail bubbles drawn last frame, with their note's index.
     bubbles: Vec<(Rect, usize)>,
     menu_rows: Vec<(Rect, usize)>,
+    /// The settings menu's rows, and the whole box.
+    settings_rows: Vec<(Rect, usize)>,
+    settings_box: Option<Rect>,
     /// The buttons of the toolbar beside a mouse selection, and the whole bar.
     toolbar: Vec<(Rect, crate::keys::Action)>,
     toolbar_bar: Option<Rect>,
@@ -182,6 +194,8 @@ pub(crate) struct Screen {
     toolbar: Option<mouse::Toolbar>,
     /// The lines between the panes, and the notes panel's width.
     dividers: divider::Dividers,
+    /// How the diff is drawn: `[review]`, as changed since.
+    settings: settings::Settings,
     /// Whether the diff changed on disk since the last capture.
     watch: watch::Watch,
     /// The last key or paste, so no disk check starts while the person types.
@@ -208,14 +222,28 @@ impl std::fmt::Debug for Screen {
 }
 
 impl Screen {
-    /// Open the review of `capture`: load its notes, place them on this diff, and start the
-    /// viewer. `wake` is the event loop's: the viewer sends on it when it has work ready.
+    /// Open the review of `capture` with the default settings, writing none.
+    #[cfg(test)]
     pub(crate) fn open(
         repo: Repo,
         capture: Capture,
         data_dir: &Path,
         delivery: Box<dyn Delivery>,
         wake: SyncSender<()>,
+    ) -> Result<Self> {
+        Self::open_with(repo, capture, data_dir, delivery, wake, settings::Settings::default())
+    }
+
+    /// Open the review of `capture`: load its notes, place them on this diff, and start the
+    /// viewer as `settings` say. `wake` is the event loop's: the viewer sends on it when it
+    /// has work ready.
+    pub(crate) fn open_with(
+        repo: Repo,
+        capture: Capture,
+        data_dir: &Path,
+        delivery: Box<dyn Delivery>,
+        wake: SyncSender<()>,
+        settings: settings::Settings,
     ) -> Result<Self> {
         let (project, owner) = capture.record_owner();
         let store = ReviewStore::load(data_dir, &project, &owner, &capture.scope)?;
@@ -224,7 +252,7 @@ impl Screen {
         let order = files::tree::order(&capture.files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>());
         let paths: Vec<String> =
             order.into_iter().filter_map(|i| capture.files.get(i).map(|f| f.path.clone())).collect();
-        let diff = Diff::open(&capture, &paths, light, wake.clone())?;
+        let diff = Diff::open(&capture, &paths, settings.now, light, wake.clone())?;
         let progress = Progress::open(&capture, data_dir, viewed::saving(data_dir));
         let mut screen = Self {
             repo,
@@ -260,6 +288,7 @@ impl Screen {
             grown: None,
             toolbar: None,
             dividers: divider::Dividers::default(),
+            settings,
             watch,
             last_key: None,
             whole: None,
@@ -331,6 +360,8 @@ impl Screen {
     /// True when the screen changed.
     pub(crate) fn tick(&mut self) -> Result<bool> {
         let mut changed = false;
+        // A setting the viewer could not take yet (before its first file or frame) now.
+        self.apply_settings()?;
         if self.diff.poll(&self.capture)? {
             self.sync_markers();
             changed = true;

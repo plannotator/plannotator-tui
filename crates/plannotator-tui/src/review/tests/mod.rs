@@ -25,6 +25,8 @@ mod place_flow;
 mod pull_flow;
 mod rex_picker;
 mod send_flow;
+mod settings_flow;
+mod split_drag;
 mod viewed_flow;
 mod whole_flow;
 
@@ -133,6 +135,33 @@ impl Fixture {
             Screen::open(repo, capture, &self.data(), Box::new(self.agent.clone()), wake).expect("screen");
         settle(&mut screen);
         screen
+    }
+
+    /// The config file the review writes its settings to.
+    pub(super) fn config(&self) -> PathBuf {
+        self.dir.join("config").join("config.toml")
+    }
+
+    /// The review screen as [`Self::open`] does, its diff drawn as `[review]` in the
+    /// fixture's config file says (the defaults when it has none), and writing changes there.
+    pub(super) fn open_configured(&self) -> Screen {
+        let (repo, capture) =
+            super::capture(&self.repo(), &Request::Uncommitted { base: None }).expect("capture");
+        let (wake, _ready) = std::sync::mpsc::sync_channel(1);
+        let review = crate::config::Config::load_from(&self.config()).expect("config").review;
+        let settings = super::settings::Settings::new(review, Some(self.config()));
+        let mut screen =
+            Screen::open_with(repo, capture, &self.data(), Box::new(self.agent.clone()), wake, settings)
+                .expect("screen");
+        settle(&mut screen);
+        screen
+    }
+
+    /// Write the fixture's config file.
+    pub(super) fn write_config(&self, text: &str) {
+        let path = self.config();
+        std::fs::create_dir_all(path.parent().expect("dir")).expect("config dir");
+        std::fs::write(path, text).expect("config");
     }
 
     pub(super) fn sent(&self) -> Vec<String> {

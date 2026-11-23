@@ -100,6 +100,7 @@ impl Whole {
         path: &str,
         version: Version,
         reveal: Option<u32>,
+        settings: crate::config::review::ReviewConfig,
         light: bool,
         wake: SyncSender<()>,
     ) -> Self {
@@ -111,7 +112,7 @@ impl Whole {
         let view = match capture.read_whole(version.side(), side_path) {
             Ok(WholeFile::Text(content)) if content.is_empty() => View::Message(format!("{path} is empty.")),
             Ok(WholeFile::Text(content)) => {
-                match Diff::open_whole(&whole_patch(path, &content), path, light, wake) {
+                match Diff::open_whole(&whole_patch(path, &content), path, settings, light, wake) {
                     Ok(diff) => View::Shown { diff: Box::new(diff), content },
                     Err(err) => View::Message(format!("could not show {path}: {err:#}")),
                 }
@@ -367,7 +368,8 @@ impl Screen {
             None => path.to_owned(),
         };
         let light = crate::theme::theme() == crate::theme::Theme::Light;
-        let mut whole = Whole::load(&self.capture, path, version, line, light, self.wake.clone());
+        let mut whole =
+            Whole::load(&self.capture, path, version, line, self.settings.now, light, self.wake.clone());
         whole.opened_on = opened_on;
         self.status = None;
         self.whole = Some(whole);
@@ -439,7 +441,10 @@ impl Screen {
             Action::PageUp => Command::PageUp,
             Action::Top => Command::FirstSource,
             Action::Bottom => Command::LastSource,
-            Action::ToggleWrap => Command::ToggleWrap,
+            Action::ToggleWrap => {
+                self.toggle_wrap();
+                return Ok(());
+            }
             _ => return Ok(()),
         };
         match self.whole.as_mut().and_then(Whole::diff_mut) {
