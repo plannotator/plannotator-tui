@@ -9,7 +9,7 @@ categories = ["development-tools"]
 description = "Git diff capture, code-review notes, anchoring and agent feedback for plannotator-tui."
 
 [dependencies]
-plannotator-tui-schema = { path = "../plannotator-tui-schema", version = "0.10.0" }
+plannotator-tui-schema = { path = "../plannotator-tui-schema", version = "0.11.0" }
 regex = "1"
 serde.workspace = true
 serde_json.workspace = true
