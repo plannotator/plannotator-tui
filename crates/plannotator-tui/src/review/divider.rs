@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use ratatui::Frame;
 use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 
 use super::Screen;
 use super::files::fit;
@@ -84,13 +84,15 @@ impl Dividers {
         self.drawn.iter().find(|(_, rect)| rect.contains(at)).map(|(divider, _)| *divider)
     }
 
-    /// Draw the notes panel's line, and brighten the one dragged or under the pointer.
+    /// Draw the lines, the file list's again over its own: dim, and in the accent colour
+    /// while dragged or under the pointer. Only the colour changes; a bold line is drawn
+    /// with a shorter glyph in many terminals and would break into dashes.
     pub(super) fn draw(&self, frame: &mut Frame) {
         let lit = self.dragging.or(self.hover);
         let buf = frame.buffer_mut();
         for (divider, rect) in &self.drawn {
             let style = if lit == Some(*divider) {
-                Style::new().fg(crate::theme::palette().accent).add_modifier(Modifier::BOLD)
+                Style::new().fg(crate::theme::palette().accent)
             } else {
                 Style::new().fg(Color::DarkGray)
             };

@@ -132,15 +132,21 @@ fn a_width_set_by_hand_stays_through_a_filter_and_a_reload_until_a_double_click(
 }
 
 #[test]
-fn a_line_lights_up_under_the_pointer_and_while_dragged() {
+fn a_line_lights_up_under_the_pointer_and_while_dragged_in_colour_only() {
     let (_fixture, mut screen) = open("divider-hover");
     let line = list_line(&screen);
     let lit = |screen: &mut Screen, x: u16| {
         let mut terminal = Terminal::new(TestBackend::new(COLS, ROWS)).expect("terminal");
         terminal.draw(|f| screen.draw(f).expect("draw")).expect("draw");
-        terminal.backend().buffer()[(x, 5)].fg == crate::theme::palette().accent
+        let cell = &terminal.backend().buffer()[(x, 5)];
+        // The same glyph and weight lit or not: only the colour changes.
+        assert_eq!(cell.symbol(), "\u{2502}");
+        assert_eq!(cell.modifier, ratatui::style::Modifier::empty());
+        cell.fg == crate::theme::palette().accent
     };
     assert!(!lit(&mut screen, line));
+    let notes = notes_line(&screen);
+    assert!(!lit(&mut screen, notes), "the notes line looks like the list's");
     mouse(&mut screen, MouseEventKind::Moved, line, 5);
     assert!(lit(&mut screen, line), "under the pointer");
     mouse(&mut screen, MouseEventKind::Moved, line + 20, 5);
