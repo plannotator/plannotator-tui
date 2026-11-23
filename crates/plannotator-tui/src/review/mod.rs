@@ -14,7 +14,8 @@
 //! - [`herdr`]: `plannotator-tui herdr review`. [`scope`]: what it shares with `rex review`
 //!   and `hc review`, and the pane they open.
 //! - [`input`]: keys and the mouse; [`mouse`]: clicks and drags in the diff. [`draw`],
-//!   [`footer`], [`rail`] and [`overlays`]: the frame.
+//!   [`footer`], [`rail`] and [`overlays`]: the frame. [`divider`]: dragging the lines
+//!   between the panes.
 //! - [`send`]: send, resend, finish and undo. [`pi`]: the Pi link.
 //! - [`watch`]: noticing that the diff changed on disk, for the footer.
 //! - [`whole`]: the whole-file view (`o`, `O`), a second diffs-rs engine.
@@ -26,6 +27,7 @@
 
 pub(crate) mod cli;
 mod diff;
+mod divider;
 mod drafts;
 mod draw;
 mod files;
@@ -174,6 +176,8 @@ pub(crate) struct Screen {
     drag: Option<mouse::Drag>,
     /// The toolbar beside the lines a drag selected, until the next key or click.
     toolbar: Option<mouse::Toolbar>,
+    /// The lines between the panes, and the notes panel's width.
+    dividers: divider::Dividers,
     /// Whether the diff changed on disk since the last capture.
     watch: watch::Watch,
     /// The last key or paste, so no disk check starts while the person types.
@@ -249,6 +253,7 @@ impl Screen {
             geometry: Geometry::default(),
             drag: None,
             toolbar: None,
+            dividers: divider::Dividers::default(),
             watch,
             last_key: None,
             whole: None,

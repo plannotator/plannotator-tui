@@ -20,7 +20,7 @@ use crate::theme::palette;
 use crate::ui::{compose, send_button};
 
 const RAIL_WIDTH: u16 = 36;
-const RAIL_MIN_WIDTH: u16 = 28;
+pub(super) const RAIL_MIN_WIDTH: u16 = 28;
 /// Below this the rail is dropped; notes still show as gutter markers.
 pub(super) const RAIL_MIN_TOTAL_WIDTH: u16 = 80;
 /// The comment box's widest; code suggestions want the room.
@@ -40,7 +40,8 @@ impl Screen {
         .areas(area);
         // A hidden rail gives its columns to the diff, which the viewer reflows as on a resize.
         let mut rail_width = if self.rail_shown() && area.width >= RAIL_MIN_TOTAL_WIDTH {
-            (area.width * 3 / 10).clamp(RAIL_MIN_WIDTH, RAIL_WIDTH)
+            let fitted = (area.width * 3 / 10).clamp(RAIL_MIN_WIDTH, RAIL_WIDTH);
+            self.dividers.notes_width(fitted, body.width, self.files_wanted())
         } else {
             0
         };
@@ -84,6 +85,8 @@ impl Screen {
             None => (Rect::default(), main),
         };
         self.geometry = Geometry { diff, rail, files, ..Geometry::default() };
+        self.dividers.notes_drawn(rail_width);
+        self.dividers.place(files, rail);
         self.draw_header(frame, header);
         let cursor_selected = self.cursor_selected();
         match &mut self.whole {
@@ -98,6 +101,7 @@ impl Screen {
         if rail_width > 0 {
             self.draw_rail(frame, rail);
         }
+        self.dividers.draw(frame);
         self.draw_footer(frame, footer);
         match &self.mode {
             Mode::Compose(draft) => {

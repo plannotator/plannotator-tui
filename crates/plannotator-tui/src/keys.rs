@@ -101,6 +101,9 @@ pub(crate) enum Action {
     /// `<` or `>` to a code review key before the list existed keeps the reading column's.
     NarrowFiles,
     WidenFiles,
+    /// The code review's notes panel, by four columns.
+    NarrowNotes,
+    WidenNotes,
     /// The whole file under the cursor as it is now, or back to the diff.
     WholeFile,
     /// The whole file as it was before the change (its base), or back to the diff.
@@ -132,7 +135,7 @@ use Action::{
     ToggleWrap, WholeBase, WholeFile,
 };
 use Action::{FilterFiles, FilterKinds, GoToDefinition, HideViewed, JumpBack, JumpForward};
-use Action::{NarrowColumn, NarrowFiles, ToggleNotes, WidenColumn, WidenFiles};
+use Action::{NarrowColumn, NarrowFiles, NarrowNotes, ToggleNotes, WidenColumn, WidenFiles, WidenNotes};
 
 /// Browsing, before the focused pane gets the key.
 pub(crate) const GLOBAL: &[Action] = &[
@@ -220,6 +223,8 @@ pub(crate) const REVIEW_GLOBAL: &[Action] = &[
     PickTarget,
     Help,
     ToggleNotes,
+    NarrowNotes,
+    WidenNotes,
 ];
 /// The diff. `left` and `right` pick the old and the new side.
 pub(crate) const DIFF: &[Action] = &[
@@ -491,6 +496,8 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (WidenColumn, &[ch('>')]),
     (NarrowFiles, &[ch('<')]),
     (WidenFiles, &[ch('>')]),
+    (NarrowNotes, &[ch('}')]),
+    (WidenNotes, &[ch('{')]),
     (WholeFile, &[ch('o')]),
     (WholeBase, &[ch('O')]),
     (ToggleNotes, &[ch('z')]),
@@ -532,6 +539,8 @@ const LATE: &[Action] = &[
     WidenColumn,
     NarrowFiles,
     WidenFiles,
+    NarrowNotes,
+    WidenNotes,
     WholeFile,
     WholeBase,
     ToggleNotes,
@@ -716,6 +725,8 @@ impl Action {
             Self::WidenColumn => "widen-column",
             Self::NarrowFiles => "narrow-files",
             Self::WidenFiles => "widen-files",
+            Self::NarrowNotes => "narrow-notes",
+            Self::WidenNotes => "widen-notes",
             Self::WholeFile => "whole-file",
             Self::WholeBase => "whole-base",
             Self::ToggleNotes => "toggle-notes",

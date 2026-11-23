@@ -6,6 +6,7 @@
 mod big;
 mod blocked_send;
 mod disk_flow;
+mod divider_mouse;
 mod file_kinds;
 mod file_list;
 mod file_list_mouse;

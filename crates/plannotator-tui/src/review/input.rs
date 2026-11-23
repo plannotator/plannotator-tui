@@ -64,7 +64,8 @@ impl Screen {
         // file list and the footer follow the file its cursor is in.
         // Not mid-drag: finding the file can press the cursor off a heading and back, which
         // may scroll the rows under the pointer. The release finds it.
-        if moves && self.drag.is_none() && matches!(self.mode, Mode::Browse | Mode::FilterFiles) {
+        let dragging = self.drag.is_some() || self.dividers.dragging();
+        if moves && !dragging && matches!(self.mode, Mode::Browse | Mode::FilterFiles) {
             self.track_current()?;
         }
         Ok(())
@@ -186,6 +187,10 @@ impl Screen {
             Some(Action::Help) => {
                 self.help_scroll = 0;
                 self.mode = Mode::Help;
+                return Ok(());
+            }
+            Some(action @ (Action::NarrowNotes | Action::WidenNotes)) => {
+                self.resize_notes(action == Action::WidenNotes);
                 return Ok(());
             }
             Some(Action::ToggleNotes) => {
@@ -353,8 +358,12 @@ impl Screen {
             Mode::Browse => {}
             _ => return Ok(()),
         }
-        // A drag that selects lines goes on wherever the pointer is, over the list, the
-        // notes or past the pane.
+        // A line between panes takes its own presses and drags; a drag that selects lines
+        // goes on wherever the pointer is, over the list, the notes or past the pane.
+        if self.divider_mouse(mouse) {
+            self.toolbar = None;
+            return Ok(());
+        }
         if self.drag.is_some() {
             match mouse.kind {
                 MouseEventKind::Drag(MouseButton::Left) => return self.drag_to(mouse),

@@ -260,6 +260,7 @@ impl Screen {
                 pair(Action::Down, Action::Up, "move"),
                 key(Action::Edit, "edit"),
                 key(Action::Remove, "remove"),
+                pair(Action::WidenNotes, Action::NarrowNotes, "width"),
                 key(Action::ToggleNotes, "hide"),
                 key(Action::CycleFocus, "diff"),
             ]

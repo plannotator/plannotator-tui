@@ -148,6 +148,7 @@ impl Screen {
                     (key(&[Action::HideViewed]), "hide viewed files"),
                     (key(&[Action::ToggleViewed]), "mark the file viewed, or not"),
                     (key(&[Action::Back]), "clear the name filter, then back to the diff"),
+                    ("drag its line".to_owned(), "wider / narrower; double-click it to fit the names again"),
                 ],
             ),
             (
@@ -168,6 +169,8 @@ impl Screen {
                 "notes",
                 vec![
                     (key(&[Action::Down, Action::Up]), "next / previous (the diff follows)"),
+                    (key(&[Action::WidenNotes, Action::NarrowNotes]), "widen / narrow the notes"),
+                    ("drag its line".to_owned(), "wider / narrower; double-click it to fit again"),
                     (key(&[Action::Confirm]), "show it; a note not in the diff opens the whole file"),
                     (key(&[Action::Edit]), "edit"),
                     (key(&[Action::Remove]), "remove"),

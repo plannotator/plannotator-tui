@@ -99,6 +99,12 @@ impl FileList {
         self.chosen_width
     }
 
+    /// Set the list's width (`None`: fit its names again), and show it.
+    pub(super) fn set_width(&mut self, width: Option<u16>) {
+        self.chosen_width = width;
+        self.closed = false;
+    }
+
     /// The paths the diff shows, in the list's order.
     pub(super) fn shown(&self) -> &[String] {
         &self.shown
