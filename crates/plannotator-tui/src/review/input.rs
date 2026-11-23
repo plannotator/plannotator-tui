@@ -62,11 +62,6 @@ impl Screen {
         if event == Event::FocusLost {
             self.dividers.unlight();
         }
-        let moves = match &event {
-            Event::Key(key) => key.kind != KeyEventKind::Release,
-            Event::Mouse(mouse) => mouse.kind != MouseEventKind::Moved,
-            _ => false,
-        };
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => self.key(key)?,
             Event::Paste(text) if matches!(self.mode, Mode::Compose(_)) => self.compose.insert_text(&text),
@@ -95,12 +90,8 @@ impl Screen {
             self.cancel_drags();
         }
         // Whatever moved the diff (a key, a note picked in the rail, a jump, the mouse), the
-        // file list and the footer follow the file its cursor is in. Not mid-drag, where the
-        // cursor follows the pointer over other files; the release settles it.
-        let dragging = self.drag.is_some() || self.dividers.dragging();
-        if moves && !dragging && matches!(self.mode, Mode::Browse | Mode::FilterFiles) {
-            self.track_current();
-        }
+        // file list and the footer follow the file its cursor is in; the frame asks again.
+        self.track_current();
         Ok(())
     }
 

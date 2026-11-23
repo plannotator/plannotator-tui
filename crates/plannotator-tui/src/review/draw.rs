@@ -31,6 +31,7 @@ const PR_TITLE_MAX: usize = 48;
 
 impl Screen {
     pub(crate) fn draw(&mut self, frame: &mut Frame) -> Result<()> {
+        self.track_current();
         let area = frame.area();
         let [header, body, footer] = Layout::vertical([
             Constraint::Length(1),

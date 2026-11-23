@@ -53,9 +53,10 @@ impl Screen {
     }
 
     /// Note which file the diff's cursor is in, for the list and the footer. The viewer's
-    /// cursor is the one place that knows; this keeps a copy by path.
+    /// cursor is the one place that knows; this copies its answer by path after every event
+    /// and before every frame. Not while a file the list asked for waits to arrive.
     pub(in crate::review) fn track_current(&mut self) {
-        if self.whole.is_some() {
+        if self.whole.is_some() || self.files.pending.is_some() {
             return;
         }
         if let Some(index) = self.diff.cursor_file() {

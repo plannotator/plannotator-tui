@@ -15,16 +15,13 @@ use diffs_rs::reading::SourceRange;
 use diffs_rs::theme::Appearance;
 use plannotator_tui_review::{Capture, Side};
 use ratatui::Frame;
-use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
+use ratatui::crossterm::event::{Event, MouseEventKind};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 
-mod model;
 mod place;
 mod sections;
 
-pub(super) use place::At;
-use place::Move;
 use sections::Sections;
 
 /// A number no viewer's patch had before.
@@ -61,19 +58,6 @@ pub(super) struct Diff {
     paths: Vec<String>,
     /// A whole-file view's one file, named by its capture path whatever the patch says.
     fixed: Option<String>,
-    /// The rows the viewer lays out, from the patch it was given (`model`).
-    rows: model::Rows,
-    /// Where the cursor is (`place`).
-    at: Option<At>,
-    /// The first row drawn, when it is known.
-    top: Option<(usize, usize)>,
-    /// A jump from a row not known put the cursor on the first row drawn.
-    at_top: bool,
-    /// What the last frame showed, row by row.
-    seen: Option<place::Seen>,
-    /// Whether the two sides show next to each other, and the size last drawn.
-    split: bool,
-    size: (u16, u16),
     /// Where it was drawn last.
     area: Rect,
     /// Which patch is shown, unique among every viewer opened, so a drag can tell its lines
@@ -115,28 +99,15 @@ impl Diff {
         // Draw on the terminal's own background and text colour, as the document screen does;
         // the changed-line tints come from the light or dark palette picked above.
         engine.set_terminal_background(true)?;
-        Ok(Self::with(engine, Some((capture.patch_key.clone(), sections)), None, patch))
+        Ok(Self::with(engine, Some((capture.patch_key.clone(), sections)), None))
     }
 
-    fn with(
-        engine: Engine,
-        sections: Option<(String, Sections)>,
-        fixed: Option<String>,
-        patch: Vec<u8>,
-    ) -> Self {
+    fn with(engine: Engine, sections: Option<(String, Sections)>, fixed: Option<String>) -> Self {
         Self {
             engine,
             sections,
             paths: Vec::new(),
             fixed,
-            rows: model::Rows::new(patch),
-            // A new viewer starts on its first row: the first file's heading.
-            at: Some(At::Row { file: 0, row: 0 }),
-            top: Some((0, 0)),
-            at_top: false,
-            seen: None,
-            split: false,
-            size: (0, 0),
             area: Rect::default(),
             generation: next_generation(),
             notice: None,
@@ -157,7 +128,7 @@ impl Diff {
         let mut engine = Engine::open(input, options, wake).context("opening the whole-file view")?;
         // The same terminal background as the diff, so both views match.
         engine.set_terminal_background(true)?;
-        Ok(Self::with(engine, None, Some(name.to_owned()), bytes.to_vec()))
+        Ok(Self::with(engine, None, Some(name.to_owned())))
     }
 
     /// Show the files at `paths` of `capture`, a new capture of the same review or the same
@@ -171,13 +142,6 @@ impl Diff {
         let input = input_bytes(&patch, capture.scope.title())?;
         self.engine.replace(input).context("reloading the diff viewer")?;
         self.paths.clear();
-        self.rows = model::Rows::new(patch);
-        self.at = Some(At::Row { file: 0, row: 0 });
-        self.top = Some((0, 0));
-        self.at_top = false;
-        self.seen = None;
-        self.split = false;
-        self.size = (0, 0);
         self.generation = next_generation();
         self.drawn = false;
         Ok(())
@@ -236,7 +200,6 @@ impl Diff {
     pub(super) fn draw(&mut self, frame: &mut Frame, area: Rect) -> Result<()> {
         self.engine.draw(frame, area)?;
         self.area = area.intersection(frame.area());
-        self.read_frame(frame.buffer_mut(), self.area);
         Ok(())
     }
 
@@ -270,51 +233,33 @@ impl Diff {
     }
 
     pub(super) fn run(&mut self, command: Command) -> Result<()> {
-        let before = self.at;
         let growing = self.growing();
         let effect = self.engine.execute(command)?;
-        let how = match command {
-            _ if effect == InputEffect::Ignored => Move::Still,
-            Command::Down => Move::Step(1),
-            Command::Up => Move::Step(-1),
-            Command::PageDown => Move::Page(1),
-            Command::PageUp => Move::Page(-1),
-            Command::NextHunk => Move::Hunk(true),
-            Command::PreviousHunk => Move::Hunk(false),
-            Command::NextFile => Move::File(true),
-            Command::PreviousFile => Move::File(false),
-            Command::FirstSource | Command::LastSource => Move::Jump,
-            Command::ToggleLayout => {
-                let split = place::split_for(self.engine.options().layout, self.size.0);
-                let changed = split != self.split;
-                self.split = split;
-                Move::Reflow(changed)
-            }
-            Command::ToggleWrap | Command::ToggleNumbers => Move::Reflow(false),
-            _ => Move::Still,
+        let step = match command {
+            _ if effect == InputEffect::Ignored => return Ok(()),
+            Command::Down | Command::PageDown => Some(true),
+            Command::Up | Command::PageUp => Some(false),
+            _ => None,
         };
-        self.settle(before, how);
-        self.keep_in_hunk(growing, how)
+        self.keep_in_hunk(growing, step)
     }
 
     /// Mouse and resize events, which the engine handles itself. Keys never come here:
     /// this app maps them to commands. True when the engine acted on it.
     pub(super) fn handle_event(&mut self, event: Event) -> Result<bool> {
-        let before = self.at;
-        let how = match &event {
+        let step = match &event {
             Event::Mouse(mouse) => match mouse.kind {
-                MouseEventKind::ScrollDown => Move::Wheel(1),
-                MouseEventKind::ScrollUp => Move::Wheel(-1),
-                MouseEventKind::Down(MouseButton::Left) => Move::Click(mouse.row.saturating_sub(self.area.y)),
-                _ => Move::Still,
+                MouseEventKind::ScrollDown => Some(true),
+                MouseEventKind::ScrollUp => Some(false),
+                _ => None,
             },
-            _ => Move::Still,
+            _ => None,
         };
         let growing = self.growing();
         let acted = self.engine.handle_event(event, true)? != InputEffect::Ignored;
-        let how = if acted { how } else { Move::Still };
-        self.settle(before, how);
-        self.keep_in_hunk(growing, how)?;
+        if acted {
+            self.keep_in_hunk(growing, step)?;
+        }
         Ok(acted)
     }
 
@@ -325,9 +270,9 @@ impl Diff {
     }
 
     /// The first and last line on `side` of the hunk that shows `line` of `path`.
-    pub(super) fn hunk_span(&mut self, path: &str, side: Side, line: u32) -> Option<(u32, u32)> {
+    pub(super) fn hunk_span(&self, path: &str, side: Side, line: u32) -> Option<(u32, u32)> {
         let file = self.index(path)?;
-        self.rows.hunk_span(file, side == Side::Old, line)
+        self.hunk_of(file, side == Side::Old, line).map(|(_, span)| span)
     }
 
     /// The finished or growing selection, when there is one.
@@ -393,9 +338,7 @@ impl Diff {
             first: lines.first,
             last: lines.last,
         };
-        let before = self.at;
         self.engine.select_range(range)?;
-        self.settle(before, Move::Jump);
         Ok(())
     }
 
@@ -410,9 +353,7 @@ impl Diff {
     /// Put the cursor on `lines.first`. An error means the diff does not show that line.
     pub(super) fn reveal(&mut self, path: &str, side: Side, line: u32) -> Result<()> {
         let file = self.index(path).with_context(|| format!("{path} is not in the diff"))?;
-        let before = self.at;
         self.engine.reveal(file, engine_side(side), line)?;
-        self.settle(before, Move::Jump);
         Ok(())
     }
 

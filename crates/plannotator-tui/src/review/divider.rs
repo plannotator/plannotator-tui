@@ -51,6 +51,7 @@ pub(super) struct Dividers {
 }
 
 impl Dividers {
+    #[cfg(test)]
     pub(super) fn dragging(&self) -> bool {
         self.dragging.is_some()
     }

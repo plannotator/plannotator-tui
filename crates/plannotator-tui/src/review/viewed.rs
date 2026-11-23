@@ -30,18 +30,13 @@ impl Screen {
         format!("{viewed}/{total} viewed")
     }
 
-    /// Whether the file under the cursor is marked viewed, for the footer's tick. Reads the
-    /// cursor without moving it, so on a heading it says nothing.
+    /// Whether the file under the cursor is marked viewed, for the footer's tick.
     pub(super) fn cursor_file_viewed(&self) -> bool {
-        let path = match self.diff.selection() {
-            Some(lines) => Some(lines.path),
-            None => self.diff.cursor().ok().flatten().map(|lines| lines.path),
-        };
-        path.is_some_and(|p| self.progress.is_viewed(&p))
+        self.file_under_cursor().is_some_and(|p| self.progress.is_viewed(&p))
     }
 
-    /// The file under the selection or the cursor, on a heading or a binary file's note
-    /// too (`diff::place`).
+    /// The file under the selection or the cursor, on every kind of row, as the viewer says
+    /// (`diff::place`).
     pub(super) fn file_under_cursor(&self) -> Option<String> {
         if let Some(lines) = self.diff.selection() {
             return Some(lines.path);
@@ -84,7 +79,11 @@ impl Screen {
         if paths.is_empty() {
             return Ok(());
         }
-        let here = self.file_under_cursor().and_then(|p| paths.iter().position(|q| *q == p));
+        // By the viewer's index: a symlink replaced by a file is two files of one path.
+        let here = match self.diff.selection() {
+            Some(lines) => paths.iter().position(|q| *q == lines.path),
+            None => self.diff.cursor_file(),
+        };
         let count = paths.len();
         let start = here.unwrap_or(if forward { count - 1 } else { 0 });
         let target = (1..=count)
