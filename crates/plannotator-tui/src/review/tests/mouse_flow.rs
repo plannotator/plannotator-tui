@@ -247,6 +247,14 @@ fn the_toolbar_after_a_drag_comments_on_the_selection() {
     release(&mut screen, to);
     let comment = locate(&mut screen, "comment (c)", false);
     assert_eq!(comment.1, to.1 + 1, "the toolbar sits under the release");
+    // The chip colours, whose contrast `ui::chips` checks.
+    let buffer = draw(&mut screen);
+    let chips = crate::ui::chips::chips();
+    let suggest = locate(&mut screen, "suggest (s)", false);
+    for (at, fg) in [(comment, chips.review_comment()), (suggest, chips.review_suggest)] {
+        let cell = &buffer[at];
+        assert_eq!((cell.fg, cell.bg), (fg, crate::theme::palette().toolbar_bg), "{at:?}");
+    }
     mouse(&mut screen, MouseEventKind::Down(MouseButton::Left), comment);
     assert_eq!(screen.mode, Mode::Compose(Draft::Comment(lines(Side::New, 8, 10))));
 }

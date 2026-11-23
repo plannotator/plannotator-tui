@@ -315,7 +315,8 @@ impl Screen {
         let mut x = rect.x + 1;
         for (label, action) in labels {
             let w = label.width() as u16;
-            let fg = if action == Action::Comment { palette().comment } else { palette().accent };
+            let chips = crate::ui::chips::chips();
+            let fg = if action == Action::Comment { chips.review_comment() } else { chips.review_suggest };
             let style = Style::new().fg(fg).bg(palette().toolbar_bg).add_modifier(Modifier::BOLD);
             buf.set_span(x, y, &Span::styled(label, style), w);
             self.geometry.toolbar.push((Rect { x, y, width: w, height: 1 }, action));
