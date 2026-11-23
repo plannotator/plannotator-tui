@@ -41,21 +41,30 @@ impl Screen {
         if matches!(event, Event::Key(_) | Event::Paste(_)) {
             self.last_key = Some(std::time::Instant::now());
         }
+        let moves = match &event {
+            Event::Key(key) => key.kind != KeyEventKind::Release,
+            Event::Mouse(mouse) => mouse.kind != MouseEventKind::Moved,
+            _ => false,
+        };
         match event {
-            Event::Key(key) if key.kind != KeyEventKind::Release => self.key(key),
-            Event::Paste(text) if matches!(self.mode, Mode::Compose(_)) => {
-                self.compose.insert_text(&text);
-                Ok(())
-            }
-            Event::Mouse(mouse) => self.mouse(mouse),
+            Event::Key(key) if key.kind != KeyEventKind::Release => self.key(key)?,
+            Event::Paste(text) if matches!(self.mode, Mode::Compose(_)) => self.compose.insert_text(&text),
+            Event::Paste(text) if self.mode == Mode::FilterFiles => self.paste_filter(&text),
+            Event::Mouse(mouse) => self.mouse(mouse)?,
             Event::Resize(..) => {
                 if let Some(whole) = &mut self.whole {
                     whole.handle_event(event.clone())?;
                 }
-                self.diff.handle_event(event).map(drop)
+                self.diff.handle_event(event)?;
             }
-            _ => Ok(()),
+            _ => {}
         }
+        // Whatever moved the diff (a key, a note picked in the rail, a jump, the mouse), the
+        // file list and the footer follow the file its cursor is in.
+        if moves && matches!(self.mode, Mode::Browse | Mode::FilterFiles) {
+            self.track_current()?;
+        }
+        Ok(())
     }
 
     fn key(&mut self, key: KeyEvent) -> Result<()> {
@@ -195,6 +204,24 @@ impl Screen {
             Action::GoToDefinition => return self.go_to_definition(),
             Action::JumpBack => return self.jump_history(false),
             Action::JumpForward => return self.jump_history(true),
+            // The file list's keys work the same over the whole-file view.
+            Action::ToggleFiles => {
+                self.toggle_files();
+                return Ok(());
+            }
+            Action::FilterFiles => {
+                self.start_file_filter();
+                return Ok(());
+            }
+            Action::FilterKinds => {
+                self.mode = Mode::Kinds(0);
+                return Ok(());
+            }
+            Action::HideViewed => return self.toggle_hide_viewed(),
+            Action::NarrowFiles | Action::WidenFiles => {
+                self.resize_files(action == Action::WidenFiles);
+                return Ok(());
+            }
             _ => {}
         }
         if self.whole.is_some() {
@@ -223,31 +250,13 @@ impl Screen {
             Action::PreviousFile => return self.step_file(false),
             Action::ToggleLayout => Command::ToggleLayout,
             Action::ToggleWrap => Command::ToggleWrap,
-            Action::ToggleFiles => {
-                self.toggle_files();
-                return Ok(());
-            }
-            Action::FilterFiles => {
-                self.start_file_filter();
-                return Ok(());
-            }
-            Action::FilterKinds => {
-                self.mode = Mode::Kinds(0);
-                return Ok(());
-            }
-            Action::HideViewed => return self.toggle_hide_viewed(),
-            Action::NarrowColumn | Action::WidenColumn => {
-                self.resize_files(action == Action::WidenColumn);
-                return Ok(());
-            }
             Action::ToggleViewed => return self.toggle_viewed(),
             Action::NextUnviewed => return self.jump_unviewed(true),
             Action::PreviousUnviewed => return self.jump_unviewed(false),
             Action::Confirm => Command::Activate,
             _ => return Ok(()),
         };
-        self.diff.run(command)?;
-        self.track_current()
+        self.diff.run(command)
     }
 
     /// `h`/`l`: the old or the new side of the line under the cursor.
@@ -356,9 +365,6 @@ impl Screen {
                 whole.handle_event(Event::Mouse(mouse))?;
             } else {
                 self.diff.handle_event(Event::Mouse(mouse))?;
-                if click {
-                    self.track_current()?;
-                }
             }
         }
         Ok(())

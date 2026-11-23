@@ -5,9 +5,7 @@
 //! side; a note names a file by path. [`Lines`] is the meeting point: a run of lines on one
 //! side of one file, by path.
 
-use std::collections::HashMap;
 use std::io::{Seek as _, Write as _};
-use std::ops::Range;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::SyncSender;
 
@@ -17,9 +15,14 @@ use diffs_rs::reading::SourceRange;
 use diffs_rs::theme::Appearance;
 use plannotator_tui_review::{Capture, Side};
 use ratatui::Frame;
-use ratatui::crossterm::event::Event;
+use ratatui::crossterm::event::{Event, MouseEventKind};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
+
+mod place;
+mod sections;
+
+use sections::Sections;
 
 /// Lines `first..=last` on one side of the file at `path` (the capture's path).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +52,12 @@ pub(super) struct Diff {
     paths: Vec<String>,
     /// A whole-file view's one file, named by its capture path whatever the patch says.
     fixed: Option<String>,
+    /// Where the cursor was last found (`place`).
+    place: Option<place::Place>,
+    /// Whether the last move went down (`Some(true)`), up, or either way.
+    moved: Option<bool>,
+    /// Drawn since its files last changed.
+    drawn: bool,
 }
 
 impl std::fmt::Debug for Diff {
@@ -86,6 +95,9 @@ impl Diff {
             sections: Some((capture.patch_key.clone(), sections)),
             paths: Vec::new(),
             fixed: None,
+            place: None,
+            moved: None,
+            drawn: false,
         })
     }
 
@@ -102,7 +114,15 @@ impl Diff {
         let mut engine = Engine::open(input, options, wake).context("opening the whole-file view")?;
         // The same terminal background as the diff, so both views match.
         engine.set_terminal_background(true)?;
-        Ok(Self { engine, sections: None, paths: Vec::new(), fixed: Some(name.to_owned()) })
+        Ok(Self {
+            engine,
+            sections: None,
+            paths: Vec::new(),
+            fixed: Some(name.to_owned()),
+            place: None,
+            moved: None,
+            drawn: false,
+        })
     }
 
     /// Show the files at `paths` of `capture`, a new capture of the same review or the same
@@ -116,6 +136,8 @@ impl Diff {
         let input = input_bytes(&patch, capture.scope.title())?;
         self.engine.replace(input).context("reloading the diff viewer")?;
         self.paths.clear();
+        self.place = None;
+        self.drawn = false;
         Ok(())
     }
 
@@ -132,6 +154,7 @@ impl Diff {
             return Ok(true);
         }
         self.paths = (0..files).map(|index| self.capture_path(capture, index)).collect();
+        self.drawn = false;
         Ok(true)
     }
 
@@ -169,6 +192,12 @@ impl Diff {
 
     pub(super) fn after_draw(&mut self) {
         self.engine.after_draw();
+        self.drawn = !self.paths.is_empty();
+    }
+
+    /// Whether the files it has were drawn, so their rows are laid out.
+    pub(super) fn drawn(&self) -> bool {
+        self.drawn
     }
 
     pub(super) fn close(&mut self) -> Result<()> {
@@ -191,12 +220,32 @@ impl Diff {
     }
 
     pub(super) fn run(&mut self, command: Command) -> Result<()> {
+        self.moved = match command {
+            Command::Down
+            | Command::PageDown
+            | Command::NextHunk
+            | Command::NextFile
+            | Command::LastSource => Some(true),
+            Command::Up
+            | Command::PageUp
+            | Command::PreviousHunk
+            | Command::PreviousFile
+            | Command::FirstSource => Some(false),
+            _ => self.moved,
+        };
         self.engine.execute(command).map(drop)
     }
 
     /// Mouse and resize events, which the engine handles itself. Keys never come here:
     /// this app maps them to commands. True when the engine acted on it.
     pub(super) fn handle_event(&mut self, event: Event) -> Result<bool> {
+        if let Event::Mouse(mouse) = &event {
+            self.moved = match mouse.kind {
+                MouseEventKind::ScrollDown => Some(true),
+                MouseEventKind::ScrollUp => Some(false),
+                _ => None,
+            };
+        }
         Ok(self.engine.handle_event(event, true)? != InputEffect::Ignored)
     }
 
@@ -266,44 +315,6 @@ impl Diff {
             })
             .collect();
         self.engine.set_markers(&markers)
-    }
-}
-
-/// Each file's section of a patch: from its `diff --git` line to the next one.
-#[derive(Debug, Default)]
-struct Sections(HashMap<String, Range<usize>>);
-
-impl Sections {
-    fn of(patch: &[u8]) -> Self {
-        let mut starts = Vec::new();
-        let mut offset = 0;
-        for line in patch.split_inclusive(|b| *b == b'\n') {
-            if line.starts_with(b"diff --git ") {
-                starts.push(offset);
-            }
-            offset += line.len();
-        }
-        let ends = starts.iter().skip(1).copied().chain([patch.len()]);
-        let sections = starts
-            .iter()
-            .zip(ends)
-            .filter_map(|(&from, to)| {
-                let text = String::from_utf8_lossy(patch.get(from..to)?);
-                let file = plannotator_tui_review::patch::parse(&text).into_iter().next()?.path;
-                Some((file, from..to))
-            })
-            .collect();
-        Self(sections)
-    }
-
-    /// The sections of `paths`, in that order, as one patch.
-    fn select(&self, patch: &[u8], paths: &[String]) -> Vec<u8> {
-        paths
-            .iter()
-            .filter_map(|path| self.0.get(path).and_then(|range| patch.get(range.clone())))
-            .flatten()
-            .copied()
-            .collect()
     }
 }
 

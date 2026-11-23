@@ -11,12 +11,16 @@ use super::tree::{Node, Row};
 use crate::keys::{self, Action};
 use crate::review::{Focus, Mode, Screen};
 
-/// Columns `narrow-column` and `widen-column` take from or give to the list.
+/// Columns `narrow-files` and `widen-files` take from or give to the list.
 const WIDTH_STEP: u16 = 4;
 
 impl Screen {
     /// `toggle-files`: open the list and move to it; from the list, close it.
     pub(in crate::review) fn toggle_files(&mut self) {
+        if self.files.no_room && self.focus != Focus::Files {
+            self.status = Some("too narrow for the file list".into());
+            return;
+        }
         if self.focus == Focus::Files {
             self.files.closed = true;
             self.focus = Focus::Diff;
@@ -28,12 +32,13 @@ impl Screen {
 
     /// `filter-files`: to the list, typing a name filter.
     pub(in crate::review) fn start_file_filter(&mut self) {
+        self.files.filter_from = Some(self.focus);
         self.files.closed = false;
         self.focus = Focus::Files;
         self.mode = Mode::FilterFiles;
     }
 
-    /// `narrow-column`, `widen-column`: the list's width, by four columns.
+    /// `narrow-files`, `widen-files`: the list's width, by four columns.
     pub(in crate::review) fn resize_files(&mut self, wider: bool) {
         // From the width last asked for, so keys pressed between two frames add up.
         let now = match (self.files.chosen_width, self.files.drawn_width) {
@@ -93,7 +98,7 @@ impl Screen {
             }
             Action::Back => self.focus = Focus::Diff,
             Action::ToggleFiles => self.toggle_files(),
-            Action::FilterFiles => self.mode = Mode::FilterFiles,
+            Action::FilterFiles => self.start_file_filter(),
             Action::FilterKinds => self.mode = Mode::Kinds(0),
             Action::HideViewed => self.toggle_hide_viewed()?,
             Action::ToggleViewed => {
@@ -102,8 +107,8 @@ impl Screen {
                     self.toggle_viewed_of(&path);
                 }
             }
-            Action::NarrowColumn => self.resize_files(false),
-            Action::WidenColumn => self.resize_files(true),
+            Action::NarrowFiles => self.resize_files(false),
+            Action::WidenFiles => self.resize_files(true),
             _ => {}
         }
         Ok(())
@@ -113,7 +118,7 @@ impl Screen {
     fn move_files_cursor(&mut self, rows: &[Row], index: usize) -> Result<()> {
         let Some(row) = rows.get(index) else { return Ok(()) };
         self.files.cursor = Some(row.key.clone());
-        if matches!(row.node, Node::File(_)) && self.files.shown.contains(&row.key) {
+        if matches!(row.node, Node::File(_)) && self.files.is_shown(&row.key) {
             let path = row.key.clone();
             self.open_from_list(&path)?;
         }
@@ -133,24 +138,44 @@ impl Screen {
         }
     }
 
+    /// Close an open folder row, or open a closed one: every folder of its chain, which a
+    /// filter may have closed under a shorter key.
     fn toggle_folder(&mut self, key: &str) {
-        if !self.files.collapsed.remove(key) {
+        let listing = self.listing();
+        let row = listing.rows.iter().find(|r| r.key == key);
+        let Some(Row { node: Node::Folder { expanded }, label, .. }) = row else { return };
+        if *expanded {
             self.files.collapsed.insert(key.to_owned());
+            return;
         }
+        let parent = key.len().saturating_sub(label.len());
+        self.files.collapsed.retain(|closed| !(key.starts_with(closed.as_str()) && closed.len() > parent));
     }
 
     /// Typing the name filter. The list follows each key; `Enter` hands the filter to the
-    /// diff and goes to the file under the cursor; `Esc` clears it.
+    /// diff and goes to the file under the cursor; `Esc` clears it and goes back to where
+    /// `/` was pressed. Editing keys are fixed, as in the other text fields; `interrupt`
+    /// quits as it does everywhere.
     pub(in crate::review) fn filter_key(&mut self, key: KeyEvent) -> Result<()> {
+        if self.keys.action(&key, keys::REVIEW_GLOBAL) == Some(Action::Interrupt) {
+            self.mode = Mode::Browse;
+            self.request_quit();
+            return Ok(());
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
             KeyCode::Esc => {
                 self.files.filter.query.clear();
                 self.mode = Mode::Browse;
-                return self.apply_filter(None);
+                self.apply_filter(None)?;
+                if let Some(focus) = self.files.filter_from.take() {
+                    self.focus = focus;
+                }
+                return Ok(());
             }
             KeyCode::Enter => {
                 self.mode = Mode::Browse;
+                self.files.filter_from = None;
                 let listing = self.listing();
                 let at = self.files.cursor.as_deref().and_then(|key| row_of(&listing.rows, key));
                 let file = |row: &Row| matches!(row.node, Node::File(_)).then(|| row.key.clone());
@@ -182,14 +207,25 @@ impl Screen {
             KeyCode::Char(c) if !ctrl => self.files.filter.query.push(c),
             _ => return Ok(()),
         }
-        // The cursor moves to the first match when its row is gone.
+        self.keep_list_cursor();
+        Ok(())
+    }
+
+    /// A paste while typing the filter joins it; a filter is one line, so line breaks drop
+    /// out.
+    pub(in crate::review) fn paste_filter(&mut self, text: &str) {
+        self.files.filter.query.extend(text.chars().filter(|c| !c.is_control()));
+        self.keep_list_cursor();
+    }
+
+    /// The cursor moves to the first match when its row is gone.
+    fn keep_list_cursor(&mut self) {
         let listing = self.listing();
         let kept = self.files.cursor.as_deref().is_some_and(|key| listing.rows.iter().any(|r| r.key == key));
         if !kept {
             self.files.cursor =
                 listing.rows.iter().find(|r| matches!(r.node, Node::File(_))).map(|r| r.key.clone());
         }
-        Ok(())
     }
 
     /// A click or the wheel over the list.

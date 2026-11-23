@@ -181,3 +181,30 @@ fn code_is_source_by_extension_and_the_rest_is_other() {
     );
     all(Kind::Other, &["assets/logo.png", "fonts/Inter.woff2", "bin/tool", "data/blob.bin"]);
 }
+
+#[test]
+fn data_and_config_extensions_win_over_documentation_names() {
+    all(
+        Kind::Config,
+        &[
+            ".github/workflows/security.yml",
+            "install.yml",
+            "notice.yaml",
+            "data/history.json",
+            "CHANGELOG.json",
+            "docs/_config.yml",
+        ],
+    );
+    // Without an extension only a capitalised name is documentation.
+    assert_eq!(classify("scripts/install"), Kind::Other);
+    assert_eq!(classify("INSTALL"), Kind::Docs);
+    assert_eq!(classify("License"), Kind::Docs);
+}
+
+#[test]
+fn a_dist_folder_inside_src_is_source_and_one_outside_is_built() {
+    assert_eq!(classify("src/dist/mod.rs"), Kind::Code);
+    assert_eq!(classify("crates/core/src/dist/mod.rs"), Kind::Code);
+    assert_eq!(classify("dist/index.js"), Kind::Generated);
+    assert_eq!(classify("packages/app/dist/index.js"), Kind::Generated);
+}

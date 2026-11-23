@@ -13,7 +13,8 @@
 //! - [`drafts`]: making, editing and removing notes.
 //! - [`herdr`]: `plannotator-tui herdr review`. [`scope`]: what it shares with `rex review`
 //!   and `hc review`, and the pane they open.
-//! - [`input`]: keys and the mouse. [`draw`], [`rail`] and [`overlays`]: the frame.
+//! - [`input`]: keys and the mouse. [`draw`], [`footer`], [`rail`] and [`overlays`]: the
+//!   frame.
 //! - [`send`]: send, resend, finish and undo. [`pi`]: the Pi link.
 //! - [`watch`]: noticing that the diff changed on disk, for the footer.
 //! - [`whole`]: the whole-file view (`o`, `O`), a second diffs-rs engine.
@@ -28,6 +29,7 @@ mod diff;
 mod drafts;
 mod draw;
 mod files;
+mod footer;
 pub(crate) mod herdr;
 mod input;
 mod jump;
@@ -303,9 +305,10 @@ impl Screen {
         let mut changed = false;
         if self.diff.poll(&self.capture)? {
             self.sync_markers();
-            self.show_pending_file()?;
             changed = true;
         }
+        changed |= self.show_pending_file()?;
+        changed |= self.take_attributes()?;
         changed |= self.poll_pi();
         changed |= self.poll_search()?;
         let typing = matches!(self.mode, Mode::Compose(_))
@@ -370,7 +373,7 @@ impl Screen {
         self.progress = self.progress.reopen(&capture, &self.data_dir);
         self.capture = capture;
         self.files_for_capture();
-        self.diff.replace(&self.capture, &self.files.shown)?;
+        self.diff.replace(&self.capture, self.files.shown())?;
         self.files.retarget();
         let placed = self.place_notes()?;
         // The whole file is read again too, at the line it was on.

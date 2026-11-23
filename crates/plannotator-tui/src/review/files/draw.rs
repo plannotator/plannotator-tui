@@ -3,97 +3,121 @@
 //! the right edge; the name has the room first and is cut in the middle when it must be.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
-use plannotator_tui_review::{FilePatch, FileStatus};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
-use ratatui::text::Span;
 use unicode_width::UnicodeWidthStr as _;
 
 use super::fit;
+use super::row::{RowLook, counts, draw_row, indent};
 use super::tree::{self, Node, Row};
 use crate::review::{Focus, Mode, Screen};
 use crate::theme::palette;
 
-/// Below this many columns inside its padding the list indents one column a level.
-const NARROW: usize = 30;
-
-/// What the list draws this frame: its rows and the counts' column widths.
+/// What the list draws: its rows and the counts' column widths. Built when the files, the
+/// filter, the folds or the viewed marks change, and kept between frames.
 #[derive(Debug)]
 pub(in crate::review) struct Listing {
     pub(in crate::review) paths: Vec<String>,
     pub(in crate::review) rows: Vec<Row>,
+    /// Each row's viewed mark: a file's own, a folder's when every file in it is viewed.
+    viewed: Vec<bool>,
     /// Columns of the widest `+N` and `−N`.
-    plus: usize,
-    minus: usize,
+    pub(super) plus: usize,
+    pub(super) minus: usize,
     /// Whether any file is viewed, so the tick column is kept.
     ticks: bool,
 }
 
 impl Listing {
     /// The columns right of a name: the status letter and the counts, each with its gap.
-    fn status_width() -> usize {
+    pub(super) fn status_width() -> usize {
         2
     }
 
-    fn counts_width(&self) -> usize {
+    pub(super) fn counts_width(&self) -> usize {
         1 + self.plus + 1 + self.minus
     }
 
-    fn tick_width(&self) -> usize {
+    pub(super) fn tick_width(&self) -> usize {
         if self.ticks { 2 } else { 0 }
     }
 }
 
-/// `+12`, `−3`; a binary file has neither.
-fn counts(file: &FilePatch) -> (String, String) {
-    if file.binary {
-        (String::new(), "bin".to_owned())
-    } else {
-        (format!("+{}", file.additions), format!("\u{2212}{}", file.deletions))
-    }
-}
-
-fn status_letter(file: &FilePatch) -> (&'static str, Color) {
-    match file.status {
-        FileStatus::Added => ("A", palette().looks_good),
-        FileStatus::Deleted => ("D", palette().delete),
-        FileStatus::Modified => ("M", Color::Blue),
-        FileStatus::Renamed => ("R", palette().code_keyword),
-    }
-}
-
 impl Screen {
-    fn patches(&self) -> HashMap<&str, &FilePatch> {
-        self.capture.files.iter().map(|f| (f.path.as_str(), f)).collect()
+    /// The list's rows for the filter as typed, built again only when what they show
+    /// changed.
+    pub(in crate::review) fn listing(&self) -> Rc<Listing> {
+        if let Some((key, listing)) = self.files.rows.borrow().as_ref()
+            && key.version == self.files.version
+            && key.filter == self.files.filter
+            && key.collapsed == self.files.collapsed
+        {
+            return Rc::clone(listing);
+        }
+        let built = super::Built {
+            version: self.files.version,
+            filter: self.files.filter.clone(),
+            collapsed: self.files.collapsed.clone(),
+        };
+        let listing = Rc::new(self.listing_of(self.listed(), &self.files.collapsed));
+        *self.files.rows.borrow_mut() = Some((built, Rc::clone(&listing)));
+        listing
     }
 
-    /// The list's rows for the filter as typed.
-    pub(in crate::review) fn listing(&self) -> Listing {
-        self.listing_of(self.listed())
+    /// The columns the rows of the files the diff shows need, every folder open: the
+    /// list's width, which stays while a filter is typed or a folder is closed.
+    pub(in crate::review) fn shown_width(&self) -> u16 {
+        let key = (self.files.version, self.files.shown_version);
+        if let Some((version, shown, width)) = self.files.shown_width.get()
+            && (version, shown) == key
+        {
+            return width;
+        }
+        let open = std::collections::BTreeSet::new();
+        let width = self.files_content_width(&self.listing_of(self.files.shown().to_vec(), &open));
+        self.files.shown_width.set(Some((key.0, key.1, width)));
+        width
     }
 
-    /// The list's rows for the files the diff shows: what the width fits, so the list keeps
-    /// its width while a filter is typed.
-    pub(in crate::review) fn shown_listing(&self) -> Listing {
-        self.listing_of(self.files.shown.clone())
-    }
-
-    fn listing_of(&self, paths: Vec<String>) -> Listing {
+    fn listing_of(&self, paths: Vec<String>, collapsed: &std::collections::BTreeSet<String>) -> Listing {
         let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
-        let rows = tree::rows(&refs, &self.files.collapsed);
-        let patches = self.patches();
+        let rows = tree::rows(&refs, collapsed);
         let (mut plus, mut minus) = (0, 0);
         for path in &paths {
-            if let Some(file) = patches.get(path.as_str()) {
-                let (p, m) = counts(file);
+            if let Some(change) = self.change_of(path) {
+                let (p, m) = counts(&change);
                 plus = plus.max(p.width());
                 minus = minus.max(m.width());
             }
         }
         let ticks = self.capture.files.iter().any(|f| self.progress.is_viewed(&f.path));
-        Listing { paths, rows, plus, minus, ticks }
+        // A folder is viewed when every file in it is, closed or open.
+        let mut folders: HashMap<&str, bool> = rows
+            .iter()
+            .filter(|r| matches!(r.node, Node::Folder { .. }))
+            .map(|r| (r.key.as_str(), true))
+            .collect();
+        for path in &paths {
+            if self.progress.is_viewed(path) {
+                continue;
+            }
+            for (at, _) in path.match_indices('/') {
+                if let Some(all) = path.get(..=at).and_then(|folder| folders.get_mut(folder)) {
+                    *all = false;
+                }
+            }
+        }
+        let viewed = rows
+            .iter()
+            .map(|row| match row.node {
+                Node::File(i) => paths.get(i).is_some_and(|p| self.progress.is_viewed(p)),
+                Node::Folder { .. } => folders.get(row.key.as_str()).copied().unwrap_or(false),
+            })
+            .collect();
+        Listing { paths, rows, viewed, plus, minus, ticks }
     }
 
     /// The rows above the file rows: the heading, the filter, hidden notes.
@@ -178,7 +202,16 @@ impl Screen {
             }
         }
         self.files.scroll = self.files.scroll.min(listing.rows.len().saturating_sub(height));
-        let patches = self.patches();
+        // Which columns the file rows show, once for all of them so they line up.
+        let inner = usize::from(area.width.saturating_sub(2));
+        let names: Vec<usize> = listing
+            .rows
+            .iter()
+            .filter(|r| matches!(r.node, Node::File(_)))
+            .map(|row| indent(row.depth, inner) + row.label.width())
+            .collect();
+        let room = inner.saturating_sub(listing.tick_width());
+        let shown = fit::columns(&names, room, Listing::status_width(), listing.counts_width());
         let mut hits = Vec::new();
         for (offset, row) in listing.rows.iter().enumerate().skip(self.files.scroll).take(height) {
             let y = top + (offset - self.files.scroll) as u16;
@@ -191,16 +224,10 @@ impl Screen {
                 Node::File(i) => listing.paths.get(i).map(String::as_str),
                 Node::Folder { .. } => None,
             };
-            let file = path.and_then(|p| patches.get(p).copied());
-            // A folder is viewed when every file in it is, closed or open.
-            let viewed = if let Some(p) = path {
-                self.progress.is_viewed(p)
-            } else {
-                let mut inside = listing.paths.iter().filter(|p| p.starts_with(&row.key)).peekable();
-                inside.peek().is_some() && inside.all(|p| self.progress.is_viewed(p))
-            };
+            let change = path.and_then(|p| self.change_of(p));
+            let viewed = listing.viewed.get(offset).copied().unwrap_or(false);
             let current = path.is_some() && path == self.files.current.as_deref();
-            draw_row(buf, line, row, file, listing, RowLook { viewed, current });
+            draw_row(buf, line, row, change.as_ref(), listing, RowLook { viewed, current, shown });
             hits.push((y, row.key.clone()));
         }
         self.geometry.file_rows = hits;
@@ -215,77 +242,4 @@ pub(in crate::review) fn row_of(rows: &[Row], key: &str) -> Option<usize> {
             .rfind(|(_, r)| key.starts_with(&r.key) && r.key.ends_with('/'))
             .map(|(i, _)| i)
     })
-}
-
-#[derive(Debug, Clone, Copy)]
-struct RowLook {
-    viewed: bool,
-    current: bool,
-}
-
-/// One row in `line`, padded a column on each side.
-fn draw_row(
-    buf: &mut ratatui::buffer::Buffer,
-    line: Rect,
-    row: &Row,
-    file: Option<&FilePatch>,
-    listing: &Listing,
-    look: RowLook,
-) {
-    let inner = usize::from(line.width.saturating_sub(2));
-    // A narrow list indents by one column a level; deep rows give up indent before their
-    // name gets too narrow to read.
-    let step = if inner >= NARROW { 2 } else { 1 };
-    let indent = (step * row.depth).min(inner.saturating_sub(12));
-    let x = line.x + 1 + indent as u16;
-    let room = inner - indent.min(inner);
-    let tick = listing.tick_width();
-    let right = line.x + 1 + inner as u16;
-    if tick > 0 && look.viewed {
-        buf.set_string(right.saturating_sub(1), line.y, "\u{2713}", Style::new().fg(palette().looks_good));
-    }
-    let Some(file) = file else {
-        let chevron =
-            if matches!(row.node, Node::Folder { expanded: false }) { "\u{25b8} " } else { "\u{25be} " };
-        buf.set_stringn(x, line.y, chevron, room, Style::new().fg(Color::DarkGray));
-        let label_room = room.saturating_sub(2 + if look.viewed { tick } else { 0 });
-        let style = if look.viewed { Style::new().fg(Color::DarkGray) } else { Style::new() };
-        buf.set_stringn(x + 2, line.y, fit::folder(&row.label, label_room), label_room, style);
-        return;
-    };
-    let status_width = Listing::status_width();
-    let counts_width = listing.counts_width();
-    let avail = room.saturating_sub(tick);
-    let shown = fit::shown(row.label.width(), avail, status_width, counts_width);
-    let used = if shown.status { status_width } else { 0 } + if shown.counts { counts_width } else { 0 };
-    let name_room = avail.saturating_sub(used);
-    let name = fit::middle(&row.label, name_room);
-    let mut name_style = if look.viewed { Style::new().fg(Color::DarkGray) } else { Style::new() };
-    if look.current {
-        name_style = name_style.fg(palette().accent).bold();
-    }
-    buf.set_stringn(x, line.y, &name, name_room, name_style);
-    let dim = Style::new().fg(Color::DarkGray);
-    let mut end = right.saturating_sub(tick as u16);
-    if shown.counts {
-        let (plus, minus) = counts(file);
-        let start = end.saturating_sub(counts_width as u16);
-        let colour = |c: Color| if look.viewed { dim } else { Style::new().fg(c) };
-        let plus = format!("{plus:>width$}", width = listing.plus);
-        let minus = format!("{minus:>width$}", width = listing.minus);
-        buf.set_span(
-            start + 1,
-            line.y,
-            &Span::styled(plus, colour(palette().looks_good)),
-            listing.plus as u16,
-        );
-        let minus_x = start + 2 + listing.plus as u16;
-        buf.set_span(minus_x, line.y, &Span::styled(minus, colour(palette().delete)), listing.minus as u16);
-        end = start;
-    }
-    if shown.status {
-        let (letter, colour) = status_letter(file);
-        let style = if look.viewed { dim } else { Style::new().fg(colour) };
-        buf.set_string(end.saturating_sub(1), line.y, letter, style);
-    }
 }

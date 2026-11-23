@@ -2,10 +2,14 @@
 //! diff viewer, a `TestBackend` frame, and a stand-in for the agent (the one external seam).
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic, reason = "tests assert by panicking")]
 
-mod blocked_send;
 #[cfg(unix)]
+mod big;
+mod blocked_send;
 mod disk_flow;
+mod file_kinds;
 mod file_list;
+mod file_list_mouse;
+mod file_moves;
 #[cfg(unix)]
 mod first_look;
 mod jump_flow;
@@ -111,7 +115,7 @@ impl Fixture {
         std::fs::write(self.repo().join(path), text).expect("write");
     }
 
-    fn git(&self, args: &[&str]) {
+    pub(super) fn git(&self, args: &[&str]) {
         let status = Command::new("git").arg("-C").arg(self.repo()).args(args).status().expect("git");
         assert!(status.success(), "git {args:?}");
     }
@@ -144,9 +148,11 @@ pub(super) fn settle(screen: &mut Screen) {
     loop {
         screen.tick().expect("tick");
         let _ = frame(screen, 120, 40);
-        let loaded = screen.diff.files_shown() == screen.files.shown.len()
+        let loaded = screen.diff.files_shown() >= screen.files.shown().len()
             && screen.diff.progress() != super::diff::Progress::Loading;
         if loaded {
+            // A file a filter waits to show is gone to once its rows are drawn.
+            screen.tick().expect("tick");
             return;
         }
         assert!(started.elapsed() < Duration::from_secs(10), "the viewer never loaded");

@@ -247,3 +247,56 @@ fn with_the_notes_rail_closed_the_lists_and_the_whole_file_use_the_room() {
     ctrl(&mut screen, 'o');
     assert_eq!(cursor(&screen), ("app.py".into(), Side::New, 15));
 }
+
+/// `app.py` calls `compute`, which a new `lib.py` defines at line 4.
+fn calls_lib(tag: &str) -> Fixture {
+    let fixture = Fixture::new(tag);
+    fixture.write("app.py", "import sys\nfrom lib import compute\n\n\ndef main():\n    compute()\n");
+    fixture.write("lib.py", "\"\"\"Lib.\"\"\"\n\n\ndef compute():\n    return 1\n");
+    fixture
+}
+
+#[test]
+fn a_definition_in_a_file_the_filter_hides_opens_in_the_whole_file_view_and_ctrl_o_comes_back() {
+    let fixture = calls_lib("jump-hidden");
+    let mut screen = fixture.open();
+    keys(&mut screen, "/app");
+    press(&mut screen, KeyCode::Enter);
+    settle(&mut screen);
+    assert_eq!(screen.diff.paths(), ["app.py"]);
+    screen.diff.reveal("app.py", Side::New, 6).expect("the call");
+    keys(&mut screen, "d");
+    settle_search(&mut screen);
+    let whole = screen.whole.as_ref().expect("the whole file");
+    assert_eq!(whole.path, "lib.py");
+    settle_whole(&mut screen);
+    assert_eq!(screen.status.as_deref(), Some("definition: lib.py:4 \u{b7} ctrl+o back"));
+    ctrl(&mut screen, 'o');
+    assert!(screen.whole.is_none());
+    assert_eq!(cursor(&screen), ("app.py".into(), Side::New, 6));
+}
+
+#[test]
+fn ctrl_o_to_a_place_in_a_file_hidden_since_opens_it_whole() {
+    let fixture = calls_lib("jump-hidden-since");
+    let mut screen = fixture.open();
+    screen.diff.reveal("app.py", Side::New, 6).expect("the call");
+    keys(&mut screen, "d");
+    settle_search(&mut screen);
+    assert!(screen.whole.is_none(), "lib.py is in the diff");
+    assert_eq!(cursor(&screen), ("lib.py".into(), Side::New, 4));
+    // Now only lib.py shows; back to app.py is in the whole-file view.
+    keys(&mut screen, "/lib");
+    press(&mut screen, KeyCode::Enter);
+    settle(&mut screen);
+    assert_eq!(screen.diff.paths(), ["lib.py"]);
+    // From lib.py's heading, where the filter left the diff, onto its def line.
+    screen.diff.reveal("lib.py", Side::New, 4).expect("the def");
+    ctrl(&mut screen, 'o');
+    assert_eq!(screen.whole.as_ref().map(|w| w.path.as_str()), Some("app.py"));
+    assert_eq!(screen.status.as_deref(), Some("app.py:6"));
+    // And forward again, to lib.py in the diff.
+    ctrl(&mut screen, 'i');
+    assert!(screen.whole.is_none());
+    assert_eq!(cursor(&screen), ("lib.py".into(), Side::New, 4));
+}

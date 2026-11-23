@@ -453,7 +453,7 @@ impl Screen {
     fn whole_next_file(&mut self, delta: isize) {
         let Some(whole) = &self.whole else { return };
         let (path, version) = (whole.path.clone(), whole.version);
-        let shown = &self.files.shown;
+        let shown = self.files.shown();
         let at = shown.iter().position(|p| *p == path);
         let next = match at {
             Some(i) => i.checked_add_signed(delta).filter(|&n| n < shown.len()),

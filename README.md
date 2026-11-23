@@ -519,7 +519,8 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `whole-file` `whole-base` | `o` `O` | code review: the whole file as it is now, or before the change; again to go back |
 | `go-to-definition` `jump-back` `jump-forward` | `d` `ctrl+o` `ctrl+i` | code review: search for the identifier on the line and go to its definition; back and forward through the places jumped from (`ctrl+i` needs a terminal that tells it from Tab) |
 | `help` | `?` | code review: every key (`j`/`k` scroll it when it does not fit) |
-| `narrow-column` `widen-column` | `<` `>` | the reading column, by eight columns; in code review, the file list, by four |
+| `narrow-column` `widen-column` | `<` `>` | the reading column, by eight columns |
+| `narrow-files` `widen-files` | `<` `>` | code review: the file list, by four columns |
 | `toggle-notes` | `z` | close the notes rail, or open it again; remembered for the next session |
 
 Actions forwarded by Herdr Mirror default to a split beside the invoking remote

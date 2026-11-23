@@ -97,6 +97,10 @@ pub(crate) enum Action {
     /// The reading column, by eight columns.
     NarrowColumn,
     WidenColumn,
+    /// The code review's file list, by four columns. Its own action, so a config that gave
+    /// `<` or `>` to a code review key before the list existed keeps the reading column's.
+    NarrowFiles,
+    WidenFiles,
     /// The whole file under the cursor as it is now, or back to the diff.
     WholeFile,
     /// The whole file as it was before the change (its base), or back to the diff.
@@ -128,7 +132,7 @@ use Action::{
     ToggleWrap, WholeBase, WholeFile,
 };
 use Action::{FilterFiles, FilterKinds, GoToDefinition, HideViewed, JumpBack, JumpForward};
-use Action::{NarrowColumn, ToggleNotes, WidenColumn};
+use Action::{NarrowColumn, NarrowFiles, ToggleNotes, WidenColumn, WidenFiles};
 
 /// Browsing, before the focused pane gets the key.
 pub(crate) const GLOBAL: &[Action] = &[
@@ -251,8 +255,8 @@ pub(crate) const DIFF: &[Action] = &[
     GoToDefinition,
     JumpBack,
     JumpForward,
-    NarrowColumn,
-    WidenColumn,
+    NarrowFiles,
+    WidenFiles,
     Confirm,
 ];
 /// The code review's file list.
@@ -272,8 +276,8 @@ pub(crate) const FILES: &[Action] = &[
     FilterKinds,
     HideViewed,
     ToggleViewed,
-    NarrowColumn,
-    WidenColumn,
+    NarrowFiles,
+    WidenFiles,
 ];
 /// The kind picker over the file list; Space turns a row on or off.
 pub(crate) const KINDS: &[Action] = &[Down, Up, Confirm, Back, FilterKinds, Interrupt];
@@ -484,6 +488,8 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (Help, &[ch('?')]),
     (NarrowColumn, &[ch('<')]),
     (WidenColumn, &[ch('>')]),
+    (NarrowFiles, &[ch('<')]),
+    (WidenFiles, &[ch('>')]),
     (WholeFile, &[ch('o')]),
     (WholeBase, &[ch('O')]),
     (ToggleNotes, &[ch('z')]),
@@ -523,6 +529,8 @@ const LATE: &[Action] = &[
     ChangeComment,
     NarrowColumn,
     WidenColumn,
+    NarrowFiles,
+    WidenFiles,
     WholeFile,
     WholeBase,
     ToggleNotes,
@@ -557,7 +565,7 @@ impl<'de> Deserialize<'de> for Keymap {
         for late in unset {
             let taken =
                 keymap.0.get(&late).is_some_and(|keys| keys.iter().any(|key| user_keys.contains(key)));
-            if taken && keymap.check().is_err() {
+            if taken && keymap.clashes(late) {
                 keymap.0.insert(late, Vec::new());
             }
         }
@@ -595,6 +603,18 @@ impl Keymap {
 
     fn keys(&self, action: Action) -> &[Key] {
         self.0.get(&action).map_or(&[], Vec::as_slice)
+    }
+
+    /// Whether one of `action`'s keys means another action where both read the keypress.
+    fn clashes(&self, action: Action) -> bool {
+        SHARED.iter().any(|contexts| {
+            let actions: Vec<Action> = contexts.iter().copied().flatten().copied().collect();
+            actions.contains(&action)
+                && self
+                    .keys(action)
+                    .iter()
+                    .any(|key| actions.iter().any(|&other| other != action && self.keys(other).contains(key)))
+        })
     }
 
     /// No key may mean two actions where both read the same keypress.
@@ -693,6 +713,8 @@ impl Action {
             Self::Help => "help",
             Self::NarrowColumn => "narrow-column",
             Self::WidenColumn => "widen-column",
+            Self::NarrowFiles => "narrow-files",
+            Self::WidenFiles => "widen-files",
             Self::WholeFile => "whole-file",
             Self::WholeBase => "whole-base",
             Self::ToggleNotes => "toggle-notes",

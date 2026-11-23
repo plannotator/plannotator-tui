@@ -255,3 +255,42 @@ fn a_folder_whose_files_are_all_viewed_is_ticked_open_or_closed() {
     let folder = entry(&rows, "components/");
     assert!(folder.contains('\u{25b8}') && folder.trim_end().ends_with('\u{2713}'), "{rows:#?}");
 }
+
+#[test]
+fn every_file_row_shows_the_same_columns_so_they_line_up() {
+    let fixture = monorepo("files-columns");
+    let mut screen = fixture.open();
+    for cols in [80, 100, 160] {
+        let rows = frame(&mut screen, cols, 30);
+        let width = usize::from(screen.files.drawn_width);
+        // A file row's text ends at the same column: the counts' right edge, or the status
+        // letter's when the counts give way.
+        let ends: Vec<usize> = rows
+            .iter()
+            .skip(2)
+            .filter(|row| row.chars().nth(width) == Some('\u{2502}'))
+            .map(|row| row.chars().take(width).collect::<String>())
+            .filter(|left| {
+                !left.trim().is_empty() && !left.contains('\u{25be}') && !left.contains('\u{25b8}')
+            })
+            .map(|left| left.trim_end().chars().count())
+            .collect();
+        assert!(ends.len() >= 4, "{cols}: {rows:#?}");
+        assert!(ends.windows(2).all(|w| w.first() == w.last()), "{cols} columns: {ends:?} {rows:#?}");
+    }
+}
+
+#[test]
+fn the_footer_hints_take_one_row_on_a_wide_screen_and_two_on_a_narrow_one() {
+    let fixture = monorepo("files-footer");
+    let mut screen = fixture.open();
+    for (cols, most) in [(200, 1), (160, 1), (100, 2), (80, 2)] {
+        let rows = frame(&mut screen, cols, 30);
+        let footer: Vec<&String> = rows.iter().rev().take_while(|r| !r.contains('\u{2502}')).collect();
+        assert!(footer.len() <= most, "{cols} columns: {footer:#?}");
+        let last = footer.first().expect("a footer");
+        assert!(last.contains("? help") && last.contains("q quit"), "{cols} columns: {last:?}");
+        // No row holds a hint alone.
+        assert!(footer.iter().all(|r| r.contains(" \u{b7} ")), "{cols} columns: {footer:#?}");
+    }
+}

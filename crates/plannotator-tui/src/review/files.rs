@@ -8,23 +8,28 @@
 //!
 //! - [`kind`]: what kind of file a path is. [`filter`]: what passes.
 //! - [`tree`]: the rows. [`fit`]: the width, and cutting long names.
-//! - `draw` and `input`: the list on screen and its keys; `kinds`: the kind picker.
+//! - `shown`: what the diff shows, and the kinds; `attrs`: `.gitattributes`.
+//! - `nav`: moving the diff from file to file.
+//! - `draw` and `row`: the list on screen; `input`: its keys; `kinds`: the kind picker.
 
+mod attrs;
 mod draw;
 pub(super) mod filter;
 pub(super) mod fit;
 mod input;
 pub(super) mod kind;
 mod kinds;
+mod nav;
+mod row;
+mod shown;
 pub(super) mod tree;
 
-use std::collections::BTreeSet;
-
-use anyhow::Result;
-use diffs_rs::engine::Command;
-use plannotator_tui_review::{NoteScope, Side};
+use std::cell::{Cell, RefCell};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::rc::Rc;
 
 use super::Screen;
+use draw::Listing;
 use filter::Filter;
 use kind::Kind;
 
@@ -35,10 +40,23 @@ pub(super) struct FileList {
     pub(super) closed: bool,
     /// The filter, as typed so far.
     pub(super) filter: Filter,
+    /// Where the focus was when `/` started typing, to go back to on `Esc`.
+    filter_from: Option<super::Focus>,
     /// The paths the diff shows, in the list's order: the filter as last applied.
-    pub(super) shown: Vec<String>,
+    shown: Vec<String>,
+    /// The same paths, to look up.
+    shown_set: HashSet<String>,
+    /// Lines added and removed in the files shown.
+    shown_totals: (u32, u32),
     /// Each capture file's kind, in capture order.
     kinds: Vec<Kind>,
+    /// Git's `linguist-generated` answer for the capture, until it comes, with the
+    /// version it is for.
+    attributes: Option<(u64, std::sync::mpsc::Receiver<HashMap<String, bool>>)>,
+    /// Each capture file's index, by path; two for a path the patch names twice.
+    index: HashMap<String, Vec<usize>>,
+    /// The capture's files in the list's order, every folder open.
+    order: Vec<usize>,
     /// Folders closed in the list, by row key.
     collapsed: BTreeSet<String>,
     /// The row under the list's cursor, by key.
@@ -49,12 +67,31 @@ pub(super) struct FileList {
     scrolled_to: Option<String>,
     /// The file the diff's cursor is in.
     pub(super) current: Option<String>,
-    /// The width chosen with `narrow-column` and `widen-column`.
+    /// The width chosen with `narrow-files` and `widen-files`.
     chosen_width: Option<u16>,
     /// The width drawn last frame; 0 when hidden.
     pub(super) drawn_width: u16,
+    /// Whether the last frame was too narrow for the list even with the whole width.
+    pub(super) no_room: bool,
     /// A file to show once the diff, replaced for a new filter, has it.
     pending: Option<String>,
+    /// Counts up when the capture, its kinds or the viewed marks change, so the rows built
+    /// for the last frame are known to be stale.
+    version: u64,
+    /// The rows last built, for the filter as typed, and what they were built from.
+    rows: RefCell<Option<(Built, Rc<Listing>)>>,
+    /// Counts up when the files shown change.
+    shown_version: u64,
+    /// The width the rows of the files shown need, and the versions it was worked out for.
+    shown_width: Cell<Option<(u64, u64, u16)>>,
+}
+
+/// What a listing was built from: when all of it is the same, so are the rows.
+#[derive(Debug)]
+struct Built {
+    version: u64,
+    filter: Filter,
+    collapsed: BTreeSet<String>,
 }
 
 impl FileList {
@@ -62,8 +99,27 @@ impl FileList {
         self.chosen_width
     }
 
+    /// The paths the diff shows, in the list's order.
+    pub(super) fn shown(&self) -> &[String] {
+        &self.shown
+    }
+
+    pub(super) fn is_shown(&self, path: &str) -> bool {
+        self.shown_set.contains(path)
+    }
+
+    /// Lines added and removed in the files the diff shows.
+    pub(super) fn shown_totals(&self) -> (u32, u32) {
+        self.shown_totals
+    }
+
+    /// A viewed mark changed: rows built before are stale.
+    pub(super) fn viewed_changed(&mut self) {
+        self.version += 1;
+    }
+
     /// The list was drawn `width` wide (0: hidden). A chosen width the room could not give
-    /// comes down to what it gave, so the next `narrow-column` narrows what is seen.
+    /// comes down to what it gave, so the next `narrow-files` narrows what is seen.
     pub(super) fn drawn(&mut self, width: u16) {
         self.drawn_width = width;
         if width > 0 {
@@ -71,191 +127,25 @@ impl FileList {
         }
     }
 
+    /// Whether git's answer about `.gitattributes` is in (or will not come).
+    #[cfg(test)]
+    pub(super) fn attributes_read(&self) -> bool {
+        self.attributes.is_none()
+    }
+
+    /// The kind of the capture's file at `path`.
+    #[cfg(test)]
+    pub(super) fn kind_of(&self, path: &str) -> Option<Kind> {
+        self.index.get(path).and_then(|v| v.first()).and_then(|&i| self.kinds.get(i)).copied()
+    }
+
     /// After the diff was replaced for a new capture: come back to the file it was on.
     pub(super) fn retarget(&mut self) {
-        self.pending = self.current.clone().filter(|p| self.shown.contains(p));
+        self.pending = self.current.clone().filter(|p| self.shown_set.contains(p));
     }
 }
 
 impl Screen {
-    /// Classify the capture's files and show them all, in the list's order. Call it when
-    /// the capture is new; the filter stays as it was.
-    pub(super) fn files_for_capture(&mut self) {
-        self.files.kinds = self.capture.files.iter().map(|f| kind::classify(&f.path)).collect();
-        self.files.shown = self.filtered(&self.files.filter.clone());
-        if self.files.current.as_ref().is_none_or(|c| !self.files.shown.contains(c)) {
-            self.files.current = self.files.shown.first().cloned();
-        }
-    }
-
-    /// The capture's paths that pass `filter`, in the list's order.
-    fn filtered(&self, filter: &Filter) -> Vec<String> {
-        let paths: Vec<&str> = self.capture.files.iter().map(|f| f.path.as_str()).collect();
-        let keep = filter.keep(&paths, &self.files.kinds, |p| self.progress.is_viewed(p));
-        tree::order(&paths)
-            .into_iter()
-            .filter(|&i| keep.get(i).copied().unwrap_or(false))
-            .filter_map(|i| paths.get(i).map(|p| (*p).to_owned()))
-            .collect()
-    }
-
-    /// The paths the list shows now: the filter as typed, which the diff takes on `Enter`.
-    pub(super) fn listed(&self) -> Vec<String> {
-        self.filtered(&self.files.filter)
-    }
-
-    /// Show in the diff what the filter lets through, then `show` (or the file the diff was
-    /// on, if it still passes). An unchanged set only moves to `show`.
-    pub(super) fn apply_filter(&mut self, show: Option<String>) -> Result<()> {
-        let shown = self.listed();
-        let target = show.or_else(|| self.files.current.clone()).filter(|p| shown.contains(p));
-        if shown == self.files.shown {
-            if let Some(path) = target {
-                self.goto_file(&path)?;
-            }
-            return Ok(());
-        }
-        self.diff.replace(&self.capture, &shown)?;
-        self.files.shown = shown;
-        self.files.current = target.clone().or_else(|| self.files.shown.first().cloned());
-        self.files.pending = target;
-        Ok(())
-    }
-
-    /// After the diff took more files: go to the file a new filter was waiting to show.
-    pub(super) fn show_pending_file(&mut self) -> Result<()> {
-        let Some(path) = self.files.pending.clone() else { return Ok(()) };
-        if self.diff.paths().contains(&path) {
-            self.files.pending = None;
-            self.goto_file(&path)?;
-        } else if self.diff.files_shown() >= self.files.shown.len() {
-            self.files.pending = None;
-        }
-        Ok(())
-    }
-
-    /// Show `path` in the diff, its heading at the top and the cursor on it. A file the
-    /// filter hides is not in the diff; the footer says so.
-    pub(super) fn goto_file(&mut self, path: &str) -> Result<()> {
-        let Some(index) = self.diff.paths().iter().position(|p| p == path) else {
-            self.status = Some(format!("{path} is hidden by the file filter"));
-            return Ok(());
-        };
-        self.files.current = Some(path.to_owned());
-        if self.diff.selection().is_some() {
-            self.diff.clear_selection()?;
-        }
-        if index == 0 {
-            self.diff.run(Command::FirstSource)?;
-            for _ in 0..2 {
-                self.diff.run(Command::Up)?;
-            }
-            return Ok(());
-        }
-        // From a line of the file, the previous file's heading and back puts this file's
-        // heading at the top; a file with no lines (binary, mode only) is reached by
-        // walking from the first heading.
-        let first = self.capture.file(path).and_then(|file| {
-            let line = |side| file.lines(side).next().map(|(n, _)| (side, n));
-            line(Side::New).or_else(|| line(Side::Old))
-        });
-        if let Some((side, line)) = first
-            && self.diff.reveal(path, side, line).is_ok()
-        {
-            self.diff.run(Command::PreviousFile)?;
-            return self.diff.run(Command::NextFile);
-        }
-        self.diff.run(Command::FirstSource)?;
-        for _ in 0..index {
-            self.diff.run(Command::NextFile)?;
-        }
-        Ok(())
-    }
-
-    /// `n`/`N`: the next or previous file the diff shows.
-    pub(super) fn step_file(&mut self, forward: bool) -> Result<()> {
-        let paths = self.diff.paths().to_vec();
-        let here = self.files.current.as_ref().and_then(|c| paths.iter().position(|p| p == c));
-        let next = match here {
-            Some(i) if forward => i.checked_add(1).filter(|&n| n < paths.len()),
-            Some(i) => i.checked_sub(1),
-            None => Some(0),
-        };
-        if let Some(path) = next.and_then(|n| paths.get(n)).cloned() {
-            return self.goto_file(&path);
-        }
-        self.status = Some(if forward { "last file" } else { "first file" }.into());
-        Ok(())
-    }
-
-    /// Note which file the diff's cursor is in, after it moved. On a heading or between
-    /// hunks the cursor names no file: the first line below it does, so the cursor looks
-    /// there and comes back. A growing selection is left alone.
-    pub(super) fn track_current(&mut self) -> Result<()> {
-        if let Some(lines) = self.diff.cursor()? {
-            self.files.current = Some(lines.path);
-            return Ok(());
-        }
-        if self.diff.selecting() {
-            return Ok(());
-        }
-        let mut moved = 0;
-        let mut found = None;
-        while moved < 3 && found.is_none() {
-            self.diff.run(Command::Down)?;
-            moved += 1;
-            found = self.diff.cursor()?.map(|lines| lines.path);
-        }
-        for _ in 0..moved {
-            self.diff.run(Command::Up)?;
-        }
-        if found.is_some() {
-            self.files.current = found;
-        }
-        Ok(())
-    }
-
-    /// Unsent notes on files the filter hides, so the list can say they are there.
-    pub(super) fn notes_in_hidden_files(&self) -> usize {
-        self.store
-            .pending()
-            .iter()
-            .filter(|note| note.scope != NoteScope::General && !self.files.shown.contains(&note.file_path))
-            .count()
-    }
-
-    /// `hide-viewed`: hide the viewed files, or show them again.
-    pub(super) fn toggle_hide_viewed(&mut self) -> Result<()> {
-        self.files.filter.hide_viewed = !self.files.filter.hide_viewed;
-        self.apply_filter(None)?;
-        let viewed = self.capture.files.iter().filter(|f| self.progress.is_viewed(&f.path)).count();
-        self.status = Some(if self.files.filter.hide_viewed {
-            format!("hiding {viewed} viewed file{}", if viewed == 1 { "" } else { "s" })
-        } else {
-            "showing viewed files".to_owned()
-        });
-        Ok(())
-    }
-
-    /// After `path` was marked viewed or not: with viewed files hidden, it leaves the list
-    /// and the diff goes on to the next file.
-    pub(super) fn after_viewed_change(&mut self, path: &str) -> Result<()> {
-        if !self.files.filter.hide_viewed {
-            return Ok(());
-        }
-        let at = self.files.shown.iter().position(|p| p == path);
-        let next = at.and_then(|i| {
-            self.files
-                .shown
-                .iter()
-                .skip(i + 1)
-                .chain(self.files.shown.iter().take(i))
-                .find(|p| *p != path)
-                .cloned()
-        });
-        self.apply_filter(next)
-    }
-
     /// Whether the list wants to show: not closed, and more than one file or a filter.
     pub(super) fn files_wanted(&self) -> bool {
         !self.files.closed

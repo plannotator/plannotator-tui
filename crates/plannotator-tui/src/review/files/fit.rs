@@ -107,17 +107,30 @@ pub(crate) struct Shown {
     pub(crate) counts: bool,
 }
 
-/// What a file row whose name needs `name` columns shows in `room` columns: everything if
-/// it fits, else the counts give way, then the status letter. `counts` and `status` are the
-/// columns each takes, its gap included.
-pub(crate) fn shown(name: usize, room: usize, status: usize, counts: usize) -> Shown {
-    if name + status + counts <= room {
-        Shown { status: true, counts: true }
-    } else if name + status <= room {
-        Shown { status: true, counts: false }
-    } else {
-        Shown { status: false, counts: false }
+/// Which columns every file row shows, decided once for the whole list so they line up.
+/// `names` is what each file row needs for its name, indent included; `status` and
+/// `counts` are the columns each takes, its gap included. The counts go first, then the
+/// status letter, but a column goes only when that shows more names whole; on a tie the
+/// list keeps it.
+pub(crate) fn columns(names: &[usize], room: usize, status: usize, counts: usize) -> Shown {
+    let options = [
+        Shown { status: true, counts: true },
+        Shown { status: true, counts: false },
+        Shown { status: false, counts: false },
+    ];
+    let cut = |shown: &Shown| {
+        let right = if shown.status { status } else { 0 } + if shown.counts { counts } else { 0 };
+        names.iter().filter(|&&name| name + right > room).count()
+    };
+    let mut best = Shown { status: true, counts: true };
+    let mut fewest = cut(&best);
+    for option in options.into_iter().skip(1) {
+        let n = cut(&option);
+        if n < fewest {
+            (best, fewest) = (option, n);
+        }
     }
+    best
 }
 
 #[cfg(test)]
@@ -157,10 +170,15 @@ mod tests {
     }
 
     #[test]
-    fn counts_give_way_first_then_the_status_letter() {
-        assert_eq!(shown(10, 30, 2, 9), Shown { status: true, counts: true });
-        assert_eq!(shown(20, 25, 2, 9), Shown { status: true, counts: false });
-        assert_eq!(shown(24, 25, 2, 9), Shown { status: false, counts: false });
+    fn columns_go_for_every_row_and_only_when_that_shows_more_names_whole() {
+        // Every name fits with everything.
+        assert_eq!(columns(&[10, 18], 30, 2, 9), Shown { status: true, counts: true });
+        // One name fits only without the counts: no row shows them.
+        assert_eq!(columns(&[10, 20], 25, 2, 9), Shown { status: true, counts: false });
+        // A name that fits only with nothing beside it: neither column for any row.
+        assert_eq!(columns(&[10, 24], 25, 2, 9), Shown { status: false, counts: false });
+        // A name too long for any choice keeps the columns it cannot gain from.
+        assert_eq!(columns(&[10, 60], 25, 2, 9), Shown { status: true, counts: true });
     }
 
     #[test]

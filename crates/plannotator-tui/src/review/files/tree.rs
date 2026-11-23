@@ -32,7 +32,8 @@ struct Folder<'a> {
     files: Vec<(&'a str, usize)>,
 }
 
-/// The rows for `paths`, with the folders in `collapsed` (by key) closed.
+/// The rows for `paths`, with the folders in `collapsed` (by path) closed. A row that is a
+/// chain of folders is closed when any of them is.
 pub(crate) fn rows(paths: &[&str], collapsed: &BTreeSet<String>) -> Vec<Row> {
     let mut root = Folder::default();
     for (index, path) in paths.iter().enumerate() {
@@ -61,7 +62,8 @@ pub(crate) fn order(paths: &[&str]) -> Vec<usize> {
 
 /// Names as the browser's `localeCompare` roughly orders them: case aside first.
 fn by_name(a: &str, b: &str) -> std::cmp::Ordering {
-    a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b))
+    // Compared a character at a time, without a lowercase copy of either name.
+    a.chars().flat_map(char::to_lowercase).cmp(b.chars().flat_map(char::to_lowercase)).then_with(|| a.cmp(b))
 }
 
 fn walk(folder: &Folder<'_>, prefix: &str, depth: usize, collapsed: &BTreeSet<String>, rows: &mut Vec<Row>) {
@@ -69,15 +71,18 @@ fn walk(folder: &Folder<'_>, prefix: &str, depth: usize, collapsed: &BTreeSet<St
     folders.sort_by(|a, b| by_name(a.0, b.0));
     for (name, mut child) in folders {
         let mut label = format!("{name}/");
+        // A folder closed when the row was a longer or a shorter chain stays closed.
+        let mut closed = collapsed.contains(&format!("{prefix}{label}"));
         while child.files.is_empty()
             && child.folders.len() == 1
             && let Some((only, grandchild)) = child.folders.iter().next()
         {
             label = format!("{label}{only}/");
+            closed |= collapsed.contains(&format!("{prefix}{label}"));
             child = grandchild;
         }
         let key = format!("{prefix}{label}");
-        let expanded = !collapsed.contains(&key);
+        let expanded = !closed;
         rows.push(Row { depth, label, key: key.clone(), node: Node::Folder { expanded } });
         if expanded {
             walk(child, &key, depth + 1, collapsed, rows);
@@ -125,6 +130,18 @@ mod tests {
                 "README.md",
             ]
         );
+    }
+
+    #[test]
+    fn a_closed_folder_stays_closed_when_its_chain_grows_or_shrinks() {
+        // Closed as `a/b/`, while `a/` held another folder.
+        let closed = ["a/b/"];
+        assert_eq!(drawn(&["a/b/one.rs", "a/c/two.rs"], &closed), ["a/", "  b/", "  c/", "    two.rs"]);
+        // A filter leaves only `a/b/`: the row is the chain `a/b/`, still closed.
+        assert_eq!(drawn(&["a/b/one.rs"], &closed), ["a/b/"]);
+        // Closed as the chain `a/b/c/`; a filter splits the chain at `a/`: `b/c/` stays closed.
+        let closed = ["a/b/c/"];
+        assert_eq!(drawn(&["a/b/c/one.rs", "a/top.rs"], &closed), ["a/", "  b/c/", "  top.rs"]);
     }
 
     #[test]

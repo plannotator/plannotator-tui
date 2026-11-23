@@ -129,7 +129,7 @@ impl Screen {
                         "show only some kinds: code, tests, docs, config, generated",
                     ),
                     (key(&[Action::HideViewed]), "hide viewed files, or show them again"),
-                    (key(&[Action::NarrowColumn, Action::WidenColumn]), "narrow / widen the file list"),
+                    (key(&[Action::NarrowFiles, Action::WidenFiles]), "narrow / widen the file list"),
                 ],
             ),
             (

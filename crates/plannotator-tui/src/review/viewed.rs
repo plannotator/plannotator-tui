@@ -10,7 +10,6 @@
 use std::path::Path;
 
 use anyhow::Result;
-use diffs_rs::engine::Command;
 use plannotator_tui_review::progress;
 
 use super::Screen;
@@ -41,21 +40,13 @@ impl Screen {
         path.is_some_and(|p| self.progress.is_viewed(&p))
     }
 
-    /// The file under the selection or the cursor. On a file or hunk heading, which the
-    /// viewer does not tie to a file, the cursor steps down to the first line below it.
+    /// The file under the selection or the cursor, on a heading or a binary file's note
+    /// too (`diff::place`).
     pub(super) fn file_under_cursor(&mut self) -> Result<Option<String>> {
-        let mut path = match self.diff.selection() {
-            Some(lines) => Some(lines.path),
-            None => self.diff.cursor()?.map(|lines| lines.path),
-        };
-        for _ in 0..3 {
-            if path.is_some() {
-                break;
-            }
-            self.diff.run(Command::Down)?;
-            path = self.diff.cursor()?.map(|lines| lines.path);
+        if let Some(lines) = self.diff.selection() {
+            return Ok(Some(lines.path));
         }
-        Ok(path)
+        Ok(self.diff.cursor_file()?.and_then(|i| self.diff.paths().get(i).cloned()))
     }
 
     /// `x`: flip the file's mark and save it.

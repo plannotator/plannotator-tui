@@ -85,7 +85,7 @@ impl Screen {
         let path = note.file_path.clone();
         let (side, line) = (note.side, note.line_start);
         let on_lines = note.scope == NoteScope::Line && !notes::is_outdated(note);
-        if note.scope != NoteScope::General && self.whole.is_none() && !self.files.shown.contains(&path) {
+        if note.scope != NoteScope::General && self.whole.is_none() && !self.files.is_shown(&path) {
             self.status = Some(format!("{path} is hidden by the file filter"));
             return;
         }

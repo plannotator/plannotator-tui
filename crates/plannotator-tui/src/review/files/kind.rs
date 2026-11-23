@@ -43,169 +43,28 @@ impl Kind {
     }
 }
 
-/// Plannotator's `DEFAULT_GENERATED_PATTERNS`, matched against the last path segment:
-/// whole names, then `*.`-suffixes with at least one character before the suffix.
-const GENERATED_NAMES: &[&str] = &[
-    "package-lock.json",
-    "npm-shrinkwrap.json",
-    "yarn.lock",
-    "pnpm-lock.yaml",
-    "bun.lock",
-    "bun.lockb",
-    "Cargo.lock",
-    "Gemfile.lock",
-    "composer.lock",
-    "poetry.lock",
-    "uv.lock",
-    "Pipfile.lock",
-    "go.sum",
-    "flake.lock",
-    "packages.lock.json",
-];
-const GENERATED_SUFFIXES: &[&str] = &[".min.js", ".min.css", ".map"];
+mod lists;
 
-/// Lockfiles and generated sources the browser does not list yet (linguist's
-/// `generated.rb`): whole names, then suffixes.
-const MORE_GENERATED_NAMES: &[&str] = &[
-    "deno.lock",
-    "pdm.lock",
-    "mix.lock",
-    "pubspec.lock",
-    "Podfile.lock",
-    "Package.resolved",
-    "gradle.lockfile",
-    "go.work.sum",
-];
-const MORE_GENERATED_SUFFIXES: &[&str] = &[
-    ".pb.go",
-    "_pb2.py",
-    "_pb2_grpc.py",
-    ".pb.h",
-    ".pb.cc",
-    ".g.dart",
-    ".freezed.dart",
-    ".designer.cs",
-    ".generated.ts",
-    ".generated.js",
-];
-
-/// Folders whose files are vendored or built (linguist's `vendor.yml`), compared with each
-/// folder of the path.
-const GENERATED_FOLDERS: &[&str] =
-    &["vendor", "node_modules", "third_party", "third-party", "dist", "__generated__"];
-
-/// Plannotator's `TEST_FOLDERS`, compared case-insensitively with each folder of the path.
-const TEST_FOLDERS: &[&str] = &[
-    "__tests__",
-    "__snapshots__",
-    "__fixtures__",
-    "__mocks__",
-    "test",
-    "tests",
-    "spec",
-    "e2e",
-    "fixtures",
-    "testdata",
-    "testfixtures",
-];
-
-/// Plannotator's `CODE_EXT`: a test marker counts only before one of these, so
-/// `openapi.spec.yaml` and `load_test.md` are not tests.
-const TEST_CODE_EXT: &[&str] = &[
-    "js", "jsx", "ts", "tsx", "cjs", "cjsx", "cts", "ctsx", "mjs", "mjsx", "mts", "mtsx", "rb", "py", "go",
-    "rs", "java", "kt", "kts", "swift", "cs", "fs", "ex", "exs", "php", "scala", "dart", "groovy", "clj",
-    "cljc", "cljs", "lua", "erl", "hs", "ml", "jl", "r", "c", "cc", "cpp", "h", "hpp", "m", "mm", "vue",
-    "svelte",
-];
-
-/// The markers of `foo.test.ts`, `foo.spec.rb`, `login.cy.ts`, `app.e2e.ts`, `t.test-d.ts`.
-const TEST_MARKERS: &[&str] = &["test", "spec", "cy", "e2e", "test-d"];
-
-/// Extensions of source code, beyond the test markers' list.
-const CODE_EXT: &[&str] = &[
-    "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd", "sql", "html", "htm", "css", "scss", "sass", "less",
-    "astro", "zig", "nim", "pl", "pm", "gradle", "tf", "hcl", "nix", "proto", "graphql", "gql", "elm", "fsx",
-    "vb", "asm", "s", "cxx", "hh", "hxx", "ino", "cu", "metal", "glsl", "wgsl", "hlsl", "sol", "v", "sv",
-    "vhd", "f90", "cob", "d", "cr", "rkt", "scm", "lisp", "el", "vim", "tcl", "awk", "ipynb",
-];
-
-/// Documentation by extension (linguist's prose languages and `documentation.yml`).
-const DOCS_EXT: &[&str] =
-    &["md", "mdx", "markdown", "rst", "adoc", "asciidoc", "txt", "org", "rdoc", "pod", "tex"];
-
-/// Documentation by name, extension or none: `README`, `README.md`, `CHANGELOG.rst`.
-const DOCS_NAMES: &[&str] = &[
-    "readme",
-    "changelog",
-    "changes",
-    "history",
-    "license",
-    "licence",
-    "copying",
-    "notice",
-    "authors",
-    "contributors",
-    "contributing",
-    "code_of_conduct",
-    "security",
-    "install",
-];
-
-/// Folders of documentation (linguist's `documentation.yml`).
-const DOCS_FOLDERS: &[&str] = &["docs", "doc", "documentation"];
-
-/// Configuration by extension.
-const CONFIG_EXT: &[&str] = &[
-    "json",
-    "jsonc",
-    "json5",
-    "yaml",
-    "yml",
-    "toml",
-    "ini",
-    "cfg",
-    "conf",
-    "properties",
-    "xml",
-    "plist",
-    "env",
-    "cmake",
-    "mk",
-    "editorconfig",
-];
-
-/// Configuration and build files by whole name, compared case-insensitively.
-const CONFIG_NAMES: &[&str] = &[
-    "dockerfile",
-    "containerfile",
-    "makefile",
-    "gnumakefile",
-    "justfile",
-    "procfile",
-    "gemfile",
-    "rakefile",
-    "pipfile",
-    "brewfile",
-    "vagrantfile",
-    "jenkinsfile",
-    "cmakelists.txt",
-    "requirements.txt",
-    "go.mod",
-    "go.work",
-    "codeowners",
-    "build",
-    "build.bazel",
-    "workspace",
-    "module.bazel",
-];
+use lists::{
+    CODE_EXT, CONFIG_EXT, CONFIG_NAMES, DOCS_EXT, DOCS_FOLDERS, DOCS_NAMES, GENERATED_FOLDERS,
+    GENERATED_NAMES, GENERATED_SUFFIXES, MORE_GENERATED_NAMES, MORE_GENERATED_SUFFIXES, TEST_CODE_EXT,
+    TEST_FOLDERS, TEST_MARKERS,
+};
 
 /// The kind of the file at `path`, a repository path with `/` between folders.
 pub(crate) fn classify(path: &str) -> Kind {
+    classify_with(path, None)
+}
+
+/// [`classify`], with `.gitattributes` `linguist-generated` when git has an opinion on the
+/// path: `Some(true)` makes it generated, `Some(false)` keeps it from being generated by
+/// name, as in Plannotator.
+pub(crate) fn classify_with(path: &str, generated: Option<bool>) -> Kind {
     let (folders, name) = match path.rsplit_once('/') {
         Some((folders, name)) => (folders.split('/').collect::<Vec<_>>(), name),
         None => (Vec::new(), path),
     };
-    if is_generated(&folders, name) {
+    if generated.unwrap_or_else(|| is_generated(&folders, name)) {
         Kind::Generated
     } else if is_test(&folders, name) {
         Kind::Test
@@ -221,7 +80,16 @@ fn is_generated(folders: &[&str], name: &str) -> bool {
         || suffix(GENERATED_SUFFIXES)
         || MORE_GENERATED_NAMES.contains(&name)
         || suffix(MORE_GENERATED_SUFFIXES)
-        || folders.iter().any(|f| GENERATED_FOLDERS.contains(f))
+        || folders
+            .iter()
+            .enumerate()
+            .any(|(i, f)| GENERATED_FOLDERS.contains(f) && !(*f == "dist" && under_src(folders, i)))
+}
+
+/// Whether a folder above `folders[at]` is `src`: a `dist` there is a module of the source
+/// (`src/dist/mod.rs`), not a build's output.
+fn under_src(folders: &[&str], at: usize) -> bool {
+    folders.iter().take(at).any(|f| *f == "src")
 }
 
 /// Plannotator's `isTestPath`: a test file name, or a test folder above it.
@@ -277,8 +145,10 @@ fn is_source_set_test(folder: &str) -> bool {
 }
 
 /// Not generated and not a test: config, docs, code or other, by name and extension. A
-/// documentation name (`README`, `LICENSE-MIT`) counts only without a code extension, so
-/// `security.ts` stays code; code in a docs folder stays code too.
+/// documentation name (`README`, `LICENSE-MIT`) counts only without a code or data
+/// extension, so `security.ts` stays code and `.github/workflows/security.yml` config, and
+/// without any extension only capitalised, so `scripts/install` is not documentation. Code
+/// and data in a docs folder stay code and config.
 fn by_name(folders: &[&str], name: &str) -> Kind {
     let lower = name.to_lowercase();
     let dotfile = lower.starts_with('.');
@@ -300,14 +170,16 @@ fn by_name(folders: &[&str], name: &str) -> Kind {
     if ext.is_some_and(|e| TEST_CODE_EXT.contains(&e) || CODE_EXT.contains(&e)) {
         return Kind::Code;
     }
-    let doc_name = DOCS_NAMES.iter().any(|doc| {
-        stem.strip_prefix(doc).is_some_and(|rest| rest.is_empty() || rest.starts_with(['-', '_']))
-    });
-    if doc_name || folders.iter().any(|f| DOCS_FOLDERS.contains(&f.to_lowercase().as_str())) {
-        return Kind::Docs;
-    }
     if dotfile || ext.is_some_and(|e| CONFIG_EXT.contains(&e)) {
         return Kind::Config;
+    }
+    let capitalised = name.chars().next().is_some_and(char::is_uppercase);
+    let doc_name = (ext.is_some() || capitalised)
+        && DOCS_NAMES.iter().any(|doc| {
+            stem.strip_prefix(doc).is_some_and(|rest| rest.is_empty() || rest.starts_with(['-', '_']))
+        });
+    if doc_name || folders.iter().any(|f| DOCS_FOLDERS.contains(&f.to_lowercase().as_str())) {
+        return Kind::Docs;
     }
     Kind::Other
 }
