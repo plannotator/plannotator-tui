@@ -8,6 +8,7 @@ use ratatui::crossterm::event::{
 use ratatui::text::Line;
 use unicode_width::UnicodeWidthChar;
 
+use super::drag::MouseDrag;
 use super::menu::ReviewAction;
 use super::selection::Selection;
 use super::send::SendState;
@@ -27,6 +28,18 @@ impl App {
     pub(crate) fn handle_event(&mut self, event: &Event) -> Result<()> {
         // Keys can reach any row (`G`, a page down, a click), so input sees the whole layout.
         self.open.layout.finish();
+        // A key, a paste or a resize stops the edge timer; the next report starts it again.
+        if !matches!(event, Event::Mouse(_) | Event::FocusGained) {
+            self.mouse_drag = None;
+        }
+        let kept;
+        let event = if let Event::Mouse(mouse) = event {
+            let Some(mouse) = crate::ui::drag::on_screen(*mouse, self.geometry.screen) else { return Ok(()) };
+            kept = Event::Mouse(mouse);
+            &kept
+        } else {
+            event
+        };
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => match &self.mode {
                 Mode::Browse => self.browse_key(*key),
@@ -545,6 +558,10 @@ impl App {
     }
 
     fn mouse(&mut self, mouse: MouseEvent) -> Result<()> {
+        // A press starts a new drag and a release ends one.
+        if matches!(mouse.kind, MouseEventKind::Down(_) | MouseEventKind::Up(_)) {
+            self.mouse_drag = None;
+        }
         match mouse.kind {
             MouseEventKind::ScrollDown if self.in_tree(mouse.column, mouse.row) => self.tree_scroll_by(3),
             MouseEventKind::ScrollUp if self.in_tree(mouse.column, mouse.row) => self.tree_scroll_by(-3),
@@ -608,23 +625,9 @@ impl App {
                 self.cursor = pos;
                 self.pending = None;
                 self.selection = Some(Selection::start(pos));
+                self.mouse_drag = Some(MouseDrag::pressed(mouse));
             }
-            MouseEventKind::Drag(MouseButton::Left) => {
-                if !self.selection.is_some_and(|s| s.dragging) {
-                    return Ok(());
-                }
-                let doc = self.geometry.doc;
-                if mouse.row < doc.y {
-                    self.scroll_by(-1);
-                } else if mouse.row >= doc.bottom() {
-                    self.scroll_by(1);
-                }
-                if let Some(pos) = self.doc_position(mouse.column, mouse.row, true)
-                    && let Some(sel) = self.selection.as_mut()
-                {
-                    sel.set_head(pos);
-                }
-            }
+            MouseEventKind::Drag(MouseButton::Left) => self.drag_to(mouse),
             MouseEventKind::Up(MouseButton::Left) if self.selection.is_some_and(|s| s.dragging) => {
                 self.finish_selection();
             }
@@ -674,7 +677,7 @@ impl App {
 
     /// Screen cell -> document (row, column). With `clamp`, positions outside the
     /// document area snap to its nearest edge so a drag can leave the area.
-    fn doc_position(&self, column: u16, row: u16, clamp: bool) -> Option<(usize, usize)> {
+    pub(super) fn doc_position(&self, column: u16, row: u16, clamp: bool) -> Option<(usize, usize)> {
         let doc = self.geometry.doc;
         let inside = column >= doc.x && column < doc.right() && row >= doc.y && row < doc.bottom();
         if !inside && !clamp {

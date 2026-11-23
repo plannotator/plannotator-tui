@@ -82,7 +82,14 @@ impl App {
         ])
         .areas(body);
         let old_height = self.geometry.doc.height;
-        self.geometry = Geometry { tree, doc, width: area.width, column_room: room, ..Geometry::default() };
+        self.geometry = Geometry {
+            screen: frame.area(),
+            tree,
+            doc,
+            width: area.width,
+            column_room: room,
+            ..Geometry::default()
+        };
         self.settle_layout_for_view();
 
         // A layout is at least one column wide, so an empty pane must not count as a resize.

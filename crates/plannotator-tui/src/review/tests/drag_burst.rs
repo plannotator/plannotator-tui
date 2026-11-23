@@ -1,6 +1,7 @@
 //! A drag as a terminal in a window reports it: a report for each pixel the pointer moves, so
 //! many for one cell, and many between two frames. Inside the pane the view never moves; held
-//! past its edge it scrolls a line per step of a timer, and no further than the drag's hunk.
+//! past its edge it scrolls a line per step of a timer, and no further than the drag's hunk;
+//! a report outside the terminal is ignored.
 //! On a long diff at 160×45, where the diff is split.
 
 use ratatui::buffer::Buffer;
@@ -8,7 +9,7 @@ use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 use super::*;
 use crate::review::diff::Lines;
-use crate::review::mouse::edge::STEP;
+use crate::ui::drag::STEP;
 
 const COLS: u16 = 160;
 const ROWS: u16 = 45;
@@ -122,8 +123,8 @@ fn reports_in_one_burst_end_as_the_same_reports_one_per_frame() {
     let pane = framed.geometry.diff;
     // Down past the bottom, up past the top, and back to the middle.
     let path: Vec<(u16, u16)> = [
-        wiggle(from, (from.0, pane.bottom() + 1)),
-        wiggle((from.0, pane.bottom() + 1), (from.0, pane.y - 1)),
+        wiggle(from, (from.0, pane.bottom())),
+        wiggle((from.0, pane.bottom()), (from.0, pane.y - 1)),
         wiggle((from.0, pane.y - 1), (from.0, from.1 + 6)),
     ]
     .concat();
@@ -177,9 +178,9 @@ fn held_past_the_bottom_the_view_scrolls_a_line_per_step_however_many_reports() 
     let last =
         |view: &[Option<(String, Option<u32>)>]| view.last().cloned().flatten().and_then(|(_, line)| line);
     let bottom = last(&before).expect("a line on the last row");
-    // Hundreds of reports past the bottom, along it and below it: none scrolls by itself.
+    // Hundreds of reports past the bottom, along the footer row: none scrolls by itself.
     for k in 0..300u16 {
-        moved(&mut screen, (from.0 + k % 7, pane.bottom() + k % 2));
+        moved(&mut screen, (from.0 + k % 7, pane.bottom()));
     }
     assert_eq!(view(&mut screen), before);
     assert!(screen.held_at_edge());
@@ -206,7 +207,7 @@ fn held_past_the_bottom_the_view_stops_at_the_end_of_the_drags_hunk() {
     let from = cell_of(&mut screen, 20);
     let pane = screen.geometry.diff;
     report(&mut screen, MouseEventKind::Down(MouseButton::Left), from);
-    moved(&mut screen, (from.0, pane.bottom() + 1));
+    moved(&mut screen, (from.0, pane.bottom()));
     let reached = screen.selected_lines().expect("dragging").last;
     let start = Instant::now();
     let mut steps = 0;
@@ -221,7 +222,7 @@ fn held_past_the_bottom_the_view_stops_at_the_end_of_the_drags_hunk() {
         shown.iter().flatten().all(|(path, _)| path == "file0.py"),
         "the view stayed in file0.py: {shown:?}"
     );
-    report(&mut screen, MouseEventKind::Up(MouseButton::Left), (from.0, pane.bottom() + 1));
+    report(&mut screen, MouseEventKind::Up(MouseButton::Left), (from.0, pane.bottom()));
     assert_eq!(screen.diff.selection(), Some(new_lines(20, 92)));
 }
 
@@ -245,7 +246,7 @@ fn other_buttons_the_horizontal_wheel_and_focus_reports_during_a_drag_scroll_not
         MouseEventKind::ScrollRight,
     ];
     for kind in kinds {
-        for row in [pane.y - 1, from.1, pane.bottom() - 1, pane.bottom(), pane.bottom() + 5] {
+        for row in [pane.y - 1, from.1, pane.bottom() - 1, pane.bottom()] {
             report(&mut screen, kind, (to.0, row));
         }
     }
@@ -254,4 +255,35 @@ fn other_buttons_the_horizontal_wheel_and_focus_reports_during_a_drag_scroll_not
     assert_eq!(view(&mut screen), before);
     report(&mut screen, MouseEventKind::Up(MouseButton::Left), to);
     assert_eq!(screen.diff.selection(), Some(new_lines(20, 24)));
+}
+
+#[test]
+fn reports_outside_the_terminal_are_ignored_and_a_release_there_still_ends_the_drag() {
+    let (_fixture, mut screen) = open("burst-off-screen");
+    let from = cell_of(&mut screen, 20);
+    let to = cell_of(&mut screen, 24);
+    report(&mut screen, MouseEventKind::Down(MouseButton::Left), from);
+    for at in wiggle(from, to) {
+        moved(&mut screen, at);
+    }
+    let before = view(&mut screen);
+    // Pixel positions, rows past the terminal, and the largest a report can hold: none is
+    // the pointer past the pane's bottom, and none drops the drag.
+    let nonsense = [(to.0, ROWS), (to.0, 900), (1200, to.1), (u16::MAX, u16::MAX)];
+    for at in nonsense {
+        for kind in [
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Moved,
+        ] {
+            report(&mut screen, kind, at);
+        }
+    }
+    assert!(!screen.held_at_edge());
+    assert!(!screen.step_at_edge(Instant::now()).expect("step"));
+    assert_eq!(view(&mut screen), before);
+    assert_eq!(screen.selected_lines(), Some(new_lines(20, 24)));
+    report(&mut screen, MouseEventKind::Up(MouseButton::Left), (to.0, 900));
+    assert_eq!(screen.diff.selection(), Some(new_lines(20, 24)));
+    assert_eq!(screen.selected_lines(), screen.diff.selection(), "no drag is held");
 }

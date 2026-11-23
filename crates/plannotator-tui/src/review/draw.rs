@@ -85,7 +85,7 @@ impl Screen {
             }
             None => (Rect::default(), main),
         };
-        self.geometry = Geometry { diff, rail, files, ..Geometry::default() };
+        self.geometry = Geometry { screen: area, diff, rail, files, ..Geometry::default() };
         self.dividers.notes_drawn(rail_width);
         self.dividers.place(files, rail);
         self.draw_header(frame, header);
