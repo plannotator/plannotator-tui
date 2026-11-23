@@ -32,11 +32,18 @@ impl Screen {
             self.status = Some(format!("{path} is hidden by the file filter"));
             return Ok(());
         };
+        self.goto_index(index)
+    }
+
+    /// Show the diff's file `index`, its heading at the top and the cursor on it. By index,
+    /// as two files can share a path (a symlink deleted and a file added in its place).
+    pub(in crate::review) fn goto_index(&mut self, index: usize) -> Result<()> {
+        let Some(path) = self.diff.paths().get(index).cloned() else { return Ok(()) };
         if self.diff.selection().is_some() {
             self.diff.clear_selection()?;
         }
         self.diff.show_heading(index)?;
-        self.files.current = Some(path.to_owned());
+        self.files.current = Some(path);
         Ok(())
     }
 

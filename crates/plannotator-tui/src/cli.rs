@@ -619,15 +619,23 @@ pub(crate) fn with_terminal<T>(
     let mut terminal = ratatui::init();
     #[cfg(unix)]
     crate::hangup::watch();
+    // ratatui's hook leaves the alternate screen and raw mode on a panic. The modes this app
+    // turns on go first, or the shell is left with mouse, focus and paste reports; the hook
+    // is in place before any of them is on. Whether the keyboard flags were pushed is only
+    // known once the terminal answers below.
+    let pushed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flags = std::sync::Arc::clone(&pushed);
+    std::panic::set_hook(release_first(
+        move || release_input(flags.load(std::sync::atomic::Ordering::Acquire)),
+        std::panic::take_hook(),
+    ));
+    crate::layout::keep_hook_off_layout_threads();
     execute!(stdout(), EnableMouseCapture)?;
     // Shift+Enter is only distinguishable from Enter where the kitty keyboard protocol
     // holds end to end (terminal, and any multiplexer in between). Ask for it; the flag
     // gates the compose box's hint so it never advertises a key that cannot arrive.
     let shift_enter = ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
-    // ratatui's hook leaves the alternate screen and raw mode on a panic; the modes this
-    // app turns on go first, or the shell is left with mouse, focus and paste reports.
-    std::panic::set_hook(release_first(move || release_input(shift_enter), std::panic::take_hook()));
-    crate::layout::keep_hook_off_layout_threads();
+    pushed.store(shift_enter, std::sync::atomic::Ordering::Release);
     claim_input(shift_enter);
     let result = run(&mut terminal, Session { config, shift_enter });
     release_input(shift_enter);

@@ -61,12 +61,3 @@ strip = true
 inherits = "release"
 debug = 1
 strip = false
-
-# Until diffs-rs publishes `Engine::cursor_row` and `Engine::row_at` (plannotator/diffs-rs,
-# branch feat/cursor-place): the viewer and its forks from that branch, so Unix builds still
-# share one copy of the grammar engine.
-[patch.crates-io]
-diffs-rs = { git = "https://github.com/plannotator/diffs-rs", branch = "feat/cursor-place" }
-diffs-fancy-regex = { git = "https://github.com/plannotator/diffs-rs", branch = "feat/cursor-place" }
-diffs-syntect = { git = "https://github.com/plannotator/diffs-rs", branch = "feat/cursor-place" }
-diffs-two-face = { git = "https://github.com/plannotator/diffs-rs", branch = "feat/cursor-place" }

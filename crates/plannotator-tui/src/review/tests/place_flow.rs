@@ -463,3 +463,34 @@ fn diff_rows(screen: &mut Screen, cols: u16, rows: u16) -> Vec<String> {
     let shown = frame(screen, cols, rows);
     shown.iter().map(|row| diff_side(screen, row)).collect()
 }
+
+#[test]
+fn ctrl_n_goes_past_both_files_of_a_path_and_counts_the_path_once() {
+    // gg is two files: the symlink deleted and a file added in its place.
+    let fixture = every_kind("place-twice");
+    let mut screen = fixture.open();
+    frame(&mut screen, 120, 30);
+    let paths = screen.diff.paths().to_vec();
+    let gg: Vec<usize> = (0..paths.len()).filter(|&i| paths[i] == "gg").collect();
+    assert_eq!(gg.len(), 2, "{paths:?}");
+    for path in &paths {
+        if path != "gg" && path != "hh.txt" {
+            screen.progress.set(path, true).expect("mark");
+        }
+    }
+    screen.goto_index(gg[0]).expect("gg");
+    assert_eq!(screen.diff.cursor_file(), Some(gg[0]));
+    for _ in 0..3 {
+        ctrl_n(&mut screen);
+        assert_eq!(engine_file(&screen), "hh.txt", "ctrl+n goes past both of gg's files");
+        assert_eq!(screen.status.as_deref(), Some("hh.txt \u{b7} 2 not viewed"));
+        same_file(&screen, "on hh.txt");
+        ctrl_n(&mut screen);
+        assert_eq!(screen.diff.cursor_file(), Some(gg[0]), "back round to gg's first file");
+        assert_eq!(screen.status.as_deref(), Some("gg \u{b7} 2 not viewed"));
+    }
+    // From gg's second file too.
+    screen.goto_index(gg[1]).expect("gg");
+    ctrl_n(&mut screen);
+    assert_eq!(engine_file(&screen), "hh.txt");
+}

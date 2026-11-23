@@ -79,24 +79,31 @@ impl Screen {
         if paths.is_empty() {
             return Ok(());
         }
-        // By the viewer's index: a symlink replaced by a file is two files of one path.
+        // By the viewer's index: a symlink replaced by a file is two files of one path, and
+        // both are where the cursor is.
         let here = match self.diff.selection() {
             Some(lines) => paths.iter().position(|q| *q == lines.path),
             None => self.diff.cursor_file(),
         };
+        let here_path = here.and_then(|i| paths.get(i));
         let count = paths.len();
         let start = here.unwrap_or(if forward { count - 1 } else { 0 });
         let target = (1..=count)
             .map(|step| if forward { (start + step) % count } else { (start + count - step % count) % count })
-            .find(|&i| paths.get(i).is_some_and(|p| !self.progress.is_viewed(p)));
-        let Some(index) = target.filter(|&i| Some(i) != here) else {
+            .find(|&i| paths.get(i).is_some_and(|p| Some(p) != here_path && !self.progress.is_viewed(p)));
+        let Some(index) = target else {
             let all = paths.iter().all(|p| self.progress.is_viewed(p));
             self.status = Some(if all { "every file is viewed" } else { "no other file to view" }.into());
             return Ok(());
         };
+        self.goto_index(index)?;
         let path = paths.get(index).cloned().unwrap_or_default();
-        self.goto_file(&path)?;
-        let left = paths.iter().filter(|p| !self.progress.is_viewed(p)).count();
+        // Each path once: its mark is one for both of its files.
+        let left = paths
+            .iter()
+            .filter(|p| !self.progress.is_viewed(p))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
         self.status = Some(format!("{path} \u{b7} {left} not viewed"));
         Ok(())
     }
