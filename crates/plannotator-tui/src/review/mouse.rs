@@ -282,8 +282,15 @@ pub(super) fn selection_bg() -> Color {
 /// selection's underline is taken off (a search match, bold as well, keeps its own), and
 /// the pane takes the selection background up to its end: the split's middle line, which
 /// the viewer draws `(width - 1) / 2` cells into the code area, or else the pane's edge.
+///
+/// Rows strictly between the first and the last selected row are filled too, so the
+/// selection reads as one block: in the unified view the other side's lines sit among the
+/// selected ones (a removed line inside new lines). They are only drawn so; the note still
+/// covers the selected side's lines alone.
 pub(super) fn tint_selection(buf: &mut Buffer, area: Rect, cursor_selected: bool) {
     let bg = selection_bg();
+    // Each selected pane: its columns and its rows.
+    let mut panes: Vec<(u16, u16, Vec<u16>)> = Vec::new();
     let bar = |buf: &Buffer, x: u16, y: u16| buf.cell((x, y)).is_some_and(|c| c.symbol() == "\u{2502}");
     for y in area.top()..area.bottom() {
         let mut x = area.left();
@@ -312,7 +319,21 @@ pub(super) fn tint_selection(buf: &mut Buffer, area: Rect, cursor_selected: bool
                 }
                 cell.set_bg(bg);
             }
+            match panes.iter_mut().find(|(left, right, _)| (*left, *right) == (x, end)) {
+                Some((_, _, rows)) => rows.push(y),
+                None => panes.push((x, end, vec![y])),
+            }
             x = end;
+        }
+    }
+    for (left, right, rows) in panes {
+        let (Some(&first), Some(&last)) = (rows.first(), rows.last()) else { continue };
+        for y in (first + 1..last).filter(|y| !rows.contains(y)) {
+            for x in left..right {
+                if let Some(cell) = buf.cell_mut((x, y)) {
+                    cell.set_bg(bg);
+                }
+            }
         }
     }
 }

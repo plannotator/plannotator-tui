@@ -195,6 +195,49 @@ fn a_selection_is_one_block_of_colour_while_dragging_after_the_release_and_with_
 }
 
 #[test]
+fn in_the_unified_view_a_removed_line_inside_new_lines_is_shaded_but_not_selected() {
+    let fixture = Fixture::new("mouse-unified");
+    let mut screen = fixture.open();
+    press(&mut screen, KeyCode::Char('u'));
+    let tint = crate::review::mouse::selection_bg();
+    let from = locate(&mut screen, "def add(a, b):", true);
+    let to = locate(&mut screen, "return total", true);
+    let removed = locate(&mut screen, "return a + b", true);
+    assert!(from.1 < removed.1 && removed.1 < to.1, "the removed line sits among the new ones");
+    let shaded = |buffer: &Buffer, (x, y): (u16, u16)| buffer[(x, y)].bg == tint;
+    let pane = screen.geometry.diff;
+    let check = |buffer: &Buffer| {
+        for at in [from, removed, to] {
+            assert!(shaded(buffer, at), "row {} is shaded", at.1);
+        }
+        // The whole row, from the pane's first column to its last.
+        assert!(shaded(buffer, (pane.x, removed.1)) && shaded(buffer, (pane.right() - 1, removed.1)));
+        // Nothing above the first selected row or below the last.
+        assert!(!shaded(buffer, (from.0, from.1 - 1)) && !shaded(buffer, (to.0, to.1 + 1)));
+    };
+
+    drag(&mut screen, from, to);
+    check(&draw(&mut screen));
+    release(&mut screen, to);
+    check(&draw(&mut screen));
+
+    // The keyboard's selection looks the same.
+    press(&mut screen, KeyCode::Esc);
+    at(&mut screen, 8);
+    // In the unified view `j` steps over the removed row too.
+    keys(&mut screen, "vjjj");
+    assert_eq!(selection(&screen), Some(lines(Side::New, 8, 10)));
+    check(&draw(&mut screen));
+
+    // Only the look: the note is on new lines 8-10 and quotes them alone.
+    press(&mut screen, KeyCode::Char('c'));
+    type_and_save(&mut screen, "split this up");
+    let note = screen.store.annotations().first().expect("a note");
+    assert_eq!((note.line_start, note.line_end, note.side), (8, 10, Side::New));
+    assert_eq!(note.anchor_text.as_deref(), Some("def add(a, b):\n    total = a + b\n    return total"));
+}
+
+#[test]
 fn the_toolbar_after_a_drag_comments_on_the_selection() {
     let fixture = Fixture::new("mouse-toolbar");
     let mut screen = fixture.open();
