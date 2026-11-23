@@ -14,6 +14,7 @@ use unicode_width::UnicodeWidthStr as _;
 use plannotator_tui_review::Side;
 
 use super::diff::{Lines, Progress};
+use super::files::fit;
 use super::{Draft, Focus, Geometry, Mode, Screen};
 use crate::keys::Action;
 use crate::theme::palette;
@@ -25,6 +26,9 @@ const RAIL_MIN_WIDTH: u16 = 28;
 const RAIL_MIN_TOTAL_WIDTH: u16 = 80;
 /// The comment box's widest; code suggestions want the room.
 pub(super) const COMPOSE_MAX_WIDTH: u16 = 84;
+
+/// Columns a diff file heading keeps for its status and counts (` Modified   +12 −3 `).
+const HEADING_COUNTS: usize = 24;
 
 /// The most characters of a PR's title the header shows.
 const PR_TITLE_MAX: usize = 48;
@@ -39,22 +43,55 @@ impl Screen {
         ])
         .areas(area);
         // A hidden rail gives its columns to the diff, which the viewer reflows as on a resize.
-        let rail_width = if self.rail_shown() && area.width >= RAIL_MIN_TOTAL_WIDTH {
+        let mut rail_width = if self.rail_shown() && area.width >= RAIL_MIN_TOTAL_WIDTH {
             (area.width * 3 / 10).clamp(RAIL_MIN_WIDTH, RAIL_WIDTH)
         } else {
             0
         };
-        let [diff, _gap, rail] = Layout::horizontal([
+        // The file list on the left, as wide as its names need within its share; without
+        // room it hides, unless it has the focus, when the notes rail makes way for it.
+        let listing = self.listing();
+        let focused = self.focus == Focus::Files;
+        let content = self.files_content_width(&self.shown_listing());
+        let fits = |room: u16| fit::width(content, room, self.files.chosen_width(), focused);
+        let mut files_width = None;
+        if self.files_wanted() {
+            files_width = fits(body.width.saturating_sub(rail_width + u16::from(rail_width > 0)));
+            if files_width.is_none() && focused && rail_width > 0 {
+                rail_width = 0;
+                files_width = fits(body.width);
+            }
+        }
+        let [main, _gap, rail] = Layout::horizontal([
             Constraint::Min(1),
             Constraint::Length(u16::from(rail_width > 0)),
             Constraint::Length(rail_width),
         ])
         .areas(body);
-        self.geometry = Geometry { diff, rail, ..Geometry::default() };
+        if files_width.is_none() && focused {
+            self.focus = Focus::Diff;
+        }
+        self.files.drawn(files_width.unwrap_or(0));
+        let (files, diff) = match files_width {
+            Some(width) => {
+                let [files, _divider, diff] = Layout::horizontal([
+                    Constraint::Length(width),
+                    Constraint::Length(1),
+                    Constraint::Min(1),
+                ])
+                .areas(main);
+                (files, diff)
+            }
+            None => (Rect::default(), main),
+        };
+        self.geometry = Geometry { diff, rail, files, ..Geometry::default() };
         self.draw_header(frame, header);
         match &mut self.whole {
             Some(whole) => whole.draw(frame, diff)?,
             None => self.diff.draw(frame, diff)?,
+        }
+        if files.width > 0 {
+            self.draw_files(frame, files, &listing);
         }
         if rail_width > 0 {
             self.draw_rail(frame, rail);
@@ -75,7 +112,8 @@ impl Screen {
                 let pick = pick.clone();
                 self.draw_pick(frame, diff, &pick);
             }
-            Mode::Browse | Mode::ConfirmQuit => {}
+            Mode::Kinds(cursor) => self.draw_kinds(frame, *cursor),
+            Mode::Browse | Mode::ConfirmQuit | Mode::FilterFiles => {}
         }
         Ok(())
     }
@@ -96,14 +134,24 @@ impl Screen {
     /// `Uncommitted · 4 files +120 −30` on the left; on the right the Review menu and the
     /// Send button, on the edge.
     fn draw_header(&mut self, frame: &mut Frame, area: Rect) {
-        let (added, removed) = self.capture.totals();
         let files = self.capture.files.len();
+        // While a filter hides files, the counts are of the files the diff shows.
+        let (added, removed) = if self.files.shown.len() == files {
+            self.capture.totals()
+        } else {
+            let shown = |f: &&plannotator_tui_review::FilePatch| self.files.shown.contains(&f.path);
+            let files = self.capture.files.iter().filter(shown);
+            files.fold((0, 0), |(a, r), f| (a + f.additions, r + f.deletions))
+        };
+        let count = match self.files.shown.len() {
+            shown if shown == files => format!("{files} file{}", if files == 1 { "" } else { "s" }),
+            shown => format!("{shown} of {files} files"),
+        };
         let title = match self.whole_title() {
             Some(whole) => format!(" {whole} "),
             None => format!(
-                " {} \u{b7} {files} file{} +{added} \u{2212}{removed} \u{b7} {} ",
+                " {} \u{b7} {count} +{added} \u{2212}{removed} \u{b7} {} ",
                 self.scope_title(),
-                if files == 1 { "" } else { "s" },
                 self.viewed_label()
             ),
         };
@@ -192,10 +240,33 @@ impl Screen {
             Progress::Failed(error) => parts.push(format!("diff error: {error}")),
             Progress::Ready => {}
         }
+        // The list hidden for want of room still tells what its filter hides, early so a
+        // narrow footer keeps it.
+        if self.files.drawn_width == 0 && self.files.filter.is_active() {
+            parts.push(format!("filter: {} of {} files", self.files.shown.len(), self.capture.files.len()));
+            match self.notes_in_hidden_files() {
+                0 => {}
+                1 => parts.push("1 unsent note in hidden files".into()),
+                n => parts.push(format!("{n} unsent notes in hidden files")),
+            }
+        }
+        if self.files.drawn_width == 0 && self.files_wanted() {
+            parts.push(match self.keys.hint(Action::ToggleFiles) {
+                key if key.is_empty() => "files hidden: no room".to_owned(),
+                key => format!("files hidden: {key} shows them"),
+            });
+        }
         let notes = self.store.annotations();
         let outdated = notes.iter().filter(|n| super::notes::is_outdated(n)).count();
         if self.cursor_file_viewed() {
             parts.push("\u{2713} viewed".into());
+        }
+        // A narrow diff cuts its file headings short: the whole path of the file the cursor
+        // is in goes here then.
+        if let Some(path) = self.files.current.as_deref().filter(|_| self.whole.is_none())
+            && path.width() + HEADING_COUNTS > usize::from(self.geometry.diff.width)
+        {
+            parts.push(path.to_owned());
         }
         parts.push(self.repo_name());
         parts.push(match outdated {
@@ -261,6 +332,19 @@ impl Screen {
             ];
             return hints.into_iter().chain(tail).flatten().collect();
         }
+        if self.mode == Mode::FilterFiles {
+            return [
+                key(Action::Confirm, "show"),
+                key(Action::Back, "clear"),
+                Some("\u{2191}\u{2193} move".to_owned()),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+        }
+        if matches!(self.mode, Mode::Kinds(_)) {
+            return Vec::new();
+        }
         let hints: Vec<Option<String>> = match self.focus {
             Focus::Diff if self.diff.selection().is_some() => vec![
                 self.diff.selecting().then(|| key(Action::Visual, "end selection")).flatten(),
@@ -277,9 +361,25 @@ impl Screen {
                 key(Action::GoToDefinition, "definition"),
                 pair(Action::NextHunk, Action::PreviousHunk, "hunk"),
                 pair(Action::NextFile, Action::PreviousFile, "file"),
+                key(Action::FilterFiles, "filter files"),
                 key(Action::ToggleViewed, "viewed"),
                 key(Action::Reload, "reload"),
                 (!self.store.annotations().is_empty()).then(|| key(Action::CycleFocus, "notes")).flatten(),
+            ]
+            .into_iter()
+            .chain(tail)
+            .collect(),
+            Focus::Files => [
+                pair(Action::Down, Action::Up, "move"),
+                key(Action::Confirm, "open"),
+                pair(Action::Left, Action::Right, "fold"),
+                key(Action::FilterFiles, "filter"),
+                key(Action::FilterKinds, "kinds"),
+                key(Action::HideViewed, "hide viewed"),
+                key(Action::ToggleViewed, "viewed"),
+                pair(Action::NarrowColumn, Action::WidenColumn, "width"),
+                key(Action::ToggleFiles, "close"),
+                key(Action::Back, "diff"),
             ]
             .into_iter()
             .chain(tail)

@@ -96,7 +96,8 @@ fn viewer(fixture: &Fixture, light: bool) -> Buffer {
     let (_repo, capture) =
         crate::review::capture(&fixture.repo(), &Request::Uncommitted { base: None }).expect("capture");
     let (wake, _ready) = std::sync::mpsc::sync_channel(1);
-    let mut diff = Diff::open(&capture, light, wake).expect("viewer");
+    let paths: Vec<String> = capture.files.iter().map(|f| f.path.clone()).collect();
+    let mut diff = Diff::open(&capture, &paths, light, wake).expect("viewer");
     let mut terminal = Terminal::new(TestBackend::new(160, 40)).expect("terminal");
     let started = Instant::now();
     loop {
@@ -132,8 +133,6 @@ fn a_light_terminal_keeps_its_own_background_with_light_tints_on_changed_lines()
         let buffer = viewer(&fixture, light);
         let context = row(&buffer, "def add(a, b):");
         assert!(context.iter().all(|(_, _, bg)| *bg == Color::Reset), "light {light}: {context:?}");
-        let files = row(&buffer, "Files");
-        assert!(files.iter().all(|(_, _, bg)| *bg == Color::Reset), "light {light}: {files:?}");
         let added = row(&buffer, "total = a + b");
         let tint = added.iter().find_map(|(_, _, bg)| lightness(*bg)).expect("a tint on the added line");
         if light {

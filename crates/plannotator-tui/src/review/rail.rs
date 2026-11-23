@@ -85,6 +85,10 @@ impl Screen {
         let path = note.file_path.clone();
         let (side, line) = (note.side, note.line_start);
         let on_lines = note.scope == NoteScope::Line && !notes::is_outdated(note);
+        if note.scope != NoteScope::General && self.whole.is_none() && !self.files.shown.contains(&path) {
+            self.status = Some(format!("{path} is hidden by the file filter"));
+            return;
+        }
         let place = match note.scope {
             // On no file: the rail is its only place.
             NoteScope::General => return,

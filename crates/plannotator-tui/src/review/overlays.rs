@@ -70,7 +70,7 @@ impl Screen {
     }
 
     /// The key help's sections: a title, then each key with what it does.
-    fn help_sections(&self) -> [(&'static str, Vec<(String, &'static str)>); 4] {
+    fn help_sections(&self) -> [(&'static str, Vec<(String, &'static str)>); 5] {
         let key = |actions: &[Action]| {
             actions.iter().map(|a| self.keys.hint(*a)).filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" ")
         };
@@ -122,7 +122,30 @@ impl Screen {
                     (key(&[Action::Back]), "clear the selection"),
                     (key(&[Action::ToggleLayout]), "split / unified"),
                     (key(&[Action::ToggleWrap]), "wrap long lines"),
-                    (key(&[Action::ToggleFiles]), "file list"),
+                    (key(&[Action::ToggleFiles]), "the file list: open it and move there; there, close it"),
+                    (key(&[Action::FilterFiles]), "filter the files by name"),
+                    (
+                        key(&[Action::FilterKinds]),
+                        "show only some kinds: code, tests, docs, config, generated",
+                    ),
+                    (key(&[Action::HideViewed]), "hide viewed files, or show them again"),
+                    (key(&[Action::NarrowColumn, Action::WidenColumn]), "narrow / widen the file list"),
+                ],
+            ),
+            (
+                "file list",
+                vec![
+                    (key(&[Action::Down, Action::Up]), "next / previous row (the diff follows)"),
+                    (key(&[Action::Confirm]), "go to the file; open or close a folder"),
+                    (key(&[Action::Left, Action::Right]), "close / open a folder"),
+                    (
+                        key(&[Action::FilterFiles]),
+                        "type a filter: words in the path; enter shows the matches, esc clears",
+                    ),
+                    (key(&[Action::FilterKinds]), "kinds: space turns one on or off, enter shows it alone"),
+                    (key(&[Action::HideViewed]), "hide viewed files"),
+                    (key(&[Action::ToggleViewed]), "mark the file viewed, or not"),
+                    (key(&[Action::Back]), "clear the name filter, then back to the diff"),
                 ],
             ),
             (

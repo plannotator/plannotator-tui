@@ -103,7 +103,7 @@ fn several_identifiers_are_offered_left_to_right_and_a_definition_outside_the_di
     assert!(rows[0].starts_with(" Whole file · new · helpers.py "), "{:?}", rows[0]);
     assert!(rows[1].contains(" Not in the diff "), "{:?}", rows[1]);
     assert_eq!(screen.whole.as_ref().and_then(|w| w.target().expect("target")), Some((4, 4)));
-    assert!(row_with(&rows, "def shout(text):").starts_with('\u{258e}'), "{rows:#?}");
+    assert!(diff_side(&screen, row_with(&rows, "def shout(text):")).starts_with('\u{258e}'), "{rows:#?}");
 
     // From the whole file, `d` searches again; ctrl+o goes back through both views.
     keys(&mut screen, "j");
@@ -171,7 +171,7 @@ fn nothing_found_says_so_and_the_old_side_searches_the_base() {
     assert!(rows[0].starts_with(" Whole file · base ("), "the base, where it is defined: {:?}", rows[0]);
     assert!(rows[0].contains(" · legacy.py "), "{:?}", rows[0]);
     assert_eq!(screen.whole.as_ref().and_then(|w| w.target().expect("target")), Some((12, 12)));
-    assert!(row_with(&rows, "def old_helper():").starts_with('\u{258e}'));
+    assert!(diff_side(&screen, row_with(&rows, "def old_helper():")).starts_with('\u{258e}'));
     // The line under the cursor has nothing to search for.
     keys(&mut screen, "kk");
     let blank = screen.whole.as_ref().and_then(|w| w.target().expect("target"));
@@ -195,9 +195,13 @@ fn the_help_lists_the_jump_keys_and_scrolls_when_the_terminal_is_short() {
             );
         } else {
             assert!(row_with(&frame, "j/k scroll").contains("esc closes"), "{frame:#?}");
-            keys(&mut screen, &"j".repeat(40));
-            frame = super::frame(&mut screen, cols, rows);
-            assert!(!frame.iter().any(|r| r.contains("send new and edited notes")), "scrolled past the top");
+            // Every row is reachable by scrolling: gather what each step shows.
+            for _ in 0..60 {
+                keys(&mut screen, "j");
+                frame.extend(super::frame(&mut screen, cols, rows));
+            }
+            let last = super::frame(&mut screen, cols, rows);
+            assert!(!last.iter().any(|r| r.contains("send new and edited notes")), "scrolled past the top");
         }
         for needle in [
             "go to the definition of a word on the line",

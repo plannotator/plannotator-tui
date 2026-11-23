@@ -5,14 +5,14 @@
 //! side; a note names a file by path. [`Lines`] is the meeting point: a run of lines on one
 //! side of one file, by path.
 
+use std::collections::HashMap;
 use std::io::{Seek as _, Write as _};
+use std::ops::Range;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::SyncSender;
 
 use anyhow::{Context as _, Result};
-use diffs_rs::engine::{
-    self, Badge, BadgeColor, Command, Engine, FileMark, Input, InputEffect, Marker, Options,
-};
+use diffs_rs::engine::{self, Command, Engine, Input, InputEffect, Marker, Options, SidebarPreference};
 use diffs_rs::reading::SourceRange;
 use diffs_rs::theme::Appearance;
 use plannotator_tui_review::{Capture, Side};
@@ -42,6 +42,8 @@ pub(super) enum Progress {
 
 pub(super) struct Diff {
     engine: Engine,
+    /// Each file's section of the capture's patch, by path, for the patch of the key.
+    sections: Option<(String, Sections)>,
     /// The capture's path for each engine file, in engine order, as far as files have
     /// arrived.
     paths: Vec<String>,
@@ -56,20 +58,35 @@ impl std::fmt::Debug for Diff {
 }
 
 impl Diff {
-    /// Show `capture`'s patch. The engine reads it on its own thread and sends on `wake`
-    /// when it has something to show.
-    pub(super) fn open(capture: &Capture, light: bool, wake: SyncSender<()>) -> Result<Self> {
+    /// Show the files at `paths` of `capture`'s patch, in that order. The engine reads them
+    /// on its own thread and sends on `wake` when it has something to show.
+    pub(super) fn open(
+        capture: &Capture,
+        paths: &[String],
+        light: bool,
+        wake: SyncSender<()>,
+    ) -> Result<Self> {
         let options = Options {
             appearance: if light { Appearance::Light } else { Appearance::Dark },
-            // The header, footer and help are this app's own (`review::draw`).
+            // The header, footer, help and file list are this app's own (`review::draw`,
+            // `review::files`).
             chrome: false,
+            sidebar: SidebarPreference::Hide,
             ..Options::default()
         };
-        let mut engine = Engine::open(input(capture)?, options, wake).context("opening the diff viewer")?;
+        let sections = Sections::of(&capture.patch);
+        let patch = sections.select(&capture.patch, paths);
+        let input = input_bytes(&patch, capture.scope.title())?;
+        let mut engine = Engine::open(input, options, wake).context("opening the diff viewer")?;
         // Draw on the terminal's own background and text colour, as the document screen does;
         // the changed-line tints come from the light or dark palette picked above.
         engine.set_terminal_background(true)?;
-        Ok(Self { engine, paths: Vec::new(), fixed: None })
+        Ok(Self {
+            engine,
+            sections: Some((capture.patch_key.clone(), sections)),
+            paths: Vec::new(),
+            fixed: None,
+        })
     }
 
     /// A whole-file view: `patch` is one file as a single unchanged hunk (`super::whole`),
@@ -85,12 +102,19 @@ impl Diff {
         let mut engine = Engine::open(input, options, wake).context("opening the whole-file view")?;
         // The same terminal background as the diff, so both views match.
         engine.set_terminal_background(true)?;
-        Ok(Self { engine, paths: Vec::new(), fixed: Some(name.to_owned()) })
+        Ok(Self { engine, sections: None, paths: Vec::new(), fixed: Some(name.to_owned()) })
     }
 
-    /// Show a new capture of the same review, keeping the layout and wrapping.
-    pub(super) fn replace(&mut self, capture: &Capture) -> Result<()> {
-        self.engine.replace(input(capture)?).context("reloading the diff viewer")?;
+    /// Show the files at `paths` of `capture`, a new capture of the same review or the same
+    /// one filtered, keeping the layout and wrapping.
+    pub(super) fn replace(&mut self, capture: &Capture, paths: &[String]) -> Result<()> {
+        let fresh = self.sections.as_ref().is_none_or(|(key, _)| *key != capture.patch_key);
+        if fresh {
+            self.sections = Some((capture.patch_key.clone(), Sections::of(&capture.patch)));
+        }
+        let patch = self.sections.as_ref().map(|(_, s)| s.select(&capture.patch, paths)).unwrap_or_default();
+        let input = input_bytes(&patch, capture.scope.title())?;
+        self.engine.replace(input).context("reloading the diff viewer")?;
         self.paths.clear();
         Ok(())
     }
@@ -243,32 +267,48 @@ impl Diff {
             .collect();
         self.engine.set_markers(&markers)
     }
+}
 
-    /// Tick the viewed files in the viewer's file list and dim their rows. The viewer ticks a
-    /// folder too once every file in it is viewed.
-    pub(super) fn set_viewed(&mut self, viewed: &[String]) -> Result<()> {
-        // The viewer names a file by its own path, which for a file that has arrived can
-        // differ from the capture's (a deleted file); the others keep the capture's path.
-        let paths: Vec<String> = viewed
+/// Each file's section of a patch: from its `diff --git` line to the next one.
+#[derive(Debug, Default)]
+struct Sections(HashMap<String, Range<usize>>);
+
+impl Sections {
+    fn of(patch: &[u8]) -> Self {
+        let mut starts = Vec::new();
+        let mut offset = 0;
+        for line in patch.split_inclusive(|b| *b == b'\n') {
+            if line.starts_with(b"diff --git ") {
+                starts.push(offset);
+            }
+            offset += line.len();
+        }
+        let ends = starts.iter().skip(1).copied().chain([patch.len()]);
+        let sections = starts
             .iter()
-            .map(|path| {
-                let meta = self.index(path).and_then(|index| self.engine.file(index));
-                meta.map_or_else(|| path.clone(), |meta| meta.path.to_string())
+            .zip(ends)
+            .filter_map(|(&from, to)| {
+                let text = String::from_utf8_lossy(patch.get(from..to)?);
+                let file = plannotator_tui_review::patch::parse(&text).into_iter().next()?.path;
+                Some((file, from..to))
             })
             .collect();
-        let tick = Badge { text: "\u{2713}", color: BadgeColor::Added };
-        let marks: Vec<FileMark<'_>> =
-            paths.iter().map(|path| FileMark { path, badge: Some(tick), dimmed: true }).collect();
-        self.engine.set_file_marks(&marks)
+        Self(sections)
+    }
+
+    /// The sections of `paths`, in that order, as one patch.
+    fn select(&self, patch: &[u8], paths: &[String]) -> Vec<u8> {
+        paths
+            .iter()
+            .filter_map(|path| self.0.get(path).and_then(|range| patch.get(range.clone())))
+            .flatten()
+            .copied()
+            .collect()
     }
 }
 
 /// The patch as a stream: a temporary file, unlinked as soon as it is open, so nothing is
 /// left behind however the review ends.
-fn input(capture: &Capture) -> Result<Input> {
-    input_bytes(&capture.patch, capture.scope.title())
-}
-
 fn input_bytes(bytes: &[u8], label: String) -> Result<Input> {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let path = std::env::temp_dir().join(format!(

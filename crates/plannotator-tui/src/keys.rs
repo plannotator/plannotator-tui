@@ -80,8 +80,14 @@ pub(crate) enum Action {
     /// Split or unified diff.
     ToggleLayout,
     ToggleWrap,
-    /// Show or hide the diff's file list.
+    /// Show the diff's file list and move to it, or close it from there.
     ToggleFiles,
+    /// Filter the code review's file list by name.
+    FilterFiles,
+    /// Pick the kinds of file the code review shows: code, tests, docs, config, generated.
+    FilterKinds,
+    /// Hide the files marked viewed from the code review, or show them again.
+    HideViewed,
     /// Mark the file under the cursor viewed, or not (`docs/spec-review-progress.md`).
     ToggleViewed,
     /// The next or previous file not marked viewed, wrapping around.
@@ -121,7 +127,7 @@ use Action::{
     PreviousHunk, PreviousMatch, PreviousUnviewed, Search, Suggest, ToggleFiles, ToggleLayout, ToggleViewed,
     ToggleWrap, WholeBase, WholeFile,
 };
-use Action::{GoToDefinition, JumpBack, JumpForward};
+use Action::{FilterFiles, FilterKinds, GoToDefinition, HideViewed, JumpBack, JumpForward};
 use Action::{NarrowColumn, ToggleNotes, WidenColumn};
 
 /// Browsing, before the focused pane gets the key.
@@ -234,6 +240,9 @@ pub(crate) const DIFF: &[Action] = &[
     ToggleLayout,
     ToggleWrap,
     ToggleFiles,
+    FilterFiles,
+    FilterKinds,
+    HideViewed,
     ToggleViewed,
     NextUnviewed,
     PreviousUnviewed,
@@ -242,8 +251,32 @@ pub(crate) const DIFF: &[Action] = &[
     GoToDefinition,
     JumpBack,
     JumpForward,
+    NarrowColumn,
+    WidenColumn,
     Confirm,
 ];
+/// The code review's file list.
+pub(crate) const FILES: &[Action] = &[
+    Down,
+    Up,
+    PageDown,
+    PageUp,
+    Top,
+    Bottom,
+    Confirm,
+    Back,
+    Left,
+    Right,
+    ToggleFiles,
+    FilterFiles,
+    FilterKinds,
+    HideViewed,
+    ToggleViewed,
+    NarrowColumn,
+    WidenColumn,
+];
+/// The kind picker over the file list; Space turns a row on or off.
+pub(crate) const KINDS: &[Action] = &[Down, Up, Confirm, Back, FilterKinds, Interrupt];
 /// The code review's notes rail.
 pub(crate) const NOTES: &[Action] = &[Down, Up, Confirm, Edit, Remove, Back];
 pub(crate) const REVIEW_MENU: &[Action] =
@@ -267,6 +300,8 @@ const SHARED: &[&[&[Action]]] = &[
     &[ARCHIVE],
     &[REVIEW_GLOBAL, DIFF],
     &[REVIEW_GLOBAL, NOTES],
+    &[REVIEW_GLOBAL, FILES],
+    &[KINDS],
     &[REVIEW_MENU],
     &[HELP],
 ];
@@ -438,6 +473,9 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (ToggleLayout, &[ch('u')]),
     (ToggleWrap, &[ch('w')]),
     (ToggleFiles, &[ch('f')]),
+    (FilterFiles, &[ch('/')]),
+    (FilterKinds, &[ch('t')]),
+    (HideViewed, &[ch('H')]),
     (ToggleViewed, &[ch('x')]),
     // `n` with Ctrl: the next file, skipping viewed ones. Ctrl+Shift+N reaches most
     // terminals as Ctrl+N, so the backward jump has no default key.
@@ -475,6 +513,9 @@ const LATE: &[Action] = &[
     ToggleLayout,
     ToggleWrap,
     ToggleFiles,
+    FilterFiles,
+    FilterKinds,
+    HideViewed,
     ToggleViewed,
     NextUnviewed,
     PreviousUnviewed,
@@ -643,6 +684,9 @@ impl Action {
             Self::ToggleLayout => "toggle-layout",
             Self::ToggleWrap => "toggle-wrap",
             Self::ToggleFiles => "toggle-files",
+            Self::FilterFiles => "filter-files",
+            Self::FilterKinds => "filter-kinds",
+            Self::HideViewed => "hide-viewed",
             Self::ToggleViewed => "toggle-viewed",
             Self::NextUnviewed => "next-unviewed",
             Self::PreviousUnviewed => "previous-unviewed",

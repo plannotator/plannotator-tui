@@ -5,6 +5,7 @@
 mod blocked_send;
 #[cfg(unix)]
 mod disk_flow;
+mod file_list;
 #[cfg(unix)]
 mod first_look;
 mod jump_flow;
@@ -143,7 +144,7 @@ pub(super) fn settle(screen: &mut Screen) {
     loop {
         screen.tick().expect("tick");
         let _ = frame(screen, 120, 40);
-        let loaded = screen.diff.files_shown() == screen.capture.files.len()
+        let loaded = screen.diff.files_shown() == screen.files.shown.len()
             && screen.diff.progress() != super::diff::Progress::Loading;
         if loaded {
             return;
@@ -185,6 +186,15 @@ pub(super) fn at(screen: &mut Screen, line: u32) {
 pub(super) fn type_and_save(screen: &mut Screen, text: &str) {
     screen.handle_event(Event::Paste(text.to_owned())).expect("paste");
     press(screen, KeyCode::Enter);
+}
+
+/// The part of a drawn row right of the file list and its divider: what the diff drew.
+pub(super) fn diff_side(screen: &Screen, row: &str) -> String {
+    let list = match screen.files.drawn_width {
+        0 => 0,
+        width => usize::from(width) + 1,
+    };
+    row.chars().skip(list).collect()
 }
 
 pub(super) fn row_with<'a>(rows: &'a [String], needle: &str) -> &'a str {

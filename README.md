@@ -106,7 +106,7 @@ dimmed. The keys also work without opening the menu.
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
-| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `M` note on the whole change; `o`/`O` whole file now/before; `d` go to definition, `ctrl+o`/`ctrl+i` back/forward; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `z` hide or show the notes; `r` read the diff again (the footer says when it changed on disk); `?` keys |
+| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `M` note on the whole change; `o`/`O` whole file now/before; `d` go to definition, `ctrl+o`/`ctrl+i` back/forward; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` the file list; `/` filter files by name; `t` filter by kind; `H` hide viewed files; `<`/`>` list width; `z` hide or show the notes; `r` read the diff again (the footer says when it changed on disk); `?` keys |
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
 
@@ -249,7 +249,34 @@ then says `the diff changed on disk · r refreshes`. It never reloads by itself.
 pull request reviews have nothing on disk to check.
 A note whose lines changed goes to the **Outdated** group at the end of the rail; it is
 still sent, marked as outdated. `u` switches between split and unified view, `w` wraps
-long lines, `f` lists the changed files and `?` shows every key.
+long lines and `?` shows every key.
+
+The changed files are listed left of the diff as a folder tree. A chain of folders with
+one folder each is one row (`crates/app/src/`), and the list is as wide as its names
+need, up to two fifths of the screen. A name that does not fit is cut in the middle, so
+its end and extension stay readable; the diff heading shows the whole path. `<` and `>`
+make the list narrower or wider. Where there is no room for it (80 columns beside the
+notes) it hides, and `f` opens it, with the notes making way. In the list, `j`/`k` move
+and show each file, `enter` goes to it, `h`/`l` close and open folders, and `f` closes
+the list.
+
+`/` filters the files by name: every word you type must be in the path (`review test`),
+and the list follows each key. `enter` hands the filter to the diff, which then shows
+only those files, so `n`/`N`, `]`/`[` and `ctrl+n` move among them. `esc` clears it.
+`t` opens the kinds: code, tests, docs, config, generated and other, each with how many
+files of it the change has. Space turns a kind on or off, `enter` shows that kind alone.
+`H` hides the files you have marked viewed. The list's heading shows `Files · 12 of 340`
+and the filter while one is on. Notes are never hidden: the rail keeps them, Send sends
+them all, and the list says how many unsent notes are in hidden files.
+
+The kinds follow the browser's rules for tests and generated files: test folders
+(`tests/`, `__tests__/`, `spec/`, `fixtures/`, `src/androidTest/`, `Acme.Tests/`), test
+names (`*.test.ts`, `*.spec.js`, `*_test.go`, `test_*.py`, `*.snap`, `*.stories.tsx`), and
+generated files (lockfiles, `*.min.js`, `*.map`). Here `*.pb.go`, `*.g.dart`, `vendor/`,
+`node_modules/` and `dist/` are generated too. Docs are prose (`*.md`, `*.rst`, `*.txt`,
+`README`, `LICENSE`, `docs/`); config is data and build files (`*.json`, `*.yaml`,
+`*.toml`, dotfiles, `Dockerfile`, `Makefile`, `*.config.ts`); code is source by
+extension; the rest is other.
 
 `x` marks the file under the cursor viewed, and `x` again unmarks it. The header counts
 them (`3/12 viewed`), the file list ticks viewed files and dims them, and `ctrl+n` goes to
@@ -486,12 +513,13 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `suggest` `file-comment` | `s` `C` | code review: suggest code for the lines; a note on the whole file |
 | `change-comment` | `M` | code review: a note on the whole change |
 | `next-hunk` `previous-hunk` `next-file` `previous-file` | `]` `[` `n` `N` | code review: move by hunk or file |
-| `toggle-layout` `toggle-wrap` `toggle-files` | `u` `w` `f` | code review: split or unified view; wrap; the file list |
+| `toggle-layout` `toggle-wrap` `toggle-files` | `u` `w` `f` | code review: split or unified view; wrap; open the file list and move to it, or close it from there |
+| `filter-files` `filter-kinds` `hide-viewed` | `/` `t` `H` | code review: filter the file list and the diff by name; by kind; hide viewed files |
 | `toggle-viewed` `next-unviewed` `previous-unviewed` | `x` `ctrl+n`, none | code review: mark the file viewed; the next or previous file not viewed |
 | `whole-file` `whole-base` | `o` `O` | code review: the whole file as it is now, or before the change; again to go back |
 | `go-to-definition` `jump-back` `jump-forward` | `d` `ctrl+o` `ctrl+i` | code review: search for the identifier on the line and go to its definition; back and forward through the places jumped from (`ctrl+i` needs a terminal that tells it from Tab) |
 | `help` | `?` | code review: every key (`j`/`k` scroll it when it does not fit) |
-| `narrow-column` `widen-column` | `<` `>` | the reading column, by eight columns |
+| `narrow-column` `widen-column` | `<` `>` | the reading column, by eight columns; in code review, the file list, by four |
 | `toggle-notes` | `z` | close the notes rail, or open it again; remembered for the next session |
 
 Actions forwarded by Herdr Mirror default to a split beside the invoking remote
