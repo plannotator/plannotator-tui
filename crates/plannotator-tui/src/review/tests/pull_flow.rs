@@ -7,14 +7,14 @@ use plannotator_tui_review::{Gh, Repo, Status};
 use super::viewed_flow::ticked;
 use super::*;
 
-const URL: &str = "https://github.com/o/app";
+pub(super) const URL: &str = "https://github.com/o/app";
 
-struct Pull {
-    dir: PathBuf,
-    agent: Agent,
+pub(super) struct Pull {
+    pub(super) dir: PathBuf,
+    pub(super) agent: Agent,
 }
 
-fn git_in(dir: &Path, args: &[&str]) -> String {
+pub(super) fn git_in(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .args(["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"])
         .arg("-C")
@@ -28,7 +28,7 @@ fn git_in(dir: &Path, args: &[&str]) -> String {
 
 impl Pull {
     /// PR 7 changes `app.py` from BEFORE to AFTER on branch `feature` off `main`.
-    fn new(tag: &str) -> Self {
+    pub(super) fn new(tag: &str) -> Self {
         let dir = std::env::temp_dir().join(format!("plannotator-review-pull-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("dir");
@@ -55,20 +55,20 @@ impl Pull {
         pull
     }
 
-    fn work(&self) -> PathBuf {
+    pub(super) fn work(&self) -> PathBuf {
         self.dir.join("work")
     }
 
-    fn clone_dir(&self) -> PathBuf {
+    pub(super) fn clone_dir(&self) -> PathBuf {
         self.dir.join("clone")
     }
 
-    fn data(&self) -> PathBuf {
+    pub(super) fn data(&self) -> PathBuf {
         self.dir.join("data")
     }
 
     /// Commit `app` on `feature`, push it as PR 7's head, and describe it for `gh`.
-    fn push_head(&self, app: &str) {
+    pub(super) fn push_head(&self, app: &str) {
         let work = self.work();
         std::fs::write(work.join("app.py"), app).expect("write");
         git_in(&work, &["commit", "-qam", "feature"]);
@@ -82,7 +82,7 @@ impl Pull {
         std::fs::write(self.dir.join("view.json"), view.to_string()).expect("view.json");
     }
 
-    fn open(&self) -> Screen {
+    pub(super) fn open(&self) -> Screen {
         let gh = Gh::at(self.dir.join("gh"));
         let (repo, capture) =
             Repo::pull_request(&self.clone_dir(), "#7", &self.dir.join("cache"), &gh).expect("the PR opens");

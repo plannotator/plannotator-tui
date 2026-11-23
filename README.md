@@ -106,7 +106,7 @@ dimmed. The keys also work without opening the menu.
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
-| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `M` note on the whole change; `o`/`O` whole file now/before; `d` go to definition, `ctrl+o`/`ctrl+i` back/forward; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `z` hide or show the notes; `r` read the diff again (the footer says when it changed on disk); `?` keys |
+| code review | `v` select, `v` again to end; `c` comment; `s` suggest code; `C` note on the file; `M` note on the whole change; `ctrl+g` post the notes to the pull request on GitHub, after a summary (pull request reviews); `o`/`O` whole file now/before; `d` go to definition, `ctrl+o`/`ctrl+i` back/forward; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `f` files; `z` hide or show the notes; `r` read the diff again (the footer says when it changed on disk); `?` keys |
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
 
@@ -217,8 +217,9 @@ Closed, it stays closed, as in a document review.
 `E` sends the new notes, `S` sends them and closes, and `P` picks the agent to send
 to. Sends go to the same place a document review's do (Herdr pane, Rex, Pi or the
 clipboard, or the agent you choose when nothing named one; see [Choosing the agent](#choosing-the-agent)), and are kept in the feedback archive. `q` asks first when notes are unsent.
-`m` opens the Review menu: `M` comment on the whole change, `R` resend all, `F` finish
-review, `U` undo.
+`m` opens the Review menu: `M` comment on the whole change, `ctrl+g` post to GitHub (in a
+pull request review, see [Posting to GitHub](#posting-to-github)), `R` resend all, `F`
+finish review, `U` undo.
 
 `o` shows the whole file under the cursor as it is now, scrolled to the same line; `O`
 shows it as it was before the change (the base), at the matching old line. The header says
@@ -278,7 +279,45 @@ The header shows `PR #123 · title · base ← head`. `r` looks the pull request
 fetches new pushes; notes follow their lines as they do for local changes. Notes are saved
 once per pull request, whichever clone you open it from. Send goes to the agent as for any
 review, with the browser's pull request header (`# PR Review: owner/repo#123`, the title,
-the branches and the link). Nothing is posted to GitHub.
+the branches and the link).
+
+#### Posting to GitHub
+
+`ctrl+g`, or **Post to GitHub…** in the Review menu (`m`), posts your notes to the pull
+request as one GitHub review, as well as (not instead of) sending them to the agent. It is
+offered only in a pull request review; anywhere else it says why not.
+
+A summary always comes first, and nothing leaves your computer until you press `Enter`
+there (`Esc` cancels; no setting skips it). It shows the repository and PR number, how many
+notes become inline comments, how many go into the review's body and why, what is skipped,
+and the verdict: **Comment** by default, or **Approve** or **Request changes** if you pick
+one with `h`/`l`, as the browser app offers them. Notes are laid out the way the browser app
+posts a review:
+
+- Line notes become inline comments: `RIGHT` for new lines, `LEFT` for old (removed)
+  lines, a range as `start_line` to `line`. A suggestion becomes a `suggestion` block that
+  GitHub can apply.
+- A note on the whole change, a note on a file (`**path:** text`), and a line note that is
+  outdated or whose lines the diff no longer shows (quoted with the code it was made on) go
+  in the review body. The browser posts file notes as file-level threads, which takes
+  several requests; here they go in the body, in the browser's own fallback shape, so a post
+  is always one request.
+- A note outside the diff (made in the whole file) is never inline: it goes at the end of
+  the body under **Comments outside the diff**, with its code quoted and a link to the lines.
+
+The review is created with one `gh api` request (`POST
+repos/OWNER/REPO/pulls/N/reviews`) under your `gh` login; no token passes through
+plannotator-tui. GitHub takes all of it or none of it. Comments are anchored to the commit
+you reviewed (the one the diff was fetched at). If the pull request has new commits since,
+the summary says so, and `r` reloads it first if you want to review those. A post that
+fails posts nothing and says why in the summary: `gh` not logged in, no permission, the
+reviewed commit force-pushed away, GitHub's rate limit, no connection, or a comment GitHub
+would not place (the summary lists where each inline comment was).
+
+After a post, the footer shows the review's link and the rail marks the notes **posted**,
+a state of its own beside **sent**: a note can be both. Posted marks are saved with the
+notes, and a later post carries only notes that are new or edited since. An edited note is
+posted again as a new comment (the summary says how many); the earlier one stays on GitHub.
 
 A Pi session can leave notes on the diff too (see [Pi](#pi)). Notes are saved with the
 other annotations, one record per repository and scope. Code review is not available on
@@ -485,6 +524,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `yes` `no` | `y` `n`, `Y` `N` | the send-before-quitting and clear-all questions |
 | `suggest` `file-comment` | `s` `C` | code review: suggest code for the lines; a note on the whole file |
 | `change-comment` | `M` | code review: a note on the whole change |
+| `post-to-github` | `ctrl+g` | code review of a pull request: post the notes to it as one GitHub review, after a summary |
 | `next-hunk` `previous-hunk` `next-file` `previous-file` | `]` `[` `n` `N` | code review: move by hunk or file |
 | `toggle-layout` `toggle-wrap` `toggle-files` | `u` `w` `f` | code review: split or unified view; wrap; the file list |
 | `toggle-viewed` `next-unviewed` `previous-unviewed` | `x` `ctrl+n`, none | code review: mark the file viewed; the next or previous file not viewed |

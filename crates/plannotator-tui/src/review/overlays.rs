@@ -22,6 +22,7 @@ impl Screen {
             .map(|row| {
                 let label = match row {
                     MenuRow::ChangeComment => "Comment on the whole change".to_owned(),
+                    MenuRow::PostToGithub => self.post_menu_label(),
                     MenuRow::ResendAll => {
                         format!("Resend all \u{b7} {} notes", self.store.annotations().len())
                     }
@@ -84,8 +85,12 @@ impl Screen {
                     (key(&[Action::SendAndClose]), "send and close"),
                     (key(&[Action::ChangeComment]), "comment on the whole change"),
                     (
+                        key(&[Action::PostToGithub]),
+                        "post the notes to the pull request on GitHub, after a summary",
+                    ),
+                    (
                         key(&[Action::ReviewMenu]),
-                        "review menu: whole-change comment, resend all, finish, undo",
+                        "review menu: whole-change comment, post to GitHub, resend all, finish, undo",
                     ),
                     (key(&[Action::PickTarget]), "choose the agent Send goes to"),
                     (

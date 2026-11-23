@@ -1,7 +1,8 @@
 //! Pull requests on GitHub: reading a PR link or number, asking `gh` (the person's own login)
 //! for the PR's branches and commits, and finding the clone a PR belongs to.
 //!
-//! Nothing here writes to GitHub: the only `gh` call is `gh pr view`.
+//! Nothing here writes to GitHub: the only `gh` call is `gh pr view`. Posting a review is
+//! [`crate::post`]'s, and only after the person confirms it.
 
 use std::ffi::OsString;
 use std::path::Path;

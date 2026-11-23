@@ -16,11 +16,14 @@
 //! - [`send`]: send, resend, finish and undo. [`pi`]: the Pi link.
 //! - [`watch`]: noticing that the diff changed on disk, for the footer.
 //! - [`whole`]: the whole-file view (`o`, `O`), a second diffs-rs engine.
+//! - [`post`]: posting the notes to the pull request on GitHub, after a summary
+//!   ([`post_view`] draws it).
 //! - [`cli`]: `plannotator-tui review [--staged | --base REF | --commit SHA | PR] [DIR]`.
 //!
 //! A pull request review (`PR` is a GitHub link, `N` or `#N`) fetches the PR with the
 //! person's `gh` login into their clone or a cache repository ([`capture`]), and sends to the
-//! agent as any review does. Nothing is posted to GitHub.
+//! agent as any review does. It can also post the notes to the PR as one GitHub review
+//! ([`post`]), only after the person confirms a summary of what it posts.
 
 pub(crate) mod cli;
 mod diff;
@@ -32,6 +35,8 @@ mod jump;
 mod notes;
 mod overlays;
 mod pi;
+mod post;
+mod post_view;
 mod rail;
 pub(crate) mod scope;
 mod send;
@@ -89,6 +94,8 @@ enum Mode {
     Help,
     /// Go to definition's list: which identifier, or which answer.
     Pick(jump::Pick),
+    /// The summary before a post to GitHub.
+    Post(post::Confirm),
 }
 
 /// Which pane keys go to.
