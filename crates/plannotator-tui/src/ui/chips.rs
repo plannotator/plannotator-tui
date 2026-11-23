@@ -32,6 +32,7 @@ pub(crate) struct Chips {
     toolbar_delete: Color,
     /// The code review's toolbar after a mouse selection: suggest, beside comment (which
     /// is the document toolbar's comment colour).
+    #[cfg_attr(not(unix), allow(dead_code, reason = "only the code review reads it"))]
     pub(crate) review_suggest: Color,
 }
 
@@ -46,6 +47,7 @@ impl Chips {
     }
 
     /// The code review toolbar's comment label: the document toolbar's.
+    #[cfg_attr(not(unix), allow(dead_code, reason = "only the code review reads it"))]
     pub(crate) fn review_comment(&self) -> Color {
         self.toolbar_comment
     }
