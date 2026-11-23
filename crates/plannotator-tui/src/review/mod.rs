@@ -8,12 +8,13 @@
 //!
 //! - `mod.rs`: the screen's state and the operations that change notes.
 //! - [`diff`]: the diffs-rs engine, in this app's terms.
+//! - [`files`]: the changed files on the left, and filtering them.
 //! - [`notes`]: the rail's order and wording.
 //! - [`drafts`]: making, editing and removing notes.
 //! - [`herdr`]: `plannotator-tui herdr review`. [`scope`]: what it shares with `rex review`
 //!   and `hc review`, and the pane they open.
 //! - [`input`]: keys and the mouse; [`mouse`]: clicks and drags in the diff. [`draw`],
-//!   [`rail`] and [`overlays`]: the frame.
+//!   [`footer`], [`rail`] and [`overlays`]: the frame.
 //! - [`send`]: send, resend, finish and undo. [`pi`]: the Pi link.
 //! - [`watch`]: noticing that the diff changed on disk, for the footer.
 //! - [`whole`]: the whole-file view (`o`, `O`), a second diffs-rs engine.
@@ -27,6 +28,8 @@ pub(crate) mod cli;
 mod diff;
 mod drafts;
 mod draw;
+mod files;
+mod footer;
 pub(crate) mod herdr;
 mod input;
 mod jump;
@@ -91,6 +94,10 @@ enum Mode {
     Help,
     /// Go to definition's list: which identifier, or which answer.
     Pick(jump::Pick),
+    /// Typing the file list's name filter.
+    FilterFiles,
+    /// The kind picker, with its highlighted row.
+    Kinds(usize),
 }
 
 /// Which pane keys go to.
@@ -98,6 +105,7 @@ enum Mode {
 enum Focus {
     Diff,
     Notes,
+    Files,
 }
 
 /// Where things were drawn last frame, for the mouse.
@@ -105,6 +113,10 @@ enum Focus {
 struct Geometry {
     diff: Rect,
     rail: Rect,
+    /// The file list; empty while it is hidden.
+    files: Rect,
+    /// The file list's rows drawn last frame: their screen row and key.
+    file_rows: Vec<(u16, String)>,
     send_button: Option<Rect>,
     review_button: Option<Rect>,
     /// Rail bubbles drawn last frame, with their note's index.
@@ -150,6 +162,8 @@ pub(crate) struct Screen {
     rail_scroll: usize,
     /// Whether the rail shows: `[ui] notes_rail`, the last session's choice, `toggle-notes`.
     notes_rail: NotesRail,
+    /// The changed files on the left, and their filter.
+    files: files::FileList,
     compose: Compose,
     send_state: SendState,
     /// Notes the last finish archived, for undo.
@@ -199,7 +213,10 @@ impl Screen {
         let store = ReviewStore::load(data_dir, &project, &owner, &capture.scope)?;
         let light = crate::theme::theme() == crate::theme::Theme::Light;
         let watch = watch::Watch::start(&capture.scope, wake.clone());
-        let diff = Diff::open(&capture, light, wake.clone())?;
+        let order = files::tree::order(&capture.files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>());
+        let paths: Vec<String> =
+            order.into_iter().filter_map(|i| capture.files.get(i).map(|f| f.path.clone())).collect();
+        let diff = Diff::open(&capture, &paths, light, wake.clone())?;
         let progress = Progress::open(&capture, data_dir, viewed::saving(data_dir));
         let mut screen = Self {
             repo,
@@ -224,6 +241,7 @@ impl Screen {
             rail_cursor: 0,
             rail_scroll: 0,
             notes_rail: NotesRail::default(),
+            files: files::FileList::default(),
             compose: Compose::default(),
             send_state: SendState::Ready,
             undo: Vec::new(),
@@ -240,10 +258,10 @@ impl Screen {
             help_room: std::cell::Cell::new(0),
             quit: false,
         };
+        screen.files_for_capture();
         let placed = screen.place_notes()?;
         screen.status = placed;
         screen.derive_send_state();
-        screen.sync_viewed();
         Ok(screen)
     }
 
@@ -304,9 +322,10 @@ impl Screen {
         let mut changed = false;
         if self.diff.poll(&self.capture)? {
             self.sync_markers();
-            self.sync_viewed();
             changed = true;
         }
+        changed |= self.show_pending_file()?;
+        changed |= self.take_attributes()?;
         changed |= self.poll_pi();
         changed |= self.poll_search()?;
         let typing = matches!(self.mode, Mode::Compose(_))
@@ -368,9 +387,11 @@ impl Screen {
             }
         };
         self.watch.recaptured();
-        self.diff.replace(&capture)?;
         self.progress = self.progress.reopen(&capture, &self.data_dir);
         self.capture = capture;
+        self.files_for_capture();
+        self.diff.replace(&self.capture, self.files.shown())?;
+        self.files.retarget();
         let placed = self.place_notes()?;
         // The whole file is read again too, at the line it was on.
         if let Some(whole) = &self.whole {
@@ -380,7 +401,6 @@ impl Screen {
         }
         self.clamp_rail_cursor();
         self.sync_markers();
-        self.sync_viewed();
         self.derive_send_state();
         let empty = if self.capture.is_empty() { " · no changes left" } else { "" };
         self.status =

@@ -4,14 +4,13 @@
 //! `docs/spec-review-progress.md`), so a review continues in either app; a mark stops
 //! counting once its file changes.
 //!
-//! The diff viewer ticks viewed files in its file list and dims their rows; the footer also
-//! ticks the file under the cursor.
+//! The file list (`files`) ticks viewed files and dims their rows, and can hide them; the
+//! footer also ticks the file under the cursor.
 
 use std::path::Path;
 
 use anyhow::Result;
-use diffs_rs::engine::Command;
-use plannotator_tui_review::{Side, progress};
+use plannotator_tui_review::progress;
 
 use super::Screen;
 
@@ -31,21 +30,6 @@ impl Screen {
         format!("{viewed}/{total} viewed")
     }
 
-    /// Tell the diff viewer which files are viewed, for the ticks in its file list. Call it
-    /// whenever a mark, the capture or the viewer's files change.
-    pub(super) fn sync_viewed(&mut self) {
-        let viewed: Vec<String> = self
-            .capture
-            .files
-            .iter()
-            .filter(|file| self.progress.is_viewed(&file.path))
-            .map(|file| file.path.clone())
-            .collect();
-        if let Err(err) = self.diff.set_viewed(&viewed) {
-            self.status = Some(format!("could not tick viewed files in the file list: {err:#}"));
-        }
-    }
-
     /// Whether the file under the cursor is marked viewed, for the footer's tick. Reads the
     /// cursor without moving it, so on a heading it says nothing.
     pub(super) fn cursor_file_viewed(&self) -> bool {
@@ -56,21 +40,13 @@ impl Screen {
         path.is_some_and(|p| self.progress.is_viewed(&p))
     }
 
-    /// The file under the selection or the cursor. On a file or hunk heading, which the
-    /// viewer does not tie to a file, the cursor steps down to the first line below it.
+    /// The file under the selection or the cursor, on a heading or a binary file's note
+    /// too (`diff::place`).
     pub(super) fn file_under_cursor(&mut self) -> Result<Option<String>> {
-        let mut path = match self.diff.selection() {
-            Some(lines) => Some(lines.path),
-            None => self.diff.cursor()?.map(|lines| lines.path),
-        };
-        for _ in 0..3 {
-            if path.is_some() {
-                break;
-            }
-            self.diff.run(Command::Down)?;
-            path = self.diff.cursor()?.map(|lines| lines.path);
+        if let Some(lines) = self.diff.selection() {
+            return Ok(Some(lines.path));
         }
-        Ok(path)
+        Ok(self.diff.cursor_file()?.and_then(|i| self.diff.paths().get(i).cloned()))
     }
 
     /// `x`: flip the file's mark and save it.
@@ -87,7 +63,6 @@ impl Screen {
     pub(super) fn toggle_viewed_of(&mut self, path: &str) {
         let viewed = !self.progress.is_viewed(path);
         let saved = self.progress.set(path, viewed);
-        self.sync_viewed();
         let count = self.viewed_label();
         self.status = Some(match (saved, viewed) {
             (Err(err), _) => format!("{path}: for this session only, the mark was not saved: {err}"),
@@ -97,10 +72,14 @@ impl Screen {
             (Ok(()), true) => format!("\u{2713} {path} viewed \u{b7} {count}"),
             (Ok(()), false) => format!("{path} not viewed \u{b7} {count}"),
         });
+        if let Err(err) = self.after_viewed_change(path) {
+            self.status = Some(format!("{err:#}"));
+        }
     }
 
     /// `ctrl+n` (and `previous-unviewed`): the next file in diff order that is not marked
-    /// viewed, wrapping around; the cursor lands on its first line.
+    /// viewed, wrapping around; its heading comes to the top. With a filter on, only the
+    /// files it shows count.
     pub(super) fn jump_unviewed(&mut self, forward: bool) -> Result<()> {
         let paths = self.diff.paths().to_vec();
         if paths.is_empty() {
@@ -118,30 +97,9 @@ impl Screen {
             return Ok(());
         };
         let path = paths.get(index).cloned().unwrap_or_default();
-        self.show_file(&path, index)?;
+        self.goto_file(&path)?;
         let left = paths.iter().filter(|p| !self.progress.is_viewed(p)).count();
         self.status = Some(format!("{path} \u{b7} {left} not viewed"));
-        Ok(())
-    }
-
-    /// Put the cursor on the first line `path` shows; a file with none (binary, mode only)
-    /// gets its heading, by walking file by file from the first.
-    fn show_file(&mut self, path: &str, index: usize) -> Result<()> {
-        let first = self.capture.file(path).and_then(|file| {
-            let line = |side| file.lines(side).next().map(|(n, _)| (side, n));
-            line(Side::New).or_else(|| line(Side::Old))
-        });
-        if let Some((side, line)) = first
-            && self.diff.reveal(path, side, line).is_ok()
-        {
-            return Ok(());
-        }
-        for _ in 0..self.diff.paths().len() {
-            self.diff.run(Command::PreviousFile)?;
-        }
-        for _ in 0..index {
-            self.diff.run(Command::NextFile)?;
-        }
         Ok(())
     }
 }

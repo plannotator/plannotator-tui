@@ -448,16 +448,18 @@ impl Screen {
         }
     }
 
-    /// `n`/`N` in the view: the next or previous changed file, same version, from its top.
+    /// `n`/`N` in the view: the next or previous file the list shows, same version, from its
+    /// top.
     fn whole_next_file(&mut self, delta: isize) {
         let Some(whole) = &self.whole else { return };
         let (path, version) = (whole.path.clone(), whole.version);
-        let at = self.capture.files.iter().position(|f| f.path == path);
+        let shown = self.files.shown();
+        let at = shown.iter().position(|p| *p == path);
         let next = match at {
-            Some(i) => i.checked_add_signed(delta).filter(|&n| n < self.capture.files.len()),
+            Some(i) => i.checked_add_signed(delta).filter(|&n| n < shown.len()),
             None => Some(0),
         };
-        match next.and_then(|n| self.capture.files.get(n)).map(|f| f.path.clone()) {
+        match next.and_then(|n| shown.get(n)).cloned() {
             Some(next) => self.show_whole(&next, version, None),
             None => self.status = Some(if delta > 0 { "last file" } else { "first file" }.into()),
         }

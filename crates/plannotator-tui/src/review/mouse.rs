@@ -101,9 +101,10 @@ impl Screen {
         }
     }
 
-    /// The left button down in the diff pane: the viewer moves the cursor (or, in its file
-    /// list, opens the file), and on a line of code a drag can start. A shift-click is the
-    /// viewer's own: it grows the selection to the clicked line.
+    /// The left button down in the diff pane: the viewer moves the cursor, and on a line of
+    /// code a drag can start. A shift-click is the viewer's own: it grows the selection to
+    /// the clicked line. The file list and the lines between the panes take their presses
+    /// before this.
     pub(super) fn press(&mut self, mouse: MouseEvent) -> Result<()> {
         self.focus = Focus::Diff;
         self.drag = None;

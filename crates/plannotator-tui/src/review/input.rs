@@ -42,21 +42,32 @@ impl Screen {
             self.last_key = Some(std::time::Instant::now());
             self.toolbar = None;
         }
+        let moves = match &event {
+            Event::Key(key) => key.kind != KeyEventKind::Release,
+            Event::Mouse(mouse) => mouse.kind != MouseEventKind::Moved,
+            _ => false,
+        };
         match event {
-            Event::Key(key) if key.kind != KeyEventKind::Release => self.key(key),
-            Event::Paste(text) if matches!(self.mode, Mode::Compose(_)) => {
-                self.compose.insert_text(&text);
-                Ok(())
-            }
-            Event::Mouse(mouse) => self.mouse(mouse),
+            Event::Key(key) if key.kind != KeyEventKind::Release => self.key(key)?,
+            Event::Paste(text) if matches!(self.mode, Mode::Compose(_)) => self.compose.insert_text(&text),
+            Event::Paste(text) if self.mode == Mode::FilterFiles => self.paste_filter(&text),
+            Event::Mouse(mouse) => self.mouse(mouse)?,
             Event::Resize(..) => {
                 if let Some(whole) = &mut self.whole {
                     whole.handle_event(event.clone())?;
                 }
-                self.diff.handle_event(event).map(drop)
+                self.diff.handle_event(event)?;
             }
-            _ => Ok(()),
+            _ => {}
         }
+        // Whatever moved the diff (a key, a note picked in the rail, a jump, the mouse), the
+        // file list and the footer follow the file its cursor is in.
+        // Not mid-drag: finding the file can press the cursor off a heading and back, which
+        // may scroll the rows under the pointer. The release finds it.
+        if moves && self.drag.is_none() && matches!(self.mode, Mode::Browse | Mode::FilterFiles) {
+            self.track_current()?;
+        }
+        Ok(())
     }
 
     fn key(&mut self, key: KeyEvent) -> Result<()> {
@@ -114,6 +125,8 @@ impl Screen {
                 Ok(())
             }
             Mode::Pick(pick) => self.pick_key(key, pick),
+            Mode::FilterFiles => self.filter_key(key),
+            Mode::Kinds(cursor) => self.kinds_key(key, cursor),
             Mode::Help => {
                 let room = self.help_room.get();
                 match self.keys.action(&key, keys::HELP) {
@@ -143,7 +156,7 @@ impl Screen {
                         self.show_selected_note();
                         Focus::Notes
                     }
-                    Focus::Diff | Focus::Notes => Focus::Diff,
+                    Focus::Diff | Focus::Notes | Focus::Files => Focus::Diff,
                 };
                 return Ok(());
             }
@@ -184,6 +197,7 @@ impl Screen {
         match self.focus {
             Focus::Diff => self.diff_key(key),
             Focus::Notes => self.notes_key(key),
+            Focus::Files => self.files_key(key),
         }
     }
 
@@ -204,6 +218,24 @@ impl Screen {
             Action::GoToDefinition => return self.go_to_definition(),
             Action::JumpBack => return self.jump_history(false),
             Action::JumpForward => return self.jump_history(true),
+            // The file list's keys work the same over the whole-file view.
+            Action::ToggleFiles => {
+                self.toggle_files();
+                return Ok(());
+            }
+            Action::FilterFiles => {
+                self.start_file_filter();
+                return Ok(());
+            }
+            Action::FilterKinds => {
+                self.mode = Mode::Kinds(0);
+                return Ok(());
+            }
+            Action::HideViewed => return self.toggle_hide_viewed(),
+            Action::NarrowFiles | Action::WidenFiles => {
+                self.resize_files(action == Action::WidenFiles);
+                return Ok(());
+            }
             _ => {}
         }
         if self.whole.is_some() {
@@ -228,11 +260,10 @@ impl Screen {
             Action::Bottom => Command::LastSource,
             Action::NextHunk => Command::NextHunk,
             Action::PreviousHunk => Command::PreviousHunk,
-            Action::NextFile => Command::NextFile,
-            Action::PreviousFile => Command::PreviousFile,
+            Action::NextFile => return self.step_file(true),
+            Action::PreviousFile => return self.step_file(false),
             Action::ToggleLayout => Command::ToggleLayout,
             Action::ToggleWrap => Command::ToggleWrap,
-            Action::ToggleFiles => Command::Files,
             Action::ToggleViewed => return self.toggle_viewed(),
             Action::NextUnviewed => return self.jump_unviewed(true),
             Action::PreviousUnviewed => return self.jump_unviewed(false),
@@ -322,13 +353,20 @@ impl Screen {
             Mode::Browse => {}
             _ => return Ok(()),
         }
-        // A drag goes on wherever the pointer is, over the rail or past the pane.
+        // A drag that selects lines goes on wherever the pointer is, over the list, the
+        // notes or past the pane.
         if self.drag.is_some() {
             match mouse.kind {
                 MouseEventKind::Drag(MouseButton::Left) => return self.drag_to(mouse),
                 MouseEventKind::Up(MouseButton::Left) => return self.release(mouse),
                 _ => {}
             }
+        }
+        if self.geometry.files.contains(at) {
+            if click {
+                self.toolbar = None;
+            }
+            return self.files_mouse(mouse);
         }
         if click && let Some(action) = self.toolbar_hit(at) {
             self.toolbar = None;
@@ -366,9 +404,10 @@ impl Screen {
             if click {
                 return self.press(mouse);
             }
-            match &mut self.whole {
-                Some(whole) => whole.handle_event(Event::Mouse(mouse))?,
-                None => self.diff.handle_event(Event::Mouse(mouse)).map(drop)?,
+            if let Some(whole) = &mut self.whole {
+                whole.handle_event(Event::Mouse(mouse))?;
+            } else {
+                self.diff.handle_event(Event::Mouse(mouse))?;
             }
         }
         Ok(())

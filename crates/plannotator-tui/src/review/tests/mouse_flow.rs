@@ -309,11 +309,16 @@ fn a_click_in_the_file_list_opens_the_file_and_starts_no_selection() {
     let fixture = Fixture::new("mouse-files");
     fixture.write("notes.txt", "changed\n");
     let mut screen = fixture.open();
-    let row = locate(&mut screen, "notes.txt", false);
+    draw(&mut screen);
+    assert_eq!(screen.files.current.as_deref(), Some("app.py"));
+    // The list's own row, not the diff's heading for the file.
+    let y = screen.geometry.file_rows.iter().find(|(_, key)| key == "notes.txt").expect("a list row").0;
+    let row = (screen.geometry.files.x + 2, y);
     drag(&mut screen, row, (row.0, row.1 + 3));
     release(&mut screen, (row.0, row.1 + 3));
     assert_eq!(selection(&screen), None);
-    assert_eq!(screen.file_under_cursor().expect("cursor").as_deref(), Some("notes.txt"));
+    assert_eq!(screen.files.current.as_deref(), Some("notes.txt"));
+    assert_eq!(screen.focus, Focus::Files);
 }
 
 #[test]
