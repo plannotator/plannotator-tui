@@ -199,6 +199,7 @@ pub(crate) struct App {
     /// What to send once the picker that Send opened has a choice.
     pick_then: Option<send::PickThen>,
     send_state: SendState,
+    last_send: crate::ui::send_button::LastSend,
     /// What ending the review means; `Gate::Off` unless `--gate` or `--json` asked for a
     /// decision.
     pub(crate) gate: Gate,
@@ -307,6 +308,7 @@ impl App {
             reach: crate::ui::agent_picker::Reach::default(),
             pick_then: None,
             send_state,
+            last_send: crate::ui::send_button::LastSend::None,
             gate: Gate::Off,
             decision: None,
             folder_counts: HashMap::new(),

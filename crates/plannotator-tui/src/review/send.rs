@@ -10,7 +10,7 @@ use plannotator_tui_review::{CodeAnnotation, NoteScope, agent_feedback, pull_age
 use super::{Mode, Screen};
 use crate::archive::{self, AnnotationRecord, ReviewTarget, Submission, Target};
 use crate::delivery::{Clipboard, Delivery as _, DeliveryError};
-use crate::ui::send_button::SendState;
+use crate::ui::send_button::{LastSend, SendState};
 
 /// The largest feedback a send carries. Highlighted code is capped per note, so normal
 /// reviews stay far below this; a larger one is refused rather than cut.
@@ -89,6 +89,7 @@ impl Screen {
             Ok(()) => {
                 self.archive(&text, records, ids.len());
                 let saved = self.store.record_delivery(&target, &ids);
+                self.last_send = LastSend::to(self.delivery.is_agent());
                 let verb = if self.delivery.is_agent() { "sent" } else { "copied" };
                 let mut status = format!("{verb} {} note(s) → {target}", ids.len());
                 if let Some(notice) = self.delivery.notice() {
@@ -227,8 +228,8 @@ impl Screen {
         match &self.send_state {
             SendState::Blocked(_) => format!("{} at a dialog · retry{key}", self.delivery.describe()),
             SendState::Sent if self.delivery.is_agent() => format!("Sent ✓{to}"),
-            SendState::Sent if asks => "Sent ✓".to_owned(),
-            SendState::Sent => "Copied ✓".to_owned(),
+            SendState::Sent if self.last_send == LastSend::Clipboard => "Copied ✓".to_owned(),
+            SendState::Sent => "Sent ✓".to_owned(),
             SendState::Ready => format!("{verb} {count} new{to}{key}"),
         }
     }

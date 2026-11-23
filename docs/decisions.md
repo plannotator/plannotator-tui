@@ -252,7 +252,9 @@ Amended 2026-11-23: once everything is sent the button reads `Sent ✓ ▸ claud
 for the clipboard) instead of a zero count, and a blocked agent reads
 `claude at a dialog · retry (E)` in document and code reviews alike. Each state takes its text
 and background colours from the 256-colour table, never from the 16 ANSI colours a terminal
-theme remaps, at 4.5:1 or more in the dark and light themes; a unit test checks every pair.
+theme remaps, at 4.5:1 or more in the dark and light themes. The same holds for the Approve and
+Review buttons, the floating toolbar's labels, the current search match and the light cursor;
+one table-driven test (`ui::chips`) checks every pair.
 
 `annotations.json` gains `deliveries: [{at, target, annotation_ids}]`. It is what lets the
 button say "Sent" after a restart and, later, lets Workspaces know which comments the agent

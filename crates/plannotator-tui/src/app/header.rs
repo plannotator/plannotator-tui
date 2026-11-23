@@ -4,7 +4,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::Span;
 use unicode_width::UnicodeWidthStr;
 
@@ -12,10 +12,7 @@ use super::App;
 use crate::gate::Gate;
 use crate::keys::Action;
 use crate::theme::palette;
-
-// Sets its own foreground as well as its background, so it reads the same on a light
-// terminal as on a dark one.
-const APPROVE_BG: Color = Color::Indexed(28);
+use crate::ui::chips::chips;
 
 const REVIEW_LABEL: &str = "Review \u{25be}";
 
@@ -81,7 +78,7 @@ impl App {
             let style = match button {
                 Button::Approve => {
                     self.geometry.approve_button = Some(rect);
-                    Style::new().fg(Color::Black).bg(APPROVE_BG).bold()
+                    chips().approve
                 }
                 Button::Send => {
                     self.geometry.send_button = Some(rect);
@@ -89,7 +86,7 @@ impl App {
                 }
                 Button::Review => {
                     self.geometry.review_button = Some(rect);
-                    Style::new().fg(palette().accent).bg(palette().toolbar_bg)
+                    Style::new().fg(chips().menu_fg).bg(palette().toolbar_bg)
                 }
             };
             frame.buffer_mut().set_span(rect.x, rect.y, &Span::styled(label, style), rect.width);

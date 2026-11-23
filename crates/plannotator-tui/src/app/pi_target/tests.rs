@@ -203,9 +203,13 @@ mod in_herdr {
         // Send goes there from now on, and `P` offers the way back to the clipboard.
         assert_eq!(app.delivery.describe(), "claude in w1:p2");
         assert!(app.send_label().contains("▸ claude in w1:p2"), "{}", app.send_label());
+        assert_eq!(app.send_label(), "Sent ✓ ▸ claude in w1:p2");
         app.open_pi_picker();
         assert!(!app.agent_picker.copy_row);
         assert_eq!(app.pi_rows(), 3, "two agents and the way back");
+        // Back to asking: the notes went to an agent, so the button says sent, not copied.
+        app.choose_target(2).expect("choose");
+        assert_eq!(app.send_label(), "Sent ✓");
         std::fs::remove_dir_all(root).expect("cleanup");
     }
 
@@ -227,6 +231,7 @@ mod in_herdr {
         enter(&mut app);
         assert_eq!(copy.copied.borrow().len(), 1, "the copy row copies");
         assert_eq!(app.status.as_deref(), Some("copied 1 annotation(s) → clipboard"));
+        assert_eq!(app.send_label(), "Copied ✓");
         assert!(!fake.join("prompts").exists(), "no agent was prompted");
         // The clipboard is still the target, so the next Send asks again.
         app.add_quote_annotation("three", Kind::Comment, "and this".into()).expect("note");
@@ -244,6 +249,7 @@ mod in_herdr {
         press(&mut app, 'E');
         assert_eq!(app.mode, Mode::Browse);
         assert_eq!(copy.copied.borrow().len(), 1);
+        assert_eq!(app.send_label(), "Copied ✓");
         std::fs::remove_dir_all(root).expect("cleanup");
     }
 

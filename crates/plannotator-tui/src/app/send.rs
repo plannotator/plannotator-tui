@@ -15,6 +15,7 @@ use crate::store::{Location, Store};
 #[cfg(test)]
 mod tests;
 
+use crate::ui::send_button::LastSend;
 pub(super) use crate::ui::send_button::SendState;
 
 /// A send waiting on the agent picker that Send opened: what to send, and whether to close after.
@@ -77,6 +78,7 @@ impl App {
                 let sent = (feedback.text.clone(), feedback.count);
                 self.archive_submission(&mut feedback, "feedback");
                 let errors = self.remember_delivery(&mut feedback, &target);
+                self.last_send = LastSend::to(self.delivery.is_agent());
                 self.derive_send_state();
                 let verb = if self.delivery.is_agent() { "sent" } else { "copied" };
                 let across = if self.tree.is_some() {
@@ -233,8 +235,8 @@ impl App {
         match &self.send_state {
             SendState::Blocked(_) => return format!("{target} at a dialog · retry{key}"),
             SendState::Sent if self.delivery.is_agent() => return format!("Sent ✓ ▸ {target}"),
-            SendState::Sent if asks => return "Sent ✓".to_owned(),
-            SendState::Sent => return "Copied ✓".to_owned(),
+            SendState::Sent if self.last_send == LastSend::Clipboard => return "Copied ✓".to_owned(),
+            SendState::Sent => return "Sent ✓".to_owned(),
             SendState::Ready => {}
         }
         if self.is_file_review() {
