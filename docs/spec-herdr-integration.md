@@ -136,12 +136,13 @@ decided by the same rule as the footer:
 ```
 target is an agent pane   →  [ Send 3 to claude ▸ ]     click or E
 target is the clipboard   →  [ Copy 3 as feedback ]     click or E
-no annotations yet        →  button shown dimmed, does nothing
+no annotations yet        →  button shown in muted grey, says "nothing to send"
 ```
 
-After a click the button reads `Sent ▸ claude` for a few seconds, then returns. On
-`agent_blocked` it reads `claude at a dialog · retry` and stays clickable so
-a second click retries. The button, `E` and `S` call the same `App::send`; there is no second
+After a send the button reads `Sent ✓ ▸ claude` (`Copied ✓` for the clipboard) in a quiet
+green until there is something new to send, then counts again. On `agent_blocked` it reads
+`claude at a dialog · retry (E)` in amber and stays clickable so a second click retries.
+The button, `E` and `S` call the same `App::send`; there is no second
 path. In a reply review, `S` then quits unless something is still unsent. Dropped: #2
 (selection), it was a worse #4 and a worse #5.
 

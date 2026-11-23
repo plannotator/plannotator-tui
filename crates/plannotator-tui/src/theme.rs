@@ -88,8 +88,8 @@ impl Theme {
 /// The backgrounds are here because they are painted *under* text whose colour belongs to
 /// the terminal: a fixed dark background hides dark text on a light terminal, and the other
 /// way round. The foregrounds are ANSI colours that already follow the terminal, so both
-/// palettes share them; they are here so `[colors]` can reach them. Styles that set both a
-/// foreground and a background read the same either way and stay where they are used.
+/// palettes share them; they are here so `[colors]` can reach them. The text of the header
+/// buttons and the floating toolbar, which sits on a background we paint, is in `ui::chips`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Palette {
     /// Focused borders and gutter, the open file in the tree, active header text.
@@ -100,13 +100,13 @@ pub(crate) struct Palette {
     pub(crate) subheading: Color,
     /// Comment titles, the compose box, annotated rows in the gutter, tree counts.
     pub(crate) comment: Color,
-    /// Looks-good titles and toolbar label.
+    /// Looks-good titles.
     pub(crate) looks_good: Color,
-    /// Delete titles, toolbar label and struck-through text.
+    /// Delete titles and struck-through text.
     pub(crate) delete: Color,
     /// The focused block's bar, and the focused row of the file tree.
     pub(crate) block_bg: Color,
-    /// The floating toolbar and the idle header buttons.
+    /// The floating toolbar and the idle header buttons. The text on it is `ui::chips`'.
     pub(crate) toolbar_bg: Color,
     /// The foreground of a header button with nothing to do.
     pub(crate) idle_fg: Color,
@@ -162,7 +162,8 @@ pub(crate) static DARK: Palette = Palette {
     code_comment: Color::DarkGray,
     // Blue and orange: no annotation tint, the block bar or the cursor uses either hue.
     search: Style::new().bg(Color::Indexed(24)),
-    search_current: Style::new().bg(Color::Indexed(208)).fg(Color::Black),
+    // Black from the 256-colour cube: ANSI black is whatever the terminal theme makes it.
+    search_current: Style::new().bg(Color::Indexed(208)).fg(Color::Indexed(16)),
 };
 
 /// The same roles, light. The greys mirror the dark ones about the middle of the ramp, so
@@ -177,12 +178,14 @@ pub(crate) static LIGHT: Palette = Palette {
     looks_good: DARK.looks_good,
     delete: DARK.delete,
     block_bg: Color::Indexed(254),
-    toolbar_bg: Color::Indexed(252),
+    // 253, not 252: the darkest grey the light toolbar's dark amber comment label still
+    // reads on at 4.5:1 (`ui::chips`).
+    toolbar_bg: Color::Indexed(253),
     idle_fg: Color::DarkGray,
     comment_bg: Color::Indexed(222),
     approve_bg: Color::Indexed(157),
     // A dark cell with its own light foreground, so the glyph under the cursor stays legible.
-    cursor: Style::new().bg(Color::Indexed(238)).fg(Color::White),
+    cursor: Style::new().bg(Color::Indexed(238)).fg(Color::Indexed(231)),
     selection: Style::new().bg(Color::Indexed(153)),
     // Light yellow, the code colour on dark, all but vanishes on white: a dark amber instead.
     code: Color::Indexed(94),
@@ -196,7 +199,7 @@ pub(crate) static LIGHT: Palette = Palette {
     code_type: Color::Indexed(30),
     code_comment: DARK.code_comment,
     search: Style::new().bg(Color::Indexed(117)),
-    search_current: Style::new().bg(Color::Indexed(214)).fg(Color::Black),
+    search_current: Style::new().bg(Color::Indexed(214)).fg(Color::Indexed(16)),
 };
 
 /// A colour as `[colors]` writes it: a name (`yellow`, `light-cyan`), a 256-colour index
@@ -389,8 +392,7 @@ pub(crate) fn install(theme: Theme, colors: &Colors) {
 }
 
 /// The theme in force: dark until [`install`] says otherwise. The diff viewer colours its
-/// code by it.
-#[cfg_attr(not(unix), allow(dead_code, reason = "only the code review reads it"))]
+/// code by it, and the Send button picks its colours by it.
 pub(crate) fn theme() -> Theme {
     THEME.get().copied().unwrap_or(Theme::Dark)
 }

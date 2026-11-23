@@ -117,6 +117,9 @@ fn the_header_draws_the_send_button_and_records_where_it_is() {
     let rect = app.geometry.send_button.expect("button rect recorded");
     assert_eq!(rect.y, 0);
     assert_eq!(rect.right(), 80, "the button sits on the right edge");
+    app.send_state = SendState::Sent;
+    let rows = draw(&mut app);
+    assert!(row(&rows, 0).ends_with("Sent ✓ ▸ claude in w1:p1 "), "header was {:?}", row(&rows, 0));
 }
 
 #[test]

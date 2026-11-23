@@ -15,6 +15,7 @@ use crate::store::{Location, Store};
 #[cfg(test)]
 mod tests;
 
+use crate::ui::send_button::LastSend;
 pub(super) use crate::ui::send_button::SendState;
 
 /// A send waiting on the agent picker that Send opened: what to send, and whether to close after.
@@ -77,6 +78,7 @@ impl App {
                 let sent = (feedback.text.clone(), feedback.count);
                 self.archive_submission(&mut feedback, "feedback");
                 let errors = self.remember_delivery(&mut feedback, &target);
+                self.last_send = LastSend::to(self.delivery.is_agent());
                 self.derive_send_state();
                 let verb = if self.delivery.is_agent() { "sent" } else { "copied" };
                 let across = if self.tree.is_some() {
@@ -226,6 +228,17 @@ impl App {
         let count = self.send_count();
         // Nothing named a target, but Send asks which agent first.
         let asks = self.reach.asks(self.delivery.as_ref());
+        let key = match self.keys.hint(Action::Send) {
+            key if key.is_empty() => String::new(),
+            key => format!(" ({key})"),
+        };
+        match &self.send_state {
+            SendState::Blocked(_) => return format!("{target} at a dialog · retry{key}"),
+            SendState::Sent if self.delivery.is_agent() => return format!("Sent ✓ ▸ {target}"),
+            SendState::Sent if self.last_send == LastSend::Clipboard => return "Copied ✓".to_owned(),
+            SendState::Sent => return "Sent ✓".to_owned(),
+            SendState::Ready => {}
+        }
         if self.is_file_review() {
             let verb = if self.delivery.is_agent() || asks { "Send" } else { "Copy" };
             let across = if self.tree.is_some() {
@@ -240,24 +253,14 @@ impl App {
             } else {
                 String::new()
             };
-            let key = match self.keys.hint(Action::Send) {
-                key if key.is_empty() => String::new(),
-                key => format!(" ({key})"),
-            };
             return format!("{verb} {count} new{across}{to}{key}");
         }
         if self.delivery.is_agent() {
-            match &self.send_state {
-                SendState::Ready => format!("Send {count} to {target} ▸"),
-                SendState::Sent => format!("Sent ▸ {target}"),
-                SendState::Blocked(_) => format!("{target} at a dialog · click to retry"),
-            }
+            format!("Send {count} to {target} ▸")
+        } else if asks {
+            format!("Send {count} ▸ choose agent")
         } else {
-            match &self.send_state {
-                SendState::Sent => "Copied".to_owned(),
-                SendState::Ready | SendState::Blocked(_) if asks => format!("Send {count} ▸ choose agent"),
-                SendState::Ready | SendState::Blocked(_) => format!("Copy {count} as feedback"),
-            }
+            format!("Copy {count} as feedback")
         }
     }
 

@@ -78,7 +78,7 @@ fn the_zero_pending_button_stays_visible_and_does_not_send_or_record_another_del
     let location = Location::for_file(&app.data_dir, &app.project, &root.join("docs/a.md"));
     let before = std::fs::read(&location.record).expect("record");
     let screen = draw(&mut app, 80, 24);
-    assert!(screen.contains("Send 0 new"));
+    assert!(screen.contains("Sent ✓ ▸ test agent"), "{screen}");
     let rect = app.geometry.send_button.expect("still clickable");
     click(&mut app, rect);
     assert_eq!(delivery.calls.borrow().len(), 1);
@@ -87,6 +87,18 @@ fn the_zero_pending_button_stays_visible_and_does_not_send_or_record_another_del
     press(&mut app, 'q');
     assert!(app.quit, "no pending feedback means no quit confirmation");
     assert_eq!(app.mode, Mode::Browse);
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn the_button_says_sent_after_a_send_and_counts_again_once_there_is_something_new() {
+    let (root, mut app, _delivery) = file_app("sent-label");
+    app.add_quote_annotation("one", Kind::Comment, "A".into()).expect("A");
+    assert_eq!(app.send_label(), "Send 1 new ▸ test agent (E)");
+    press(&mut app, 'E');
+    assert_eq!(app.send_label(), "Sent ✓ ▸ test agent");
+    app.add_quote_annotation("two", Kind::Comment, "B".into()).expect("B");
+    assert_eq!(app.send_label(), "Send 1 new ▸ test agent (E)");
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -104,6 +116,9 @@ fn unsuccessful_sends_leave_the_record_pending_and_offer_retry() {
         let status = app.status.as_deref().expect("failure status");
         assert!(status.contains("E retry"), "{status}");
         assert!(!status.contains("copied"), "clipboard was disabled");
+        if matches!(outcome, Outcome::Blocked) {
+            assert_eq!(app.send_label(), "test agent at a dialog · retry (E)");
+        }
         assert!(!app.data_dir.join("feedback").exists(), "no submission history for a failure");
         reopen(&mut app);
         assert_eq!(app.send_count(), 1);
