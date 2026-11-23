@@ -248,6 +248,12 @@ pending, and the button and footer say the agent is at a dialog; `E` retries. Th
 every agent target (Herdr, Rex, herdr-core, a delivery command's exit 75) in document and code
 reviews. A missing agent (`Unavailable`) still copies.
 
+Amended 2026-11-23: once everything is sent the button reads `Sent ✓ ▸ claude` (`Copied ✓`
+for the clipboard) instead of a zero count, and a blocked agent reads
+`claude at a dialog · retry (E)` in document and code reviews alike. Each state takes its text
+and background colours from the 256-colour table, never from the 16 ANSI colours a terminal
+theme remaps, at 4.5:1 or more in the dark and light themes; a unit test checks every pair.
+
 `annotations.json` gains `deliveries: [{at, target, annotation_ids}]`. It is what lets the
 button say "Sent" after a restart and, later, lets Workspaces know which comments the agent
 has already seen. It is append-only and absent until the first send, so records written by

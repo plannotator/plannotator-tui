@@ -389,8 +389,7 @@ pub(crate) fn install(theme: Theme, colors: &Colors) {
 }
 
 /// The theme in force: dark until [`install`] says otherwise. The diff viewer colours its
-/// code by it.
-#[cfg_attr(not(unix), allow(dead_code, reason = "only the code review reads it"))]
+/// code by it, and the Send button picks its colours by it.
 pub(crate) fn theme() -> Theme {
     THEME.get().copied().unwrap_or(Theme::Dark)
 }

@@ -82,8 +82,10 @@ no `S`; they finish with `F`.
 For file and folder reviews, `E` sends only new or edited annotations. Send A and B, then
 add C: the next send includes just C. Sent notes stay visible with a marker; editing one
 makes it pending again, including after a restart. `R` **Resend all** includes every active
-note. With nothing pending, `E` reports “nothing new to send”. A failed send keeps the notes
-pending for retry.
+note. With nothing pending, `E` reports “nothing new to send” and the button reads
+`Sent ✓ ▸ claude in w1:p2` (`Copied ✓` for the clipboard) until there is a new note. When
+the agent is at a dialog it reads `claude in w1:p2 at a dialog · retry (E)`. A failed send
+keeps the notes pending for retry.
 
 `F` **Finish review** archives sent, unchanged notes and leaves pending ones in place.
 `U` undoes the last finish during this session. `H` opens the archive, where Enter or a

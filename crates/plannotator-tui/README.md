@@ -29,7 +29,9 @@ Selections and exports are copied to the terminal clipboard (OSC 52).
 Sent notes remain visible. File reviews send only new or edited notes by default;
 `R` explicitly includes the sent ones too. `F` archives only sent notes that have not
 changed since delivery. Archived notes survive restarts, and restoring them keeps their
-ids and delivery history. Failed sends keep the feedback pending. The header shows the
+ids and delivery history. Failed sends keep the feedback pending. The send button reads
+`Send 3 new ▸ <agent> (E)` with notes to send, `Sent ✓ ▸ <agent>` once they are sent, and
+`<agent> at a dialog · retry (E)` when the agent cannot take them. The header shows the
 send button and a `Review ▾ (m)` button; its menu lists the four actions with live counts,
 dims the ones with nothing to act on, and runs a row on `Enter`, a click, or the row's own
 key. The keys also work directly, without the menu.

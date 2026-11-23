@@ -226,7 +226,10 @@ impl Screen {
         };
         match &self.send_state {
             SendState::Blocked(_) => format!("{} at a dialog · retry{key}", self.delivery.describe()),
-            _ => format!("{verb} {count} new{to}{key}"),
+            SendState::Sent if self.delivery.is_agent() => format!("Sent ✓{to}"),
+            SendState::Sent if asks => "Sent ✓".to_owned(),
+            SendState::Sent => "Copied ✓".to_owned(),
+            SendState::Ready => format!("{verb} {count} new{to}{key}"),
         }
     }
 }
