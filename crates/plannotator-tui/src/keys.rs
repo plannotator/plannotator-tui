@@ -64,6 +64,10 @@ pub(crate) enum Action {
     /// Copy the waiting selection to the clipboard.
     #[serde(rename = "copy")]
     CopySelection,
+    /// Copy the selected lines of the code review's diff. Its own action, so the keys a
+    /// config gave the diff before it existed keep their meaning; it takes `copy`'s keys
+    /// when only those are set.
+    CopyLines,
     Yes,
     No,
     // Code review (`plannotator-tui review`).
@@ -123,11 +127,11 @@ pub(crate) enum Action {
 }
 
 use Action::{
-    Approve, Archive, AttachImage, Back, Bottom, ClearAll, ClearBlock, Comment, Confirm, CopySelection,
-    CycleFocus, Delete, Down, Edit, FinishReview, Interrupt, Left, LineEnd, LineStart, LooksGood, MoveCursor,
-    No, OpenInEditor, PageDown, PageUp, PickMessage, PickTarget, QuickOpen, Quit, Reload, Remove,
-    RemoveImage, ResendAll, ReviewMenu, Right, Send, SendAndClose, ToggleHidden, ToggleTree, Top, UndoFinish,
-    Up, Visual, VisualLine, WordBack, WordEnd, WordForward, Yes,
+    Approve, Archive, AttachImage, Back, Bottom, ClearAll, ClearBlock, Comment, Confirm, CopyLines,
+    CopySelection, CycleFocus, Delete, Down, Edit, FinishReview, Interrupt, Left, LineEnd, LineStart,
+    LooksGood, MoveCursor, No, OpenInEditor, PageDown, PageUp, PickMessage, PickTarget, QuickOpen, Quit,
+    Reload, Remove, RemoveImage, ResendAll, ReviewMenu, Right, Send, SendAndClose, ToggleHidden, ToggleTree,
+    Top, UndoFinish, Up, Visual, VisualLine, WordBack, WordEnd, WordForward, Yes,
 };
 use Action::{
     ChangeComment, FileComment, Help, NextFile, NextHunk, NextMatch, NextUnviewed, PreviousFile,
@@ -263,7 +267,7 @@ pub(crate) const DIFF: &[Action] = &[
     NarrowFiles,
     WidenFiles,
     Confirm,
-    CopySelection,
+    CopyLines,
 ];
 /// The code review's file list.
 pub(crate) const FILES: &[Action] = &[
@@ -471,6 +475,7 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (LooksGood, &[ch('a')]),
     (Delete, &[ch('d')]),
     (CopySelection, &[ch('y')]),
+    (CopyLines, &[ch('y')]),
     (Yes, &[ch('y'), ch('Y')]),
     (No, &[ch('n'), ch('N')]),
     (Suggest, &[ch('s')]),
@@ -512,8 +517,10 @@ const DEFAULTS: &[(Action, &[Key])] = &[
 
 /// Actions added after configs were written: `approve` (live only in a gated review), `copy`
 /// (on a waiting selection), `word-end`, `visual-line`, the code review's own, the reading
-/// column's, `toggle-notes` and search.
+/// column's, `toggle-notes` and search. `copy-lines` comes first: it is the newest, so it
+/// yields a key before an older action does.
 const LATE: &[Action] = &[
+    CopyLines,
     Approve,
     CopySelection,
     WordEnd,
@@ -569,7 +576,12 @@ impl<'de> Deserialize<'de> for Keymap {
         let entries = BTreeMap::<Action, Vec<Key>>::deserialize(deserializer)?;
         let user_keys: Vec<Key> = entries.values().flatten().copied().collect();
         let unset: Vec<Action> = LATE.iter().copied().filter(|late| !entries.contains_key(late)).collect();
+        // Copying in the diff follows the keys a config gave `copy`, unless it says otherwise.
+        let copy = entries.get(&CopySelection).filter(|_| !entries.contains_key(&CopyLines)).cloned();
         keymap.0.extend(entries);
+        if let Some(keys) = copy {
+            keymap.0.insert(CopyLines, keys);
+        }
         // Their default keys yield to a config that gives those keys to another action, so
         // a config that loaded before they existed still loads.
         for late in unset {
@@ -702,6 +714,7 @@ impl Action {
             Self::LooksGood => "looks-good",
             Self::Delete => "delete",
             Self::CopySelection => "copy",
+            Self::CopyLines => "copy-lines",
             Self::Yes => "yes",
             Self::No => "no",
             Self::Suggest => "suggest",

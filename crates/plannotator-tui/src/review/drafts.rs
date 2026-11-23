@@ -47,14 +47,13 @@ impl Screen {
     }
 
     /// `C`: comment on the whole file under the cursor.
-    pub(super) fn start_file_comment(&mut self) -> Result<()> {
-        let Some(path) = self.file_under_cursor()? else {
+    pub(super) fn start_file_comment(&mut self) {
+        let Some(path) = self.file_under_cursor() else {
             self.status = Some("move the cursor onto a line of the file first".into());
-            return Ok(());
+            return;
         };
         self.compose = Compose::default();
         self.mode = Mode::Compose(Draft::File(path));
-        Ok(())
     }
 
     /// `M`, or the Review menu's first row: comment on the whole change, on no file. It sits

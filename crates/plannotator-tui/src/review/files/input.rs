@@ -40,8 +40,10 @@ impl Screen {
 
     /// `narrow-files`, `widen-files`: the list's width, by four columns.
     pub(in crate::review) fn resize_files(&mut self, wider: bool) {
-        // From the width last asked for, so keys pressed between two frames add up.
+        // From the width last asked for, so keys pressed between two frames add up; from
+        // the width shown when the room could not give the one asked for.
         let now = match (self.files.chosen_width, self.files.drawn_width) {
+            (Some(_), drawn) if self.files.clamped => drawn,
             (Some(chosen), _) => chosen,
             (None, 0) => fit::MIN_WIDTH,
             (None, drawn) => drawn,

@@ -50,7 +50,7 @@ fn x_marks_the_file_viewed_in_the_browsers_record_and_an_edit_drops_it() {
 
     // ctrl+n: the next file not viewed.
     ctrl_n(&mut screen);
-    assert_eq!(screen.file_under_cursor().expect("cursor").as_deref(), Some("notes.txt"));
+    assert_eq!(screen.file_under_cursor().as_deref(), Some("notes.txt"));
     keys(&mut screen, "x");
     ctrl_n(&mut screen);
     assert_eq!(screen.status.as_deref(), Some("every file is viewed"));
@@ -148,7 +148,7 @@ fn the_file_list_ticks_follow_the_marks_with_the_rail_open_or_hidden_and_across_
     assert!(!ticked(&mut screen, 160, "app.py") && ticked(&mut screen, 160, "notes.txt"));
     // x unticks too.
     ctrl_n(&mut screen);
-    assert_eq!(screen.file_under_cursor().expect("cursor").as_deref(), Some("app.py"));
+    assert_eq!(screen.file_under_cursor().as_deref(), Some("app.py"));
     keys(&mut screen, "x");
     assert!(ticked(&mut screen, 160, "app.py"));
     at(&mut screen, 9);

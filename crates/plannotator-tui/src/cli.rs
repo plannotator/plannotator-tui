@@ -12,8 +12,9 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use plannotator_tui_schema::{DocumentSource, Kind};
 use ratatui::crossterm::event::{
-    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+    EnableFocusChange, EnableMouseCapture, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use ratatui::crossterm::execute;
 
@@ -634,7 +635,9 @@ pub(crate) fn with_terminal<T>(
 /// Bracketed paste and, where the terminal has it, the kitty keyboard protocol. Mouse
 /// capture is the caller's: the first claim turns it on before the keyboard query.
 fn claim_input(shift_enter: bool) {
-    let _ = execute!(stdout(), EnableBracketedPaste);
+    // Focus changes tell the code review the pointer left, so a drag whose release went
+    // elsewhere ends; the document screen ignores them.
+    let _ = execute!(stdout(), EnableBracketedPaste, EnableFocusChange);
     if shift_enter {
         let _ = execute!(
             stdout(),
@@ -648,7 +651,7 @@ fn release_input(shift_enter: bool) {
     if shift_enter {
         let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
     }
-    let _ = execute!(stdout(), DisableBracketedPaste);
+    let _ = execute!(stdout(), DisableFocusChange, DisableBracketedPaste);
     let _ = execute!(stdout(), DisableMouseCapture);
 }
 

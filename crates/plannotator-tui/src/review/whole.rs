@@ -347,7 +347,7 @@ impl Screen {
             };
             (path, line)
         } else {
-            let Some(path) = self.file_under_cursor()? else {
+            let Some(path) = self.file_under_cursor() else {
                 self.status = Some("move the cursor onto a file first".into());
                 return Ok(());
             };

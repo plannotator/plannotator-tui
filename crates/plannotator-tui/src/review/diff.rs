@@ -15,14 +15,23 @@ use diffs_rs::reading::SourceRange;
 use diffs_rs::theme::Appearance;
 use plannotator_tui_review::{Capture, Side};
 use ratatui::Frame;
-use ratatui::crossterm::event::{Event, MouseEventKind};
+use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 
+mod model;
 mod place;
 mod sections;
 
+pub(super) use place::At;
+use place::Move;
 use sections::Sections;
+
+/// A number no viewer's patch had before.
+fn next_generation() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
 
 /// Lines `first..=last` on one side of the file at `path` (the capture's path).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,10 +61,26 @@ pub(super) struct Diff {
     paths: Vec<String>,
     /// A whole-file view's one file, named by its capture path whatever the patch says.
     fixed: Option<String>,
-    /// Where the cursor was last found (`place`).
-    place: Option<place::Place>,
-    /// Whether the last move went down (`Some(true)`), up, or either way.
-    moved: Option<bool>,
+    /// The rows the viewer lays out, from the patch it was given (`model`).
+    rows: model::Rows,
+    /// Where the cursor is (`place`).
+    at: Option<At>,
+    /// The first row drawn, when it is known.
+    top: Option<(usize, usize)>,
+    /// A jump from a row not known put the cursor on the first row drawn.
+    at_top: bool,
+    /// What the last frame showed, row by row.
+    seen: Option<place::Seen>,
+    /// Whether the two sides show next to each other, and the size last drawn.
+    split: bool,
+    size: (u16, u16),
+    /// Where it was drawn last.
+    area: Rect,
+    /// Which patch is shown, unique among every viewer opened, so a drag can tell its lines
+    /// are from an earlier one or from another view.
+    generation: u64,
+    /// What the footer should say about the last move, once.
+    notice: Option<&'static str>,
     /// Drawn since its files last changed.
     drawn: bool,
 }
@@ -90,15 +115,33 @@ impl Diff {
         // Draw on the terminal's own background and text colour, as the document screen does;
         // the changed-line tints come from the light or dark palette picked above.
         engine.set_terminal_background(true)?;
-        Ok(Self {
+        Ok(Self::with(engine, Some((capture.patch_key.clone(), sections)), None, patch))
+    }
+
+    fn with(
+        engine: Engine,
+        sections: Option<(String, Sections)>,
+        fixed: Option<String>,
+        patch: Vec<u8>,
+    ) -> Self {
+        Self {
             engine,
-            sections: Some((capture.patch_key.clone(), sections)),
+            sections,
             paths: Vec::new(),
-            fixed: None,
-            place: None,
-            moved: None,
+            fixed,
+            rows: model::Rows::new(patch),
+            // A new viewer starts on its first row: the first file's heading.
+            at: Some(At::Row { file: 0, row: 0 }),
+            top: Some((0, 0)),
+            at_top: false,
+            seen: None,
+            split: false,
+            size: (0, 0),
+            area: Rect::default(),
+            generation: next_generation(),
+            notice: None,
             drawn: false,
-        })
+        }
     }
 
     /// A whole-file view: `patch` is one file as a single unchanged hunk (`super::whole`),
@@ -114,15 +157,7 @@ impl Diff {
         let mut engine = Engine::open(input, options, wake).context("opening the whole-file view")?;
         // The same terminal background as the diff, so both views match.
         engine.set_terminal_background(true)?;
-        Ok(Self {
-            engine,
-            sections: None,
-            paths: Vec::new(),
-            fixed: Some(name.to_owned()),
-            place: None,
-            moved: None,
-            drawn: false,
-        })
+        Ok(Self::with(engine, None, Some(name.to_owned()), bytes.to_vec()))
     }
 
     /// Show the files at `paths` of `capture`, a new capture of the same review or the same
@@ -136,9 +171,21 @@ impl Diff {
         let input = input_bytes(&patch, capture.scope.title())?;
         self.engine.replace(input).context("reloading the diff viewer")?;
         self.paths.clear();
-        self.place = None;
+        self.rows = model::Rows::new(patch);
+        self.at = Some(At::Row { file: 0, row: 0 });
+        self.top = Some((0, 0));
+        self.at_top = false;
+        self.seen = None;
+        self.split = false;
+        self.size = (0, 0);
+        self.generation = next_generation();
         self.drawn = false;
         Ok(())
+    }
+
+    /// Counts the patches this viewer has shown.
+    pub(super) fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Take what the engine's workers have ready. True when more files arrived, so the
@@ -187,7 +234,10 @@ impl Diff {
     }
 
     pub(super) fn draw(&mut self, frame: &mut Frame, area: Rect) -> Result<()> {
-        self.engine.draw(frame, area)
+        self.engine.draw(frame, area)?;
+        self.area = area.intersection(frame.area());
+        self.read_frame(frame.buffer_mut(), self.area);
+        Ok(())
     }
 
     pub(super) fn after_draw(&mut self) {
@@ -220,33 +270,64 @@ impl Diff {
     }
 
     pub(super) fn run(&mut self, command: Command) -> Result<()> {
-        self.moved = match command {
-            Command::Down
-            | Command::PageDown
-            | Command::NextHunk
-            | Command::NextFile
-            | Command::LastSource => Some(true),
-            Command::Up
-            | Command::PageUp
-            | Command::PreviousHunk
-            | Command::PreviousFile
-            | Command::FirstSource => Some(false),
-            _ => self.moved,
+        let before = self.at;
+        let growing = self.growing();
+        let effect = self.engine.execute(command)?;
+        let how = match command {
+            _ if effect == InputEffect::Ignored => Move::Still,
+            Command::Down => Move::Step(1),
+            Command::Up => Move::Step(-1),
+            Command::PageDown => Move::Page(1),
+            Command::PageUp => Move::Page(-1),
+            Command::NextHunk => Move::Hunk(true),
+            Command::PreviousHunk => Move::Hunk(false),
+            Command::NextFile => Move::File(true),
+            Command::PreviousFile => Move::File(false),
+            Command::FirstSource | Command::LastSource => Move::Jump,
+            Command::ToggleLayout => {
+                let split = place::split_for(self.engine.options().layout, self.size.0);
+                let changed = split != self.split;
+                self.split = split;
+                Move::Reflow(changed)
+            }
+            Command::ToggleWrap | Command::ToggleNumbers => Move::Reflow(false),
+            _ => Move::Still,
         };
-        self.engine.execute(command).map(drop)
+        self.settle(before, how);
+        self.keep_in_hunk(growing, how)
     }
 
     /// Mouse and resize events, which the engine handles itself. Keys never come here:
     /// this app maps them to commands. True when the engine acted on it.
     pub(super) fn handle_event(&mut self, event: Event) -> Result<bool> {
-        if let Event::Mouse(mouse) = &event {
-            self.moved = match mouse.kind {
-                MouseEventKind::ScrollDown => Some(true),
-                MouseEventKind::ScrollUp => Some(false),
-                _ => None,
-            };
-        }
-        Ok(self.engine.handle_event(event, true)? != InputEffect::Ignored)
+        let before = self.at;
+        let how = match &event {
+            Event::Mouse(mouse) => match mouse.kind {
+                MouseEventKind::ScrollDown => Move::Wheel(1),
+                MouseEventKind::ScrollUp => Move::Wheel(-1),
+                MouseEventKind::Down(MouseButton::Left) => Move::Click(mouse.row.saturating_sub(self.area.y)),
+                _ => Move::Still,
+            },
+            _ => Move::Still,
+        };
+        let growing = self.growing();
+        let acted = self.engine.handle_event(event, true)? != InputEffect::Ignored;
+        let how = if acted { how } else { Move::Still };
+        self.settle(before, how);
+        self.keep_in_hunk(growing, how)?;
+        Ok(acted)
+    }
+
+    /// What the footer should say about the last move (a selection stopped at its hunk's
+    /// edge), once.
+    pub(super) fn take_notice(&mut self) -> Option<&'static str> {
+        self.notice.take()
+    }
+
+    /// The first and last line on `side` of the hunk that shows `line` of `path`.
+    pub(super) fn hunk_span(&mut self, path: &str, side: Side, line: u32) -> Option<(u32, u32)> {
+        let file = self.index(path)?;
+        self.rows.hunk_span(file, side == Side::Old, line)
     }
 
     /// The finished or growing selection, when there is one.
@@ -312,7 +393,10 @@ impl Diff {
             first: lines.first,
             last: lines.last,
         };
-        self.engine.select_range(range)
+        let before = self.at;
+        self.engine.select_range(range)?;
+        self.settle(before, Move::Jump);
+        Ok(())
     }
 
     pub(super) fn begin_or_end_selection(&mut self) -> Result<()> {
@@ -326,7 +410,10 @@ impl Diff {
     /// Put the cursor on `lines.first`. An error means the diff does not show that line.
     pub(super) fn reveal(&mut self, path: &str, side: Side, line: u32) -> Result<()> {
         let file = self.index(path).with_context(|| format!("{path} is not in the diff"))?;
-        self.engine.reveal(file, engine_side(side), line)
+        let before = self.at;
+        self.engine.reveal(file, engine_side(side), line)?;
+        self.settle(before, Move::Jump);
+        Ok(())
     }
 
     /// Replace every gutter marker. Lines in files that have not arrived are skipped; the

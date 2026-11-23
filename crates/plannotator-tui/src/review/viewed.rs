@@ -42,21 +42,20 @@ impl Screen {
 
     /// The file under the selection or the cursor, on a heading or a binary file's note
     /// too (`diff::place`).
-    pub(super) fn file_under_cursor(&mut self) -> Result<Option<String>> {
+    pub(super) fn file_under_cursor(&self) -> Option<String> {
         if let Some(lines) = self.diff.selection() {
-            return Ok(Some(lines.path));
+            return Some(lines.path);
         }
-        Ok(self.diff.cursor_file()?.and_then(|i| self.diff.paths().get(i).cloned()))
+        self.diff.cursor_file().and_then(|i| self.diff.paths().get(i).cloned())
     }
 
     /// `x`: flip the file's mark and save it.
-    pub(super) fn toggle_viewed(&mut self) -> Result<()> {
-        let Some(path) = self.file_under_cursor()? else {
+    pub(super) fn toggle_viewed(&mut self) {
+        let Some(path) = self.file_under_cursor() else {
             self.status = Some("move the cursor onto a line of the file first".into());
-            return Ok(());
+            return;
         };
         self.toggle_viewed_of(&path);
-        Ok(())
     }
 
     /// Flip `path`'s mark and save it; the whole-file view's `x` too.
@@ -85,7 +84,7 @@ impl Screen {
         if paths.is_empty() {
             return Ok(());
         }
-        let here = self.file_under_cursor()?.and_then(|p| paths.iter().position(|q| *q == p));
+        let here = self.file_under_cursor().and_then(|p| paths.iter().position(|q| *q == p));
         let count = paths.len();
         let start = here.unwrap_or(if forward { count - 1 } else { 0 });
         let target = (1..=count)

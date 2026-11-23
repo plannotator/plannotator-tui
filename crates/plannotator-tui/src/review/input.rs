@@ -7,6 +7,7 @@ use plannotator_tui_review::Side;
 use ratatui::crossterm::event::{Event, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 
+use super::diff::Diff;
 use super::whole::Version;
 use super::{Focus, Mode, Screen};
 use crate::keys::{self, Action};
@@ -42,6 +43,25 @@ impl Screen {
             self.last_key = Some(std::time::Instant::now());
             self.toolbar = None;
         }
+        // A drag ends with its release over the review. Anything else first (a key, a paste,
+        // the terminal resized or left, a second press, the pointer moving with no button
+        // held, which says the release went elsewhere, any mouse event over a box or the
+        // help) drops it unapplied, its highlight with it, so what is lit is what `c` uses.
+        let drops = match &event {
+            Event::Key(key) => key.kind != KeyEventKind::Release,
+            Event::Paste(_) | Event::Resize(..) | Event::FocusLost => true,
+            Event::Mouse(mouse) => {
+                self.mode != Mode::Browse
+                    || matches!(mouse.kind, MouseEventKind::Down(_) | MouseEventKind::Moved)
+            }
+            Event::FocusGained => false,
+        };
+        if drops {
+            self.cancel_drags();
+        }
+        if event == Event::FocusLost {
+            self.dividers.unlight();
+        }
         let moves = match &event {
             Event::Key(key) => key.kind != KeyEventKind::Release,
             Event::Mouse(mouse) => mouse.kind != MouseEventKind::Moved,
@@ -51,7 +71,13 @@ impl Screen {
             Event::Key(key) if key.kind != KeyEventKind::Release => self.key(key)?,
             Event::Paste(text) if matches!(self.mode, Mode::Compose(_)) => self.compose.insert_text(&text),
             Event::Paste(text) if self.mode == Mode::FilterFiles => self.paste_filter(&text),
-            Event::Mouse(mouse) => self.mouse(mouse)?,
+            Event::Mouse(mouse) => {
+                // Nothing the mouse does may end the review: what fails is said in the footer.
+                if let Err(error) = self.mouse(mouse) {
+                    self.cancel_drags();
+                    self.status = Some(format!("{error:#}"));
+                }
+            }
             Event::Resize(..) => {
                 if let Some(whole) = &mut self.whole {
                     whole.handle_event(event.clone())?;
@@ -60,15 +86,30 @@ impl Screen {
             }
             _ => {}
         }
+        if let Some(notice) = self.active_diff_mut().and_then(Diff::take_notice) {
+            self.status = Some(notice.into());
+        }
+        // A key that opened a box, the help or a menu mid-drag dropped the drag above; one
+        // that did so by the mouse (a toolbar button) leaves none behind either.
+        if self.mode != Mode::Browse {
+            self.cancel_drags();
+        }
         // Whatever moved the diff (a key, a note picked in the rail, a jump, the mouse), the
-        // file list and the footer follow the file its cursor is in.
-        // Not mid-drag: finding the file can press the cursor off a heading and back, which
-        // may scroll the rows under the pointer. The release finds it.
+        // file list and the footer follow the file its cursor is in. Not mid-drag, where the
+        // cursor follows the pointer over other files; the release settles it.
         let dragging = self.drag.is_some() || self.dividers.dragging();
         if moves && !dragging && matches!(self.mode, Mode::Browse | Mode::FilterFiles) {
-            self.track_current()?;
+            self.track_current();
         }
         Ok(())
+    }
+
+    /// Drop a drag in progress, of lines or of a pane's edge, without applying it.
+    pub(super) fn cancel_drags(&mut self) {
+        if self.drag.take().is_some() {
+            self.sync_markers();
+        }
+        self.dividers.cancel();
     }
 
     fn key(&mut self, key: KeyEvent) -> Result<()> {
@@ -216,7 +257,7 @@ impl Screen {
     /// A diff key's action, or the toolbar button for it.
     fn diff_action(&mut self, action: Action) -> Result<()> {
         match action {
-            Action::CopySelection => {
+            Action::CopyLines => {
                 self.copy_selection();
                 return Ok(());
             }
@@ -252,7 +293,10 @@ impl Screen {
             Action::Visual | Action::VisualLine => return self.diff.begin_or_end_selection(),
             Action::Comment => return self.start_comment(),
             Action::Suggest => return self.start_suggestion(),
-            Action::FileComment => return self.start_file_comment(),
+            Action::FileComment => {
+                self.start_file_comment();
+                return Ok(());
+            }
             Action::WholeFile => return self.open_whole(Version::Current),
             Action::WholeBase => return self.open_whole(Version::Base),
             Action::Left => return self.go_to_side(Side::Old),
@@ -269,7 +313,10 @@ impl Screen {
             Action::PreviousFile => return self.step_file(false),
             Action::ToggleLayout => Command::ToggleLayout,
             Action::ToggleWrap => Command::ToggleWrap,
-            Action::ToggleViewed => return self.toggle_viewed(),
+            Action::ToggleViewed => {
+                self.toggle_viewed();
+                return Ok(());
+            }
             Action::NextUnviewed => return self.jump_unviewed(true),
             Action::PreviousUnviewed => return self.jump_unviewed(false),
             Action::Confirm => Command::Activate,
@@ -377,10 +424,18 @@ impl Screen {
             }
             return self.files_mouse(mouse);
         }
-        if click && let Some(action) = self.toolbar_hit(at) {
+        let toolbar = self.toolbar.is_some();
+        if click
+            && toolbar
+            && let Some(action) = self.toolbar_hit(at)
+        {
             self.toolbar = None;
             self.focus = Focus::Diff;
             return self.diff_action(action);
+        }
+        // Between and beside its buttons the toolbar takes the click and does nothing.
+        if click && toolbar && inside(self.geometry.toolbar_bar) {
+            return Ok(());
         }
         if click || matches!(mouse.kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown) {
             self.toolbar = None;

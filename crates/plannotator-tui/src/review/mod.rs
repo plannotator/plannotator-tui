@@ -124,8 +124,9 @@ struct Geometry {
     /// Rail bubbles drawn last frame, with their note's index.
     bubbles: Vec<(Rect, usize)>,
     menu_rows: Vec<(Rect, usize)>,
-    /// The buttons of the toolbar beside a mouse selection.
+    /// The buttons of the toolbar beside a mouse selection, and the whole bar.
     toolbar: Vec<(Rect, crate::keys::Action)>,
+    toolbar_bar: Option<Rect>,
     /// The columns the comment box wrapped to last frame; 0 before its first.
     compose_wrap: usize,
 }
@@ -174,6 +175,8 @@ pub(crate) struct Screen {
     geometry: Geometry,
     /// A drag with the left button in the diff, until the release.
     drag: Option<mouse::Drag>,
+    /// The line the last drag's selection grew from, for a shift-click.
+    grown: Option<mouse::Grown>,
     /// The toolbar beside the lines a drag selected, until the next key or click.
     toolbar: Option<mouse::Toolbar>,
     /// The lines between the panes, and the notes panel's width.
@@ -252,6 +255,7 @@ impl Screen {
             status: None,
             geometry: Geometry::default(),
             drag: None,
+            grown: None,
             toolbar: None,
             dividers: divider::Dividers::default(),
             watch,

@@ -12,10 +12,10 @@ use super::*;
 use crate::review::diff::Lines;
 use crate::review::{Draft, Focus, Mode};
 
-const COLS: u16 = 120;
-const ROWS: u16 = 40;
+pub(super) const COLS: u16 = 120;
+pub(super) const ROWS: u16 = 40;
 
-fn draw(screen: &mut Screen) -> Buffer {
+pub(super) fn draw(screen: &mut Screen) -> Buffer {
     let mut terminal = Terminal::new(TestBackend::new(COLS, ROWS)).expect("terminal");
     let mut drawn = Ok(());
     terminal.draw(|f| drawn = screen.draw(f)).expect("draw");
@@ -26,7 +26,7 @@ fn draw(screen: &mut Screen) -> Buffer {
 
 /// The cell where `needle` starts in a fresh frame: the leftmost match, or with `last` the
 /// rightmost (the new side of a split diff).
-fn locate(screen: &mut Screen, needle: &str, last: bool) -> (u16, u16) {
+pub(super) fn locate(screen: &mut Screen, needle: &str, last: bool) -> (u16, u16) {
     let buffer = draw(screen);
     let mut found = Vec::new();
     for y in 0..ROWS {
@@ -46,13 +46,13 @@ fn locate(screen: &mut Screen, needle: &str, last: bool) -> (u16, u16) {
     *at.unwrap_or_else(|| panic!("no {needle:?} on screen"))
 }
 
-fn mouse(screen: &mut Screen, kind: MouseEventKind, (column, row): (u16, u16)) {
+pub(super) fn mouse(screen: &mut Screen, kind: MouseEventKind, (column, row): (u16, u16)) {
     let event = MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE };
     screen.handle_event(Event::Mouse(event)).expect("mouse");
 }
 
 /// Press at `from` and move, a row at a time, to `to`, without letting go.
-fn drag(screen: &mut Screen, from: (u16, u16), to: (u16, u16)) {
+pub(super) fn drag(screen: &mut Screen, from: (u16, u16), to: (u16, u16)) {
     mouse(screen, MouseEventKind::Down(MouseButton::Left), from);
     let rows: Vec<u16> =
         if to.1 >= from.1 { (from.1..=to.1).collect() } else { (to.1..=from.1).rev().collect() };
@@ -61,11 +61,11 @@ fn drag(screen: &mut Screen, from: (u16, u16), to: (u16, u16)) {
     }
 }
 
-fn release(screen: &mut Screen, at: (u16, u16)) {
+pub(super) fn release(screen: &mut Screen, at: (u16, u16)) {
     mouse(screen, MouseEventKind::Up(MouseButton::Left), at);
 }
 
-fn lines(side: Side, first: u32, last: u32) -> Lines {
+pub(super) fn lines(side: Side, first: u32, last: u32) -> Lines {
     Lines { path: "app.py".into(), side, first, last }
 }
 
@@ -285,7 +285,7 @@ fn y_copies_the_selected_code_when_copy_on_select_is_off() {
 }
 
 /// The fixture with `app.py` long enough that its diff runs past one screen.
-fn long_fixture(tag: &str) -> Fixture {
+pub(super) fn long_fixture(tag: &str) -> Fixture {
     let fixture = Fixture::new(tag);
     let tail = (1..=60).map(|i| format!("v{i} = {i}")).collect::<Vec<_>>().join("\n");
     fixture.write("app.py", &format!("{AFTER}{tail}\n"));

@@ -217,14 +217,19 @@ browser's code review, and the lines are shaded while you drag. Drag past the to
 of the diff to scroll. When you let go, a small toolbar next to the lines offers `💬 comment`
 and `✎ suggest` (click it, or press `c` or `s`), and the note is anchored on exactly those
 lines, with their code quoted for the agent. `Esc` clears the selection. Drag works the
-same in the whole-file view. Shift-click grows a selection to the clicked line.
+same in the whole-file view. Shift-click grows a selection to the clicked line, from the
+line the drag started on. A selection stays inside the hunk it started in, as GitHub's
+multi-line comments do: a drag or a `v` selection stops at the hunk's first or last line.
+A key, a second click, or the window losing focus before you let go drops the drag, and
+its shading with it.
 
 Drag the line between the file list and the diff, or between the diff and the notes, to
 make the list or the notes wider or narrower; the line lights up under the pointer and while
 you drag it. `<`/`>` do the same for the list and `{`/`}` for the notes, four columns at a
 time. The width you set stays for the rest of the review, through filters and `r`, and the
-diff always keeps room to show its code. Double-click the line to let the list or the notes
-fit themselves again.
+diff always keeps room to show its code; a window made narrower for a while draws the panes
+narrower and gives them the width you set back when it widens. Double-click the line (two
+clicks on one cell, without moving) to let the list or the notes fit themselves again.
 
 Notes appear in the rail on the right, grouped by file, and a mark in the diff shows their
 lines. Sent notes get a dimmer mark. `Tab` moves to the rail; `j`/`k` there moves to a
@@ -526,6 +531,7 @@ screen show your keys. `plannotator-tui config` prints every action with its key
 | `clear-all` | `X` | every annotation on the document, after `yes` |
 | `looks-good` `delete` | `a` `d` | toolbar, with `comment`; also on the selected block, unless another document action has the key |
 | `copy` | `y` | copy the selection waiting in the toolbar |
+| `copy-lines` | `y` | code review: copy the selected lines; a config that sets only `copy` gives its keys to this too |
 | `search` `next-match` `previous-match` | `/` `n` `N` | search the open document; step through the matches |
 | `yes` `no` | `y` `n`, `Y` `N` | the send-before-quitting and clear-all questions |
 | `suggest` `file-comment` | `s` `C` | code review: suggest code for the lines; a note on the whole file |

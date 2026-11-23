@@ -16,9 +16,11 @@ mod first_look;
 mod jump_flow;
 mod look;
 mod mouse_flow;
+mod mouse_guard;
 mod notes_flow;
 mod notes_rail;
 mod pi_notes;
+mod place_flow;
 #[cfg(unix)]
 mod pull_flow;
 mod rex_picker;

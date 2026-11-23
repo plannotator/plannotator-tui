@@ -54,13 +54,12 @@ impl Screen {
 
     /// Note which file the diff's cursor is in, for the list and the footer. The viewer's
     /// cursor is the one place that knows; this keeps a copy by path.
-    pub(in crate::review) fn track_current(&mut self) -> Result<()> {
+    pub(in crate::review) fn track_current(&mut self) {
         if self.whole.is_some() {
-            return Ok(());
+            return;
         }
-        if let Some(index) = self.diff.cursor_file()? {
+        if let Some(index) = self.diff.cursor_file() {
             self.files.current = self.diff.paths().get(index).cloned();
         }
-        Ok(())
     }
 }

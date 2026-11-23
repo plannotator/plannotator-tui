@@ -1,7 +1,9 @@
 //! The mouse in the diff and in the whole file. A click moves the cursor (the viewer's own
-//! click); a drag selects whole lines on the side it started on, as the browser's code review
-//! does; the release makes them the selection and floats a toolbar beside it, as a mouse
-//! selection in a document does. `c`, `s` and `y` then act on it like on a `v` selection.
+//! click); a drag selects whole lines on the side it started on, within the hunk it started
+//! in (the lines shown together, as GitHub's multi-line comments are), as the browser's code
+//! review does; the release makes them the selection and floats a toolbar beside it, as a
+//! mouse selection in a document does. `c`, `s` and `y` then act on it like on a `v`
+//! selection. A shift-click grows it from the line first pressed.
 //!
 //! diffs-rs handles clicks and the wheel but has no drag, and cannot say which line is under
 //! a cell. So each step of a drag clicks the viewer at the pressed column on the pointer's
@@ -36,15 +38,43 @@ pub(super) struct Drag {
     column: u16,
     /// The pressed line (`first == last`).
     anchor: Lines,
+    /// The first and last line of the anchor's hunk on its side: the drag stays inside.
+    span: (u32, u32),
     /// The line at the pointer's end, on the anchor's side.
     end: u32,
     /// Whether the pointer moved with the button down; a press and a release is a click.
     moved: bool,
-    /// Whether a step went past the top or bottom of the pane.
-    scrolled: bool,
+    /// The view it started in (the whole file or the diff) and that view's patch, so a
+    /// release over another one applies nothing.
+    whole: bool,
+    generation: u64,
+}
+
+/// The line a drag's selection grew from, while that selection stands, for a shift-click.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Grown {
+    anchor: Lines,
+    span: (u32, u32),
+    lines: Lines,
 }
 
 impl Drag {
+    /// A drag over `lines` of the diff with patch `generation`, for tests that need lines
+    /// no drag could reach.
+    #[cfg(test)]
+    pub(super) fn over(lines: Lines, generation: u64) -> Self {
+        let end = lines.last;
+        Self {
+            column: 0,
+            span: (lines.first, lines.last),
+            anchor: Lines { last: lines.first, ..lines },
+            end,
+            moved: true,
+            whole: false,
+            generation,
+        }
+    }
+
     /// The lines dragged over, once the pointer moved.
     pub(super) fn lines(&self) -> Option<Lines> {
         let (first, last) = (self.anchor.first.min(self.end), self.anchor.first.max(self.end));
@@ -86,7 +116,7 @@ impl Screen {
         }
     }
 
-    fn active_diff_mut(&mut self) -> Option<&mut Diff> {
+    pub(super) fn active_diff_mut(&mut self) -> Option<&mut Diff> {
         match &mut self.whole {
             Some(whole) => whole.diff_mut(),
             None => Some(&mut self.diff),
@@ -102,42 +132,63 @@ impl Screen {
     }
 
     /// The left button down in the diff pane: the viewer moves the cursor, and on a line of
-    /// code a drag can start. A shift-click is the viewer's own: it grows the selection to
-    /// the clicked line. The file list and the lines between the panes take their presses
-    /// before this.
+    /// code a drag can start. A shift-click grows the selection to the clicked line: from
+    /// the line a drag first pressed, or as the viewer grows a `v` selection. The file list
+    /// and the lines between the panes take their presses before this.
     pub(super) fn press(&mut self, mouse: MouseEvent) -> Result<()> {
         self.focus = Focus::Diff;
         self.drag = None;
+        let whole = self.whole.is_some();
+        let grown = self.grown.take();
         let Some(diff) = self.active_diff_mut() else { return Ok(()) };
+        let generation = diff.generation();
         if mouse.modifiers.contains(KeyModifiers::SHIFT) {
-            return diff.handle_event(Event::Mouse(mouse)).map(drop);
+            let grown = grown.filter(|grown| diff.selection().as_ref() == Some(&grown.lines));
+            let Some(grown) = grown else {
+                return diff.handle_event(Event::Mouse(mouse)).map(drop);
+            };
+            let click = MouseEvent { modifiers: KeyModifiers::NONE, ..mouse };
+            diff.handle_event(Event::Mouse(click))?;
+            let line = diff.line_on(grown.anchor.side)?.filter(|(path, _)| *path == grown.anchor.path);
+            let end = line.map_or(grown.lines.last, |(_, line)| line.clamp(grown.span.0, grown.span.1));
+            let (first, last) = (grown.anchor.first.min(end), grown.anchor.first.max(end));
+            let lines = Lines { first, last, ..grown.anchor.clone() };
+            diff.select(&lines)?;
+            if end < grown.anchor.first {
+                diff.reveal(&lines.path, lines.side, first)?;
+            }
+            self.grown = Some(Grown { lines, ..grown });
+            return Ok(());
         }
         diff.clear_selection()?;
         diff.handle_event(Event::Mouse(mouse))?;
         let anchor = if diff.selectable()? { diff.cursor()? } else { None };
-        self.drag = anchor.map(|anchor| Drag {
-            column: mouse.column,
-            end: anchor.first,
-            anchor,
-            moved: false,
-            scrolled: false,
+        self.drag = anchor.and_then(|anchor| {
+            let span = diff.hunk_span(&anchor.path, anchor.side, anchor.first)?;
+            Some(Drag {
+                column: mouse.column,
+                end: anchor.first,
+                anchor,
+                span,
+                moved: false,
+                whole,
+                generation,
+            })
         });
         Ok(())
     }
 
     /// The pointer moved with the button down: the line under it, or past the pane's top or
-    /// bottom the next line that way, ends the range. A row with nothing on the anchor's
-    /// side, or in another file, leaves the range as it was.
+    /// bottom the next line that way, ends the range, kept inside the anchor's hunk. A row
+    /// with nothing on the anchor's side, or in another file, leaves the range as it was.
     pub(super) fn drag_to(&mut self, mouse: MouseEvent) -> Result<()> {
         let Some(mut drag) = self.drag.take() else { return Ok(()) };
         let area = self.geometry.diff;
         let Some(diff) = self.active_diff_mut() else { return Ok(()) };
         if mouse.row < area.y {
             diff.run(Command::Up)?;
-            drag.scrolled = true;
         } else if mouse.row >= area.bottom() {
             diff.run(Command::Down)?;
-            drag.scrolled = true;
         } else {
             let click = MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
@@ -150,7 +201,7 @@ impl Screen {
         if let Some((path, line)) = diff.line_on(drag.anchor.side)?
             && path == drag.anchor.path
         {
-            drag.end = line;
+            drag.end = line.clamp(drag.span.0, drag.span.1);
         }
         drag.moved = true;
         self.drag = Some(drag);
@@ -159,19 +210,30 @@ impl Screen {
     }
 
     /// The button up: the lines dragged over become the selection, with the toolbar beside
-    /// them, and go to the clipboard when `copy_on_select` says so.
+    /// them, and go to the clipboard when `copy_on_select` says so. Lines from a view or a
+    /// patch no longer shown apply nothing.
     pub(super) fn release(&mut self, mouse: MouseEvent) -> Result<()> {
         let Some(drag) = self.drag.take() else { return Ok(()) };
         self.sync_markers();
         let Some(lines) = drag.lines() else { return Ok(()) };
+        let whole = self.whole.is_some();
         let Some(diff) = self.active_diff_mut() else { return Ok(()) };
-        diff.select(&lines)?;
+        if drag.whole != whole || drag.generation != diff.generation() || !diff.paths().contains(&lines.path)
+        {
+            self.status = Some("those lines are no longer shown; nothing selected".into());
+            return Ok(());
+        }
         let up = drag.end < drag.anchor.first;
-        // Scrolled up and away from the anchor, the viewer has just brought the anchor back
-        // into view, so the release point no longer marks the selection.
-        let moved_away = drag.scrolled && up;
+        diff.select(&lines)?;
+        // The viewer puts the cursor on the last line, the one first pressed: after a drag
+        // up it goes to the first, where the pointer is, and the view stays on the lines the
+        // pointer went up to rather than going back to the press.
+        if up {
+            diff.reveal(&lines.path, lines.side, lines.first)?;
+        }
+        self.grown = Some(Grown { anchor: drag.anchor.clone(), span: drag.span, lines: lines.clone() });
         let base = self.whole.as_ref().is_some_and(|w| w.version == Version::Base);
-        if !moved_away && !base {
+        if !base {
             let area = self.geometry.diff;
             let row = mouse.row.clamp(area.y, area.bottom().saturating_sub(1));
             self.toolbar = Some(Toolbar { at: Position::new(mouse.column, row), up });
@@ -217,9 +279,11 @@ impl Screen {
         self.geometry.toolbar.iter().find(|(rect, _)| rect.contains(at)).map(|(_, action)| *action)
     }
 
-    /// The toolbar under the release point, or over it when the drag went up: comment, and
-    /// suggest for new lines. It goes with the selection.
-    pub(super) fn draw_toolbar(&mut self, frame: &mut Frame, diff: Rect) {
+    /// The toolbar below the selection, or above it when the drag went up, at the release
+    /// column: comment, and suggest for new lines. It never covers a selected row while
+    /// there is room for it, and goes with the selection. `selected` is the first and last
+    /// screen row drawn selected.
+    pub(super) fn draw_toolbar(&mut self, frame: &mut Frame, diff: Rect, selected: Option<(u16, u16)>) {
         let Some(Toolbar { at, up }) = self.toolbar else { return };
         let Some(lines) = self.active_diff().and_then(Diff::selection) else {
             self.toolbar = None;
@@ -237,17 +301,17 @@ impl Screen {
         if width > diff.width || diff.height < 2 {
             return;
         }
-        let below = at.y + 1 < diff.bottom();
-        let above = at.y > diff.y;
-        let y = match (up, above, below) {
-            (true, true, _) | (false, true, false) => at.y - 1,
-            _ => at.y + 1,
-        };
+        let (first, last) = selected.unwrap_or((at.y, at.y));
+        let above = (first > diff.y).then(|| first - 1);
+        let below = (last + 1 < diff.bottom()).then_some(last + 1);
+        let beside = if at.y > diff.y { at.y - 1 } else { at.y + 1 };
+        let y = if up { above.or(below) } else { below.or(above) }.unwrap_or(beside);
         let x = at.x.clamp(diff.x, diff.right() - width);
         let rect = Rect { x, y, width, height: 1 };
         frame.render_widget(Clear, rect);
         let buf = frame.buffer_mut();
         buf.set_style(rect, Style::new().bg(palette().toolbar_bg));
+        self.geometry.toolbar_bar = Some(rect);
         let mut x = rect.x + 1;
         for (label, action) in labels {
             let w = label.width() as u16;
@@ -274,43 +338,50 @@ pub(super) fn selection_bg() -> Color {
     palette().selection.bg.unwrap_or(Color::Indexed(239))
 }
 
-/// Draw the selected rows the viewer drew in `area` as one block of background colour.
+/// Draw the selected rows the viewer drew in `area` as one block of background colour, and
+/// say which screen rows that block runs from and to.
 ///
-/// A pane of a row (the whole row, or one side of a split row) starts at the pane's edge or
-/// after a `│`. It is selected when its first cell holds the viewer's selection bar, the
-/// drag's bold mark, or the cursor's bar while `cursor_selected`. That cell is blanked, the
-/// selection's underline is taken off (a search match, bold as well, keeps its own), and
-/// the pane takes the selection background up to its end: the split's middle line, which
-/// the viewer draws `(width - 1) / 2` cells into the code area, or else the pane's edge.
+/// A row has one pane (unified) or two (split): the split's left pane ends where the viewer
+/// draws its middle line, `(width - 1) / 2` cells in, and the right one starts after it. A
+/// pane is selected when its first cell holds the viewer's selection bar, the drag's bold
+/// mark, or the cursor's bar while `cursor_selected`. That cell is blanked, the selection's
+/// underline is taken off (a search match, bold as well, keeps its own), and the pane takes
+/// the selection background to its end.
 ///
 /// Rows strictly between the first and the last selected row are filled too, so the
 /// selection reads as one block: in the unified view the other side's lines sit among the
 /// selected ones (a removed line inside new lines). They are only drawn so; the note still
-/// covers the selected side's lines alone.
-pub(super) fn tint_selection(buf: &mut Buffer, area: Rect, cursor_selected: bool) {
+/// covers the selected side's lines alone. `code` says which rows hold code: a heading or a
+/// gap between them is left as it is.
+pub(super) fn tint_selection(
+    buf: &mut Buffer,
+    area: Rect,
+    split: bool,
+    cursor_selected: bool,
+    code: impl Fn(u16) -> bool,
+) -> Option<(u16, u16)> {
     let bg = selection_bg();
-    // Each selected pane: its columns and its rows.
-    let mut panes: Vec<(u16, u16, Vec<u16>)> = Vec::new();
-    let bar = |buf: &Buffer, x: u16, y: u16| buf.cell((x, y)).is_some_and(|c| c.symbol() == "\u{2502}");
+    let middle = area.x + area.width.saturating_sub(1) / 2;
+    let panes: Vec<(u16, u16)> = if split {
+        vec![(area.left(), middle), (middle + 1, area.right())]
+    } else {
+        vec![(area.left(), area.right())]
+    };
+    // Each pane's selected rows.
+    let mut rows: Vec<Vec<u16>> = vec![Vec::new(); panes.len()];
     for y in area.top()..area.bottom() {
-        let mut x = area.left();
-        while x < area.right() {
-            let starts_pane = x == area.left() || bar(buf, x - 1, y);
-            let selected = starts_pane
-                && buf.cell((x, y)).is_some_and(|cell| match cell.symbol() {
-                    "\u{2503}" | "\u{258c}" => cell.modifier.contains(Modifier::BOLD),
-                    "\u{258e}" => cursor_selected,
-                    _ => false,
-                });
+        for (&(left, right), rows) in panes.iter().zip(rows.iter_mut()) {
+            let selected = buf.cell((left, y)).is_some_and(|cell| match cell.symbol() {
+                "\u{2503}" | "\u{258c}" => cell.modifier.contains(Modifier::BOLD),
+                "\u{258e}" => cursor_selected,
+                _ => false,
+            });
             if !selected {
-                x += 1;
                 continue;
             }
-            let middle = x + (area.right() - x).saturating_sub(1) / 2;
-            let end = if bar(buf, middle, y) { middle } else { area.right() };
-            for col in x..end {
-                let Some(cell) = buf.cell_mut((col, y)) else { continue };
-                if col == x {
+            for x in left..right {
+                let Some(cell) = buf.cell_mut((x, y)) else { continue };
+                if x == left {
                     cell.set_symbol(" ");
                     cell.modifier.remove(Modifier::BOLD);
                 }
@@ -319,16 +390,14 @@ pub(super) fn tint_selection(buf: &mut Buffer, area: Rect, cursor_selected: bool
                 }
                 cell.set_bg(bg);
             }
-            match panes.iter_mut().find(|(left, right, _)| (*left, *right) == (x, end)) {
-                Some((_, _, rows)) => rows.push(y),
-                None => panes.push((x, end, vec![y])),
-            }
-            x = end;
+            rows.push(y);
         }
     }
-    for (left, right, rows) in panes {
+    let mut block: Option<(u16, u16)> = None;
+    for (&(left, right), rows) in panes.iter().zip(&rows) {
         let (Some(&first), Some(&last)) = (rows.first(), rows.last()) else { continue };
-        for y in (first + 1..last).filter(|y| !rows.contains(y)) {
+        block = Some(block.map_or((first, last), |(a, b)| (a.min(first), b.max(last))));
+        for y in (first + 1..last).filter(|y| !rows.contains(y) && code(*y)) {
             for x in left..right {
                 if let Some(cell) = buf.cell_mut((x, y)) {
                     cell.set_bg(bg);
@@ -336,4 +405,5 @@ pub(super) fn tint_selection(buf: &mut Buffer, area: Rect, cursor_selected: bool
             }
         }
     }
+    block
 }

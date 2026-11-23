@@ -71,6 +71,8 @@ pub(super) struct FileList {
     chosen_width: Option<u16>,
     /// The width drawn last frame; 0 when hidden.
     pub(super) drawn_width: u16,
+    /// Whether the last frame drew the list narrower than the width chosen.
+    pub(super) clamped: bool,
     /// Whether the last frame was too narrow for the list even with the whole width.
     pub(super) no_room: bool,
     /// A file to show once the diff, replaced for a new filter, has it.
@@ -128,9 +130,9 @@ impl FileList {
     /// comes down to what it gave, so the next `narrow-files` narrows what is seen.
     pub(super) fn drawn(&mut self, width: u16) {
         self.drawn_width = width;
-        if width > 0 {
-            self.chosen_width = self.chosen_width.map(|chosen| chosen.min(width));
-        }
+        // A width wider than the room stays the person's choice, for when the room comes
+        // back; the keys step from what shows meanwhile.
+        self.clamped = width > 0 && self.chosen_width.is_some_and(|chosen| chosen > width);
     }
 
     /// Whether git's answer about `.gitattributes` is in (or will not come).

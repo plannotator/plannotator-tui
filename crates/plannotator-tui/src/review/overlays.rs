@@ -110,7 +110,7 @@ impl Screen {
                     (key(&[Action::Left, Action::Right]), "old / new side"),
                     (key(&[Action::Visual]), "select lines (again to finish); shift-click too"),
                     ("drag".to_owned(), "select lines with the mouse, then comment or suggest"),
-                    (key(&[Action::CopySelection]), "copy the selected lines"),
+                    (key(&[Action::CopyLines]), "copy the selected lines"),
                     (key(&[Action::Comment]), "comment on the selection or line"),
                     (key(&[Action::Suggest]), "suggest code for new lines"),
                     (key(&[Action::FileComment]), "comment on the file"),

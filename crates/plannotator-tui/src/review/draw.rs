@@ -93,7 +93,12 @@ impl Screen {
             Some(whole) => whole.draw(frame, diff)?,
             None => self.diff.draw(frame, diff)?,
         }
-        super::mouse::tint_selection(frame.buffer_mut(), diff, cursor_selected);
+        let (split, code) = match self.active_diff_mut() {
+            Some(shown) => (shown.split(), (diff.top()..diff.bottom()).map(|y| shown.code_row(y)).collect()),
+            None => (false, Vec::new()),
+        };
+        let code = |y: u16| code.get(usize::from(y - diff.y)).copied().unwrap_or(true);
+        let selected = super::mouse::tint_selection(frame.buffer_mut(), diff, split, cursor_selected, code);
         if files.width > 0 {
             let listing = self.listing();
             self.draw_files(frame, files, &listing);
@@ -118,7 +123,7 @@ impl Screen {
                 let pick = pick.clone();
                 self.draw_pick(frame, diff, &pick);
             }
-            Mode::Browse => self.draw_toolbar(frame, diff),
+            Mode::Browse => self.draw_toolbar(frame, diff, selected),
             Mode::Kinds(cursor) => self.draw_kinds(frame, *cursor),
             Mode::ConfirmQuit | Mode::FilterFiles => {}
         }

@@ -192,7 +192,7 @@ impl Screen {
                 current.then(|| key(Action::Visual, "select")).flatten(),
                 current.then(|| key(Action::Comment, "comment")).flatten(),
                 (self.on_release == super::mouse::OnRelease::Wait && self.selected_lines().is_some())
-                    .then(|| key(Action::CopySelection, "copy"))
+                    .then(|| key(Action::CopyLines, "copy"))
                     .flatten(),
                 key(Action::GoToDefinition, "definition"),
                 pair(Action::NextHunk, Action::PreviousHunk, "change"),
@@ -220,7 +220,7 @@ impl Screen {
                 key(Action::Comment, "comment"),
                 key(Action::Suggest, "suggest"),
                 (self.on_release == super::mouse::OnRelease::Wait)
-                    .then(|| key(Action::CopySelection, "copy"))
+                    .then(|| key(Action::CopyLines, "copy"))
                     .flatten(),
                 key(Action::Back, "clear"),
             ],

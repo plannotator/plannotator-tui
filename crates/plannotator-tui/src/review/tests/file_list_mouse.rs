@@ -62,7 +62,7 @@ fn a_click_on_a_file_shows_it_in_the_diff_and_selects_nothing() {
     mouse(&mut screen, MouseEventKind::Up(MouseButton::Left), 6, row);
     assert_eq!(screen.focus, Focus::Files);
     assert_eq!(screen.files.current.as_deref(), Some("alpha/file-03.ts"));
-    assert_eq!(screen.file_under_cursor().expect("cursor").as_deref(), Some("alpha/file-03.ts"));
+    assert_eq!(screen.file_under_cursor().as_deref(), Some("alpha/file-03.ts"));
     assert!(screen.diff.selection().is_none());
     let rows = frame(&mut screen, COLS, ROWS);
     assert!(rows.iter().any(|r| diff_side(&screen, r).contains("alpha/file-03.ts")), "{rows:#?}");

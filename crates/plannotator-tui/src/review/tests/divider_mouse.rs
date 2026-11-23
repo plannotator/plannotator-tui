@@ -67,11 +67,14 @@ fn the_list_line_stops_where_the_diff_would_lose_its_minimum_or_the_list_its_nar
     let line = list_line(&screen);
     drag_line(&mut screen, line, COLS - 1, 5);
     frame(&mut screen, COLS, ROWS);
-    assert!(screen.geometry.diff.width >= fit::DIFF_MIN_WIDTH, "{:?}", screen.geometry.diff);
+    // Held at the limit, not fitted again: the width asked for stays set.
+    assert_eq!(screen.geometry.diff.width, fit::DIFF_MIN_WIDTH, "{:?}", screen.geometry.diff);
+    assert!(screen.files.chosen_width().is_some_and(|w| w > screen.geometry.files.width));
     let line = list_line(&screen);
     drag_line(&mut screen, line, 2, 5);
     frame(&mut screen, COLS, ROWS);
     assert_eq!(screen.geometry.files.width, fit::MIN_WIDTH);
+    assert_eq!(screen.files.chosen_width(), Some(fit::MIN_WIDTH));
 }
 
 #[test]
@@ -88,12 +91,78 @@ fn dragging_the_notes_line_resizes_the_notes_and_the_keys_go_on_from_there() {
     keys(&mut screen, "{{");
     frame(&mut screen, COLS, ROWS);
     assert_eq!(screen.geometry.rail.width, before + 12);
-    // Never so wide that the diff loses its minimum.
+    // Never so wide that the diff loses its minimum or the list its narrowest: held at the
+    // limit, not fitted again.
     let line = notes_line(&screen);
     drag_line(&mut screen, line, 1, 5);
     frame(&mut screen, COLS, ROWS);
-    assert!(screen.geometry.diff.width >= fit::DIFF_MIN_WIDTH, "{:?}", screen.geometry.diff);
-    assert!(screen.geometry.files.width >= fit::MIN_WIDTH, "the list still shows");
+    assert_eq!(screen.geometry.diff.width, fit::DIFF_MIN_WIDTH, "{:?}", screen.geometry.diff);
+    assert_eq!(screen.geometry.files.width, fit::MIN_WIDTH, "the list still shows");
+    assert!(screen.geometry.rail.width > before + 12);
+}
+
+#[test]
+fn a_double_click_is_two_clicks_on_one_cell_with_no_move() {
+    let (_fixture, mut screen) = open("divider-double");
+    let line = list_line(&screen);
+    drag_line(&mut screen, line, line + 6, 5);
+    frame(&mut screen, COLS, ROWS);
+    let set = screen.files.chosen_width();
+    assert!(set.is_some());
+    let line = list_line(&screen);
+    let click = |screen: &mut Screen, down: u16, up: u16| {
+        mouse(screen, MouseEventKind::Down(MouseButton::Left), down, 5);
+        mouse(screen, MouseEventKind::Up(MouseButton::Left), up, 5);
+    };
+    // Two drags in a row, each ending where it started.
+    for _ in 0..2 {
+        mouse(&mut screen, MouseEventKind::Down(MouseButton::Left), line, 5);
+        mouse(&mut screen, MouseEventKind::Drag(MouseButton::Left), line + 3, 5);
+        mouse(&mut screen, MouseEventKind::Drag(MouseButton::Left), line, 5);
+        mouse(&mut screen, MouseEventKind::Up(MouseButton::Left), line, 5);
+    }
+    assert_eq!(screen.files.chosen_width(), set, "two drags are no double click");
+    // A click, then a press on the line let go on the next row down.
+    click(&mut screen, line, line);
+    mouse(&mut screen, MouseEventKind::Down(MouseButton::Left), line, 5);
+    mouse(&mut screen, MouseEventKind::Up(MouseButton::Left), line, 6);
+    assert_eq!(screen.files.chosen_width(), set, "the second release left the cell");
+    // A click on one row, then one on another.
+    click(&mut screen, line, line);
+    mouse(&mut screen, MouseEventKind::Down(MouseButton::Left), line, 7);
+    mouse(&mut screen, MouseEventKind::Up(MouseButton::Left), line, 7);
+    assert_eq!(screen.files.chosen_width(), set, "two cells");
+    click(&mut screen, line, line);
+    click(&mut screen, line, line);
+    assert_eq!(screen.files.chosen_width(), None, "a double click fits the list again");
+}
+
+#[test]
+fn a_width_chosen_stays_the_choice_through_a_narrow_window() {
+    let (_fixture, mut screen) = open("divider-narrow");
+    let line = list_line(&screen);
+    drag_line(&mut screen, line, line + 20, 5);
+    let line = notes_line(&screen);
+    drag_line(&mut screen, line, line - 20, 5);
+    frame(&mut screen, COLS, ROWS);
+    let wide = (screen.geometry.files.width, screen.geometry.rail.width);
+    // The window narrows for a moment: both panes give room, the choice stays.
+    frame(&mut screen, 120, ROWS);
+    assert!(screen.geometry.files.width < wide.0 || screen.geometry.rail.width < wide.1);
+    frame(&mut screen, COLS, ROWS);
+    assert_eq!((screen.geometry.files.width, screen.geometry.rail.width), wide, "back as chosen");
+    // A key pressed while narrow steps from the width shown.
+    let cols = (100..COLS)
+        .rev()
+        .find(|&cols| {
+            frame(&mut screen, cols, ROWS);
+            screen.geometry.files.width + 8 < wide.0
+        })
+        .expect("a window narrow enough");
+    let narrow = screen.geometry.files.width;
+    keys(&mut screen, "<");
+    frame(&mut screen, cols, ROWS);
+    assert_eq!(screen.geometry.files.width, narrow - 4);
 }
 
 #[test]
@@ -155,4 +224,9 @@ fn a_line_lights_up_under_the_pointer_and_while_dragged_in_colour_only() {
     mouse(&mut screen, MouseEventKind::Drag(MouseButton::Left), line + 4, 5);
     assert!(lit(&mut screen, line + 4), "while dragged");
     mouse(&mut screen, MouseEventKind::Up(MouseButton::Left), line + 4, 5);
+    // Off the line, and the window left: unlit.
+    mouse(&mut screen, MouseEventKind::Moved, line + 4, 5);
+    assert!(lit(&mut screen, line + 4));
+    screen.handle_event(Event::FocusLost).expect("focus lost");
+    assert!(!lit(&mut screen, line + 4), "the window lost focus");
 }

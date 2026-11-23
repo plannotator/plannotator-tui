@@ -31,16 +31,21 @@ pub(super) enum Divider {
 /// The lines' state: which one is dragged or under the pointer, and the notes panel's width.
 #[derive(Debug, Default)]
 pub(super) struct Dividers {
-    /// The line being dragged, from the press to the release.
-    dragging: Option<Divider>,
+    /// The line being dragged, from the press to the release: where it was pressed, and
+    /// whether the pointer has left that cell since.
+    dragging: Option<(Divider, Position, bool)>,
     /// The line under the pointer.
     hover: Option<Divider>,
-    /// The last press on a line, for a double click.
-    pressed: Option<(Divider, Instant)>,
-    /// The notes panel's width, once set by a drag or a key.
+    /// The last click on a line (a press and a release on one cell, no move between), for a
+    /// double click.
+    clicked: Option<(Divider, Position, Instant)>,
+    /// The notes panel's width, once set by a drag or a key: the person's choice, kept as it
+    /// is; a narrow window draws the panel narrower without changing it.
     notes_width: Option<u16>,
     /// The notes panel's width drawn last frame; 0 when hidden.
     notes_drawn: u16,
+    /// Whether that was narrower than the width chosen.
+    notes_clamped: bool,
     /// Where each line was drawn last frame.
     drawn: Vec<(Divider, Rect)>,
 }
@@ -48,6 +53,16 @@ pub(super) struct Dividers {
 impl Dividers {
     pub(super) fn dragging(&self) -> bool {
         self.dragging.is_some()
+    }
+
+    /// Drop a drag in progress; the pane keeps the width it was dragged to so far.
+    pub(super) fn cancel(&mut self) {
+        self.dragging = None;
+    }
+
+    /// Nothing under the pointer: it left the window.
+    pub(super) fn unlight(&mut self) {
+        self.hover = None;
     }
 
     /// The notes panel's width in `body` columns: the width set, else `fitted`, never so wide
@@ -59,13 +74,10 @@ impl Dividers {
         chosen.min(most).max(super::draw::RAIL_MIN_WIDTH)
     }
 
-    /// The notes panel was drawn `width` wide (0: hidden). A width the room could not give
-    /// comes down to what it gave, so the next `narrow-notes` narrows what is seen.
+    /// The notes panel was drawn `width` wide (0: hidden).
     pub(super) fn notes_drawn(&mut self, width: u16) {
         self.notes_drawn = width;
-        if width > 0 {
-            self.notes_width = self.notes_width.map(|chosen| chosen.min(width));
-        }
+        self.notes_clamped = width > 0 && self.notes_width.is_some_and(|chosen| chosen > width);
     }
 
     /// Where the lines were drawn this frame: right of `files` and left of `rail`, either
@@ -88,7 +100,7 @@ impl Dividers {
     /// while dragged or under the pointer. Only the colour changes; a bold line is drawn
     /// with a shorter glyph in many terminals and would break into dashes.
     pub(super) fn draw(&self, frame: &mut Frame) {
-        let lit = self.dragging.or(self.hover);
+        let lit = self.dragging.map(|(divider, _, _)| divider).or(self.hover);
         let buf = frame.buffer_mut();
         for (divider, rect) in &self.drawn {
             let style = if lit == Some(*divider) {
@@ -104,40 +116,41 @@ impl Dividers {
 }
 
 impl Screen {
-    /// A mouse event for the lines: a press on one starts a resize (two in a row give the
-    /// pane its fitted width back), a drag moves the line, the release ends it, and a move
-    /// lights the line under the pointer. True when the event was the lines', so nothing
-    /// else, a line selection least of all, starts from it.
+    /// A mouse event for the lines: a press on one starts a resize, a drag moves the line,
+    /// the release ends it, and two clicks in a row on one cell give the pane its fitted
+    /// width back. The line under the pointer lights. True when the event was the lines',
+    /// so nothing else, a line selection least of all, starts from it.
     pub(super) fn divider_mouse(&mut self, mouse: MouseEvent) -> bool {
         let at = Position::new(mouse.column, mouse.row);
+        self.dividers.hover = self.dividers.at(at);
         match (mouse.kind, self.dividers.dragging) {
-            (MouseEventKind::Drag(MouseButton::Left), Some(divider)) => {
+            (MouseEventKind::Drag(MouseButton::Left), Some((divider, pressed, moved))) => {
+                self.dividers.dragging = Some((divider, pressed, moved || at != pressed));
                 self.move_divider(divider, mouse.column);
                 true
             }
-            (MouseEventKind::Up(MouseButton::Left), Some(_)) => {
+            (MouseEventKind::Up(MouseButton::Left), Some((divider, pressed, moved))) => {
                 self.dividers.dragging = None;
+                let now = Instant::now();
+                if moved || at != pressed {
+                    self.dividers.clicked = None;
+                    return true;
+                }
+                let double = self.dividers.clicked.is_some_and(|(last, cell, when)| {
+                    last == divider && cell == at && now.duration_since(when) < DOUBLE_CLICK
+                });
+                if double {
+                    self.fit_divider(divider);
+                    self.dividers.clicked = None;
+                } else {
+                    self.dividers.clicked = Some((divider, at, now));
+                }
                 true
             }
             (MouseEventKind::Down(MouseButton::Left), _) => {
                 let Some(divider) = self.dividers.at(at) else { return false };
-                let now = Instant::now();
-                let double = self
-                    .dividers
-                    .pressed
-                    .is_some_and(|(last, when)| last == divider && now.duration_since(when) < DOUBLE_CLICK);
-                if double {
-                    self.fit_divider(divider);
-                    self.dividers.pressed = None;
-                } else {
-                    self.dividers.dragging = Some(divider);
-                    self.dividers.pressed = Some((divider, now));
-                }
+                self.dividers.dragging = Some((divider, at, false));
                 true
-            }
-            (MouseEventKind::Moved, _) => {
-                self.dividers.hover = self.dividers.at(at);
-                false
             }
             _ => false,
         }
@@ -164,12 +177,13 @@ impl Screen {
             Divider::Files => self.files.set_width(None),
             Divider::Notes => self.dividers.notes_width = None,
         }
-        self.dividers.dragging = None;
     }
 
     /// `narrow-notes`, `widen-notes`: the notes panel's width, by four columns.
     pub(super) fn resize_notes(&mut self, wider: bool) {
+        // From the width last asked for, or the one shown when the room could not give it.
         let now = match (self.dividers.notes_width, self.dividers.notes_drawn) {
+            (Some(_), drawn) if self.dividers.notes_clamped => drawn,
             (Some(chosen), _) => chosen,
             (None, 0) => super::draw::RAIL_MIN_WIDTH,
             (None, drawn) => drawn,

@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, reason = "tests assert by panicking")]
+#![allow(clippy::expect_used, clippy::panic, reason = "tests assert by panicking")]
 
 use super::*;
 
@@ -254,4 +254,35 @@ fn the_file_list_width_keys_yield_to_an_older_config_and_the_reading_column_keep
     assert_eq!(keymap.action(&wider, DOCUMENT), Some(WidenColumn));
     assert_eq!(keymap.hint(WidenFiles), "");
     assert_eq!(keymap.hint(NarrowFiles), "<");
+}
+
+#[test]
+fn configs_written_before_copy_lines_load_and_keep_copy_on_the_document_screen() {
+    // (config, the document's `copy`, the code review's `copy-lines`, `toggle-viewed`)
+    let table = [
+        ("", "y", "y", "x"),
+        ("toggle-viewed = [\"y\"]\n", "y", "", "y"),
+        ("copy = [\"y\"]\ntoggle-viewed = [\"y\"]\n", "y", "", "y"),
+        ("copy = [\"x\"]\n", "x", "", "x"),
+        ("copy = [\"Y\"]\n", "Y", "Y", "x"),
+        ("comment = [\"y\"]\n", "", "", "x"),
+        ("down = [\"y\"]\n", "y", "", "x"),
+        ("copy = [\"y\"]\ncopy-lines = [\"Y\"]\n", "y", "Y", "x"),
+        ("copy-lines = []\n", "y", "", "x"),
+    ];
+    for (config, copy, lines, viewed) in table {
+        let keymap = parse(config).unwrap_or_else(|err| panic!("{config:?} loads: {err}"));
+        assert_eq!(keymap.hint(CopySelection), copy, "copy in {config:?}");
+        assert_eq!(keymap.hint(CopyLines), lines, "copy-lines in {config:?}");
+        assert_eq!(keymap.hint(ToggleViewed), viewed, "toggle-viewed in {config:?}");
+        // The document screen reads `copy` from the toolbar's keys, as it did.
+        if !copy.is_empty() {
+            let key: Key = copy.parse().expect("a key");
+            let event = press(key.code, KeyModifiers::NONE);
+            assert_eq!(keymap.action(&event, TOOLBAR), Some(CopySelection), "{config:?}");
+        }
+    }
+    // A key the person gave both on purpose is still an error.
+    let err = parse("toggle-viewed = [\"y\"]\ncopy-lines = [\"y\"]\n").expect_err("both explicit");
+    assert!(err.message().contains("copy-lines"), "{}", err.message());
 }
