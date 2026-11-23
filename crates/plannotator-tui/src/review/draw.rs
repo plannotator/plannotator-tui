@@ -52,10 +52,12 @@ impl Screen {
         .areas(body);
         self.geometry = Geometry { diff, rail, ..Geometry::default() };
         self.draw_header(frame, header);
+        let cursor_selected = self.cursor_selected();
         match &mut self.whole {
             Some(whole) => whole.draw(frame, diff)?,
             None => self.diff.draw(frame, diff)?,
         }
+        super::mouse::tint_selection(frame.buffer_mut(), diff, cursor_selected);
         if rail_width > 0 {
             self.draw_rail(frame, rail);
         }
@@ -75,7 +77,8 @@ impl Screen {
                 let pick = pick.clone();
                 self.draw_pick(frame, diff, &pick);
             }
-            Mode::Browse | Mode::ConfirmQuit => {}
+            Mode::Browse => self.draw_toolbar(frame, diff),
+            Mode::ConfirmQuit => {}
         }
         Ok(())
     }
@@ -202,7 +205,7 @@ impl Screen {
             0 => count(notes.len()),
             n => format!("{} ({n} outdated)", count(notes.len())),
         });
-        if let Some(lines) = self.diff.selection() {
+        if let Some(lines) = self.selected_lines() {
             let span = if lines.first == lines.last {
                 lines.first.to_string()
             } else {
@@ -254,6 +257,9 @@ impl Screen {
                 (!back.is_empty()).then(|| format!("{} back to the diff", back.join("/"))),
                 current.then(|| key(Action::Visual, "select")).flatten(),
                 current.then(|| key(Action::Comment, "comment")).flatten(),
+                (self.on_release == super::mouse::OnRelease::Wait && self.selected_lines().is_some())
+                    .then(|| key(Action::CopySelection, "copy"))
+                    .flatten(),
                 key(Action::GoToDefinition, "definition"),
                 pair(Action::NextHunk, Action::PreviousHunk, "change"),
                 pair(Action::NextFile, Action::PreviousFile, "file"),
@@ -266,6 +272,9 @@ impl Screen {
                 self.diff.selecting().then(|| key(Action::Visual, "end selection")).flatten(),
                 key(Action::Comment, "comment"),
                 key(Action::Suggest, "suggest"),
+                (self.on_release == super::mouse::OnRelease::Wait)
+                    .then(|| key(Action::CopySelection, "copy"))
+                    .flatten(),
                 key(Action::Back, "clear"),
             ],
             Focus::Diff => [

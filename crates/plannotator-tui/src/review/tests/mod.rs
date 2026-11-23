@@ -9,6 +9,7 @@ mod disk_flow;
 mod first_look;
 mod jump_flow;
 mod look;
+mod mouse_flow;
 mod notes_flow;
 mod notes_rail;
 mod pi_notes;

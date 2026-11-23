@@ -243,6 +243,7 @@ pub(crate) const DIFF: &[Action] = &[
     JumpBack,
     JumpForward,
     Confirm,
+    CopySelection,
 ];
 /// The code review's notes rail.
 pub(crate) const NOTES: &[Action] = &[Down, Up, Confirm, Edit, Remove, Back];

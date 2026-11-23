@@ -208,6 +208,40 @@ impl Diff {
         Ok(self.engine.selected_source()?.map(|at| side_of(at.side)))
     }
 
+    /// The cursor's line on `side`, with its file: `None` on a header, a gap, or a row that
+    /// has nothing on that side (an added line has no old number).
+    pub(super) fn line_on(&self, side: Side) -> Result<Option<(&str, u32)>> {
+        let Some(at) = self.engine.selected_source()? else { return Ok(None) };
+        let line = match side {
+            Side::Old => at.old_line,
+            Side::New => at.new_line,
+        };
+        Ok(self.paths.get(at.file).map(String::as_str).zip(line))
+    }
+
+    /// Whether `v` would start a selection here: the cursor is on a line of code and the
+    /// diff, not the file list, has the focus. Asks by starting one and clearing it.
+    pub(super) fn selectable(&mut self) -> Result<bool> {
+        if self.engine.execute(Command::SelectLines)? == InputEffect::Ignored {
+            return Ok(false);
+        }
+        self.run(Command::ClearSelection)?;
+        Ok(true)
+    }
+
+    /// Select `lines` as `v` would, the cursor on the last.
+    pub(super) fn select(&mut self, lines: &Lines) -> Result<()> {
+        let file = self.index(&lines.path).with_context(|| format!("{} is not in the diff", lines.path))?;
+        let range = SourceRange {
+            review: self.engine.review_id(),
+            file,
+            side: engine_side(lines.side),
+            first: lines.first,
+            last: lines.last,
+        };
+        self.engine.select_range(range)
+    }
+
     pub(super) fn begin_or_end_selection(&mut self) -> Result<()> {
         self.run(Command::SelectLines)
     }

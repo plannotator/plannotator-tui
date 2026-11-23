@@ -1,0 +1,308 @@
+//! The mouse: the wheel, clicks on lines, files, notes and buttons, and a drag that selects
+//! lines for a comment, in the diff and in the whole file. Every position is found in the
+//! frame the screen drew, as a terminal's click would land on it.
+
+use plannotator_tui_review::Side;
+use ratatui::buffer::Buffer;
+use ratatui::crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::style::Color;
+
+use super::whole_flow::settle_whole;
+use super::*;
+use crate::review::diff::Lines;
+use crate::review::{Draft, Focus, Mode};
+
+const COLS: u16 = 120;
+const ROWS: u16 = 40;
+
+fn draw(screen: &mut Screen) -> Buffer {
+    let mut terminal = Terminal::new(TestBackend::new(COLS, ROWS)).expect("terminal");
+    let mut drawn = Ok(());
+    terminal.draw(|f| drawn = screen.draw(f)).expect("draw");
+    drawn.expect("viewer draw");
+    screen.after_draw();
+    terminal.backend().buffer().clone()
+}
+
+/// The cell where `needle` starts in a fresh frame: the leftmost match, or with `last` the
+/// rightmost (the new side of a split diff).
+fn locate(screen: &mut Screen, needle: &str, last: bool) -> (u16, u16) {
+    let buffer = draw(screen);
+    let mut found = Vec::new();
+    for y in 0..ROWS {
+        let cells: Vec<String> = (0..COLS).map(|x| buffer[(x, y)].symbol().to_owned()).collect();
+        let row = cells.concat();
+        for (byte, _) in row.match_indices(needle) {
+            let mut width = 0;
+            let mut x = 0u16;
+            while width < byte {
+                width += cells[usize::from(x)].len();
+                x += 1;
+            }
+            found.push((x, y));
+        }
+    }
+    let at = if last { found.last() } else { found.first() };
+    *at.unwrap_or_else(|| panic!("no {needle:?} on screen"))
+}
+
+fn mouse(screen: &mut Screen, kind: MouseEventKind, (column, row): (u16, u16)) {
+    let event = MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE };
+    screen.handle_event(Event::Mouse(event)).expect("mouse");
+}
+
+/// Press at `from` and move, a row at a time, to `to`, without letting go.
+fn drag(screen: &mut Screen, from: (u16, u16), to: (u16, u16)) {
+    mouse(screen, MouseEventKind::Down(MouseButton::Left), from);
+    let rows: Vec<u16> =
+        if to.1 >= from.1 { (from.1..=to.1).collect() } else { (to.1..=from.1).rev().collect() };
+    for row in rows {
+        mouse(screen, MouseEventKind::Drag(MouseButton::Left), (to.0, row));
+    }
+}
+
+fn release(screen: &mut Screen, at: (u16, u16)) {
+    mouse(screen, MouseEventKind::Up(MouseButton::Left), at);
+}
+
+fn lines(side: Side, first: u32, last: u32) -> Lines {
+    Lines { path: "app.py".into(), side, first, last }
+}
+
+fn selection(screen: &Screen) -> Option<Lines> {
+    screen.diff.selection()
+}
+
+#[test]
+fn a_drag_selects_whole_lines_on_its_side_and_the_comment_lands_on_them() {
+    let fixture = Fixture::new("mouse-drag");
+    let mut screen = fixture.open();
+    let from = locate(&mut screen, "def add(a, b):", true);
+    let to = locate(&mut screen, "return total", true);
+    drag(&mut screen, (from.0 + 3, from.1), to);
+    release(&mut screen, to);
+    assert_eq!(selection(&screen), Some(lines(Side::New, 8, 10)));
+    press(&mut screen, KeyCode::Char('c'));
+    assert_eq!(screen.mode, Mode::Compose(Draft::Comment(lines(Side::New, 8, 10))));
+    type_and_save(&mut screen, "split this up");
+    let note = screen.store.annotations().first().expect("a note");
+    assert_eq!((note.line_start, note.line_end, note.side), (8, 10, Side::New));
+    assert_eq!(note.file_path, "app.py");
+}
+
+#[test]
+fn a_drag_that_starts_on_the_old_side_stays_on_it() {
+    let fixture = Fixture::new("mouse-old");
+    let mut screen = fixture.open();
+    let from = locate(&mut screen, "def add(a, b):", false);
+    let to = locate(&mut screen, "return a + b", false);
+    // The pointer wanders to the new side; the lines stay old ones.
+    drag(&mut screen, from, (COLS - 10, to.1));
+    release(&mut screen, to);
+    assert_eq!(selection(&screen), Some(lines(Side::Old, 5, 6)));
+}
+
+#[test]
+fn dragging_up_selects_from_the_pointer_down_to_the_pressed_line() {
+    let fixture = Fixture::new("mouse-up");
+    let mut screen = fixture.open();
+    let from = locate(&mut screen, "return total", true);
+    let to = locate(&mut screen, "def add(a, b):", true);
+    drag(&mut screen, from, to);
+    release(&mut screen, to);
+    assert_eq!(selection(&screen), Some(lines(Side::New, 8, 10)));
+}
+
+#[test]
+fn a_click_moves_the_cursor_and_picks_the_side_without_selecting() {
+    let fixture = Fixture::new("mouse-click");
+    let mut screen = fixture.open();
+    let new = locate(&mut screen, "return total", true);
+    mouse(&mut screen, MouseEventKind::Down(MouseButton::Left), new);
+    release(&mut screen, new);
+    assert_eq!(screen.diff.cursor().expect("cursor"), Some(lines(Side::New, 10, 10)));
+    assert_eq!(selection(&screen), None);
+    let old = locate(&mut screen, "return a + b", false);
+    mouse(&mut screen, MouseEventKind::Down(MouseButton::Left), old);
+    release(&mut screen, old);
+    assert_eq!(screen.diff.cursor().expect("cursor"), Some(lines(Side::Old, 6, 6)));
+}
+
+#[test]
+fn a_new_press_clears_the_last_selection() {
+    let fixture = Fixture::new("mouse-reselect");
+    let mut screen = fixture.open();
+    let from = locate(&mut screen, "def add(a, b):", true);
+    let to = locate(&mut screen, "return total", true);
+    drag(&mut screen, from, to);
+    release(&mut screen, to);
+    mouse(&mut screen, MouseEventKind::Down(MouseButton::Left), from);
+    release(&mut screen, from);
+    assert_eq!(selection(&screen), None);
+}
+
+#[test]
+fn the_rows_being_dragged_over_are_tinted_and_the_others_are_not() {
+    let fixture = Fixture::new("mouse-tint");
+    let mut screen = fixture.open();
+    let from = locate(&mut screen, "def add(a, b):", true);
+    let to = locate(&mut screen, "return total", true);
+    let outside = locate(&mut screen, "def main():", true);
+    drag(&mut screen, from, to);
+    let buffer = draw(&mut screen);
+    let tint = crate::theme::palette().selection.bg.unwrap_or(Color::Indexed(239));
+    for y in from.1..=to.1 {
+        assert_eq!(buffer[(from.0, y)].bg, tint, "row {y} is selected");
+    }
+    assert_ne!(buffer[(outside.0, outside.1)].bg, tint);
+    // The old side of the same rows is not.
+    let old = locate(&mut screen, "def add(a, b):", false);
+    assert_ne!(buffer[(old.0, old.1)].bg, tint);
+}
+
+#[test]
+fn the_toolbar_after_a_drag_comments_on_the_selection() {
+    let fixture = Fixture::new("mouse-toolbar");
+    let mut screen = fixture.open();
+    let from = locate(&mut screen, "def add(a, b):", true);
+    let to = locate(&mut screen, "return total", true);
+    drag(&mut screen, from, to);
+    release(&mut screen, to);
+    let comment = locate(&mut screen, "comment (c)", false);
+    assert_eq!(comment.1, to.1 + 1, "the toolbar sits under the release");
+    mouse(&mut screen, MouseEventKind::Down(MouseButton::Left), comment);
+    assert_eq!(screen.mode, Mode::Compose(Draft::Comment(lines(Side::New, 8, 10))));
+}
+
+#[test]
+fn a_key_takes_the_toolbar_away_and_keeps_the_selection() {
+    let fixture = Fixture::new("mouse-toolbar-key");
+    let mut screen = fixture.open();
+    let from = locate(&mut screen, "def add(a, b):", true);
+    let to = locate(&mut screen, "return total", true);
+    drag(&mut screen, from, to);
+    release(&mut screen, to);
+    assert!(frame(&mut screen, COLS, ROWS).iter().any(|r| r.contains("comment (c)")));
+    press(&mut screen, KeyCode::Char('j'));
+    assert!(!frame(&mut screen, COLS, ROWS).iter().any(|r| r.contains("comment (c)")));
+    assert_eq!(selection(&screen), Some(lines(Side::New, 8, 10)));
+}
+
+#[test]
+fn y_copies_the_selected_code_when_copy_on_select_is_off() {
+    let fixture = Fixture::new("mouse-copy");
+    let mut screen = fixture.open();
+    screen.set_copy_on_select(false);
+    let from = locate(&mut screen, "def add(a, b):", true);
+    let to = locate(&mut screen, "return total", true);
+    drag(&mut screen, from, to);
+    release(&mut screen, to);
+    assert!(row_with(&frame(&mut screen, COLS, ROWS), "esc clear").contains("y copy"));
+    let picked = selection(&screen).expect("selected");
+    assert_eq!(
+        screen.selected_code(&picked).as_deref(),
+        Some("def add(a, b):\n    total = a + b\n    return total")
+    );
+    press(&mut screen, KeyCode::Char('y'));
+    assert_eq!(screen.status.as_deref(), Some("copied 3 lines"));
+}
+
+/// The fixture with `app.py` long enough that its diff runs past one screen.
+fn long_fixture(tag: &str) -> Fixture {
+    let fixture = Fixture::new(tag);
+    let tail = (1..=60).map(|i| format!("v{i} = {i}")).collect::<Vec<_>>().join("\n");
+    fixture.write("app.py", &format!("{AFTER}{tail}\n"));
+    fixture
+}
+
+#[test]
+fn dragging_past_the_bottom_scrolls_and_keeps_selecting() {
+    let fixture = long_fixture("mouse-scroll");
+    let mut screen = fixture.open();
+    let from = locate(&mut screen, "import sys", true);
+    let bottom = screen.geometry.diff.bottom();
+    drag(&mut screen, from, (from.0, bottom - 1));
+    let on_screen = screen.selected_lines().expect("dragging").last;
+    for _ in 0..10 {
+        mouse(&mut screen, MouseEventKind::Drag(MouseButton::Left), (from.0, bottom + 2));
+        let _ = draw(&mut screen);
+    }
+    release(&mut screen, (from.0, bottom + 2));
+    let picked = selection(&screen).expect("selected");
+    assert_eq!(picked.first, 1);
+    assert!(picked.last > on_screen + 5, "{} grew past {on_screen}", picked.last);
+}
+
+#[test]
+fn a_drag_in_the_whole_file_selects_its_lines_for_a_comment() {
+    let fixture = Fixture::new("mouse-whole");
+    let mut screen = fixture.open();
+    at(&mut screen, 1);
+    press(&mut screen, KeyCode::Char('o'));
+    settle_whole(&mut screen);
+    let from = locate(&mut screen, "def greet(name):", true);
+    let to = locate(&mut screen, "print(\"hello,\", name)", true);
+    drag(&mut screen, from, to);
+    release(&mut screen, to);
+    let whole = screen.whole.as_ref().expect("still open");
+    assert_eq!(whole.target().expect("target"), Some((4, 5)));
+    press(&mut screen, KeyCode::Char('c'));
+    assert_eq!(screen.mode, Mode::Compose(Draft::Comment(lines(Side::New, 4, 5))));
+}
+
+#[test]
+fn the_wheel_scrolls_the_diff_under_the_pointer() {
+    let fixture = long_fixture("mouse-wheel");
+    let mut screen = fixture.open();
+    let first = locate(&mut screen, "import sys", true);
+    mouse(&mut screen, MouseEventKind::ScrollDown, first);
+    assert!(!frame(&mut screen, COLS, ROWS).iter().any(|r| r.contains("import sys")));
+    mouse(&mut screen, MouseEventKind::ScrollUp, first);
+    assert!(frame(&mut screen, COLS, ROWS).iter().any(|r| r.contains("import sys")));
+}
+
+#[test]
+fn a_click_in_the_file_list_opens_the_file_and_starts_no_selection() {
+    let fixture = Fixture::new("mouse-files");
+    fixture.write("notes.txt", "changed\n");
+    let mut screen = fixture.open();
+    let row = locate(&mut screen, "notes.txt", false);
+    drag(&mut screen, row, (row.0, row.1 + 3));
+    release(&mut screen, (row.0, row.1 + 3));
+    assert_eq!(selection(&screen), None);
+    assert_eq!(screen.file_under_cursor().expect("cursor").as_deref(), Some("notes.txt"));
+}
+
+#[test]
+fn a_click_on_a_note_selects_it_and_shows_its_line() {
+    let fixture = Fixture::new("mouse-note");
+    let mut screen = fixture.open();
+    at(&mut screen, 9);
+    press(&mut screen, KeyCode::Char('c'));
+    type_and_save(&mut screen, "first");
+    at(&mut screen, 14);
+    press(&mut screen, KeyCode::Char('c'));
+    type_and_save(&mut screen, "second");
+    at(&mut screen, 1);
+    let bubble = locate(&mut screen, "first", true);
+    mouse(&mut screen, MouseEventKind::Down(MouseButton::Left), bubble);
+    assert_eq!(screen.focus, Focus::Notes);
+    assert_eq!(screen.selected_note().map(|n| n.line_start), Some(9));
+    assert_eq!(screen.diff.cursor().expect("cursor"), Some(lines(Side::New, 9, 9)));
+}
+
+#[test]
+fn the_header_buttons_send_and_open_the_review_menu() {
+    let fixture = Fixture::new("mouse-buttons");
+    let mut screen = fixture.open();
+    at(&mut screen, 9);
+    press(&mut screen, KeyCode::Char('c'));
+    type_and_save(&mut screen, "a note");
+    let review = locate(&mut screen, "Review", false);
+    mouse(&mut screen, MouseEventKind::Down(MouseButton::Left), review);
+    assert_eq!(screen.mode, Mode::Menu(0));
+    press(&mut screen, KeyCode::Esc);
+    let send = locate(&mut screen, "Send 1 new", false);
+    mouse(&mut screen, MouseEventKind::Down(MouseButton::Left), send);
+    assert_eq!(fixture.sent().len(), 1);
+}

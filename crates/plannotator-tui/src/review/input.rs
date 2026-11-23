@@ -40,6 +40,7 @@ impl Screen {
     pub(crate) fn handle_event(&mut self, event: Event) -> Result<()> {
         if matches!(event, Event::Key(_) | Event::Paste(_)) {
             self.last_key = Some(std::time::Instant::now());
+            self.toolbar = None;
         }
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => self.key(key),
@@ -187,8 +188,19 @@ impl Screen {
     }
 
     fn diff_key(&mut self, key: KeyEvent) -> Result<()> {
-        let Some(action) = self.keys.action(&key, keys::DIFF) else { return Ok(()) };
+        match self.keys.action(&key, keys::DIFF) {
+            Some(action) => self.diff_action(action),
+            None => Ok(()),
+        }
+    }
+
+    /// A diff key's action, or the toolbar button for it.
+    fn diff_action(&mut self, action: Action) -> Result<()> {
         match action {
+            Action::CopySelection => {
+                self.copy_selection();
+                return Ok(());
+            }
             Action::GoToDefinition => return self.go_to_definition(),
             Action::JumpBack => return self.jump_history(false),
             Action::JumpForward => return self.jump_history(true),
@@ -298,8 +310,33 @@ impl Screen {
                 self.mode = Mode::Browse;
                 return Ok(());
             }
+            Mode::Help => {
+                let room = self.help_room.get();
+                match mouse.kind {
+                    MouseEventKind::ScrollDown => self.help_scroll = (self.help_scroll + 3).min(room),
+                    MouseEventKind::ScrollUp => self.help_scroll = self.help_scroll.saturating_sub(3),
+                    _ => {}
+                }
+                return Ok(());
+            }
             Mode::Browse => {}
             _ => return Ok(()),
+        }
+        // A drag goes on wherever the pointer is, over the rail or past the pane.
+        if self.drag.is_some() {
+            match mouse.kind {
+                MouseEventKind::Drag(MouseButton::Left) => return self.drag_to(mouse),
+                MouseEventKind::Up(MouseButton::Left) => return self.release(mouse),
+                _ => {}
+            }
+        }
+        if click && let Some(action) = self.toolbar_hit(at) {
+            self.toolbar = None;
+            self.focus = Focus::Diff;
+            return self.diff_action(action);
+        }
+        if click || matches!(mouse.kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown) {
+            self.toolbar = None;
         }
         if click && inside(self.geometry.send_button) {
             self.send(false);
@@ -327,7 +364,7 @@ impl Screen {
         }
         if self.geometry.diff.contains(at) {
             if click {
-                self.focus = Focus::Diff;
+                return self.press(mouse);
             }
             match &mut self.whole {
                 Some(whole) => whole.handle_event(Event::Mouse(mouse))?,

@@ -12,7 +12,8 @@
 //! - [`drafts`]: making, editing and removing notes.
 //! - [`herdr`]: `plannotator-tui herdr review`. [`scope`]: what it shares with `rex review`
 //!   and `hc review`, and the pane they open.
-//! - [`input`]: keys and the mouse. [`draw`], [`rail`] and [`overlays`]: the frame.
+//! - [`input`]: keys and the mouse; [`mouse`]: clicks and drags in the diff. [`draw`],
+//!   [`rail`] and [`overlays`]: the frame.
 //! - [`send`]: send, resend, finish and undo. [`pi`]: the Pi link.
 //! - [`watch`]: noticing that the diff changed on disk, for the footer.
 //! - [`whole`]: the whole-file view (`o`, `O`), a second diffs-rs engine.
@@ -29,6 +30,7 @@ mod draw;
 pub(crate) mod herdr;
 mod input;
 mod jump;
+mod mouse;
 mod notes;
 mod overlays;
 mod pi;
@@ -108,6 +110,8 @@ struct Geometry {
     /// Rail bubbles drawn last frame, with their note's index.
     bubbles: Vec<(Rect, usize)>,
     menu_rows: Vec<(Rect, usize)>,
+    /// The buttons of the toolbar beside a mouse selection.
+    toolbar: Vec<(Rect, crate::keys::Action)>,
     /// The columns the comment box wrapped to last frame; 0 before its first.
     compose_wrap: usize,
 }
@@ -136,6 +140,8 @@ pub(crate) struct Screen {
     shift_enter: bool,
     /// Copy to the terminal clipboard when a send cannot reach the agent (off headless).
     clipboard: bool,
+    /// `[ui] copy_on_select`: whether a mouse selection is copied on release.
+    on_release: mouse::OnRelease,
     mode: Mode,
     focus: Focus,
     /// The selected note, by its position in the rail's order.
@@ -150,6 +156,10 @@ pub(crate) struct Screen {
     undo: Vec<String>,
     status: Option<String>,
     geometry: Geometry,
+    /// A drag with the left button in the diff, until the release.
+    drag: Option<mouse::Drag>,
+    /// The toolbar beside the lines a drag selected, until the next key or click.
+    toolbar: Option<mouse::Toolbar>,
     /// Whether the diff changed on disk since the last capture.
     watch: watch::Watch,
     /// The last key or paste, so no disk check starts while the person types.
@@ -208,6 +218,7 @@ impl Screen {
             keys: Keymap::default(),
             shift_enter: false,
             clipboard: false,
+            on_release: mouse::OnRelease::Copy,
             mode: Mode::Browse,
             focus: Focus::Diff,
             rail_cursor: 0,
@@ -218,6 +229,8 @@ impl Screen {
             undo: Vec::new(),
             status: None,
             geometry: Geometry::default(),
+            drag: None,
+            toolbar: None,
             watch,
             last_key: None,
             whole: None,
@@ -274,6 +287,11 @@ impl Screen {
 
     pub(crate) fn enable_clipboard(&mut self) {
         self.clipboard = true;
+    }
+
+    /// `[ui] copy_on_select`: off, a mouse selection waits for `y` to be copied.
+    pub(crate) fn set_copy_on_select(&mut self, on: bool) {
+        self.on_release = if on { mouse::OnRelease::Copy } else { mouse::OnRelease::Wait };
     }
 
     pub(crate) fn wants_quit(&self) -> bool {
@@ -389,6 +407,13 @@ impl Screen {
                 };
                 (lines, if self.store.is_pending(note) { unsent } else { sent })
             })
+            .chain(
+                self.whole
+                    .is_none()
+                    .then(|| self.drag.as_ref().and_then(mouse::Drag::lines))
+                    .flatten()
+                    .map(|lines| (lines, mouse::drag_mark())),
+            )
             .collect();
         if let Err(err) = self.diff.set_markers(&marks) {
             self.status = Some(format!("could not mark notes in the diff: {err:#}"));
