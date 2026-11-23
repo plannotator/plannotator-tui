@@ -78,14 +78,13 @@ fn check_attr(root: &PathBuf, paths: &[String]) -> Option<HashMap<String, bool>>
 /// `git check-attr -z` output: path, attribute, value, each ended by a NUL.
 fn parse(output: &str) -> HashMap<String, bool> {
     let fields: Vec<&str> = output.split('\0').collect();
-    fields
-        .chunks_exact(3)
-        .filter_map(|triple| match triple {
-            [path, attribute, value] if *attribute == ATTRIBUTE => match *value {
-                "set" | "true" => Some(((*path).to_owned(), true)),
-                "unset" | "false" => Some(((*path).to_owned(), false)),
-                _ => None,
-            },
+    let (triples, _) = fields.as_chunks::<3>();
+    triples
+        .iter()
+        .filter(|[_, attribute, _]| *attribute == ATTRIBUTE)
+        .filter_map(|[path, _, value]| match *value {
+            "set" | "true" => Some(((*path).to_owned(), true)),
+            "unset" | "false" => Some(((*path).to_owned(), false)),
             _ => None,
         })
         .collect()

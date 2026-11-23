@@ -13,8 +13,9 @@ use super::diff::Progress;
 use super::draw::{RAIL_MIN_TOTAL_WIDTH, count};
 use super::{Focus, Mode, Screen};
 use crate::keys::Action;
+
+mod fit;
 use crate::theme::palette;
-use crate::ui::hints;
 
 /// From this many columns the footer's hints take one row, below it two.
 const FOOTER_ONE_ROW: u16 = 120;
@@ -148,7 +149,7 @@ impl Screen {
         let rows = if width >= FOOTER_ONE_ROW { 1 } else { 2 };
         let hints = self.footer_hints();
         let keep = self.footer_tail_len(&hints);
-        (text, hints::fit(&hints, keep, room, beside, rows))
+        (text, fit::fit(&hints, keep, room, beside, rows))
     }
 
     /// `the diff changed on disk · r refreshes`, once a check saw the diff change.
