@@ -31,6 +31,7 @@ fn send_carries_new_notes_and_resending_after_an_edit_carries_only_the_edit() {
     );
     assert!(first.contains("argv may be empty"));
     assert_eq!(screen.send_state, SendState::Sent);
+    assert_eq!(screen.send_label(), "Sent ✓ ▸ test agent");
     keys(&mut screen, "E");
     assert_eq!(fixture.sent().len(), 1, "nothing new to send");
 
@@ -39,6 +40,7 @@ fn send_carries_new_notes_and_resending_after_an_edit_carries_only_the_edit() {
     keys(&mut screen, "e");
     screen.handle_event(Event::Paste(", or missing".into())).expect("paste");
     press(&mut screen, KeyCode::Enter);
+    assert_eq!(screen.send_label(), "Send 1 new ▸ test agent (E)", "the edit is new again");
     keys(&mut screen, "E");
     let sent = fixture.sent();
     let second = sent.last().expect("second send");
@@ -62,6 +64,7 @@ fn a_blocked_agent_keeps_the_notes_pending_and_says_so() {
     assert!(matches!(screen.send_state, SendState::Blocked(_)));
     assert_eq!(screen.store.pending().len(), 1);
     assert_eq!(screen.status.as_deref(), Some("test agent is at a dialog \u{b7} E retry"));
+    assert_eq!(screen.send_label(), "test agent at a dialog · retry (E)");
     fixture.agent.outcome.set(Outcome::Delivered);
     keys(&mut screen, "E");
     assert_eq!(screen.store.pending().len(), 0);

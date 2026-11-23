@@ -82,8 +82,10 @@ no `S`; they finish with `F`.
 For file and folder reviews, `E` sends only new or edited annotations. Send A and B, then
 add C: the next send includes just C. Sent notes stay visible with a marker; editing one
 makes it pending again, including after a restart. `R` **Resend all** includes every active
-note. With nothing pending, `E` reports “nothing new to send”. A failed send keeps the notes
-pending for retry.
+note. With nothing pending, `E` reports “nothing new to send” and the button reads
+`Sent ✓ ▸ claude in w1:p2` (`Copied ✓` for the clipboard) until there is a new note. When
+the agent is at a dialog it reads `claude in w1:p2 at a dialog · retry (E)`. A failed send
+keeps the notes pending for retry.
 
 `F` **Finish review** archives sent, unchanged notes and leaves pending ones in place.
 `U` undoes the last finish during this session. `H` opens the archive, where Enter or a
@@ -417,7 +419,7 @@ delete = "red"           # also the struck-through text
 comment-bg = "58"        # the tint under commented text
 looks-good-bg = "22"     # the tint under looks-good text
 block = "236"            # the focused block and the focused tree row
-toolbar = "238"          # the floating toolbar and the idle header buttons
+toolbar = "238"          # the floating toolbar and the idle header buttons; 253 on light
 cursor = "240"           # the keyboard cursor cell
 selection = "#45475a"    # a character selection, a picker row, a menu row
 code = "light-yellow"    # inline code, and fenced code without a bundled grammar; 94 on light
@@ -428,11 +430,14 @@ code-function = "blue"
 code-type = "cyan"       # 30 on light
 code-comment = "dark-gray"  # comments (italic), the bar beside code and its language label
 search = "24"            # every match of a document search
-search-current = "208"   # the match the cursor is on (black text by default)
+search-current = "208"   # the match the cursor is on (black text by default); 214 on light
 ```
 
 `cursor`, `selection`, `search` and `search-current` become plain backgrounds when set: the
-text on them keeps the terminal's colour.
+text on them keeps the terminal's colour. The text on the header buttons and the floating
+toolbar is not a role: each theme picks it from the 256-colour table so that it reads at 4.5:1
+or more on the default toolbar grey. A `toolbar` colour far from that grey can make it harder
+to read.
 
 The document's text sits in a reading column, centred in the columns the tree and the notes
 leave, and `[ui]` sizes it and the app around it:

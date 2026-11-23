@@ -169,6 +169,7 @@ pub(crate) struct Screen {
     files: files::FileList,
     compose: Compose,
     send_state: SendState,
+    last_send: crate::ui::send_button::LastSend,
     /// Notes the last finish archived, for undo.
     undo: Vec<String>,
     status: Option<String>,
@@ -251,6 +252,7 @@ impl Screen {
             files: files::FileList::default(),
             compose: Compose::default(),
             send_state: SendState::Ready,
+            last_send: crate::ui::send_button::LastSend::None,
             undo: Vec::new(),
             status: None,
             geometry: Geometry::default(),

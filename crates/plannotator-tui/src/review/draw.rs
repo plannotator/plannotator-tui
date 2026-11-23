@@ -17,7 +17,7 @@ use super::files::fit;
 use super::{Draft, Focus, Geometry, Mode, Screen};
 use crate::keys::Action;
 use crate::theme::palette;
-use crate::ui::{compose, send_button};
+use crate::ui::{chips, compose, send_button};
 
 const RAIL_WIDTH: u16 = 36;
 pub(super) const RAIL_MIN_WIDTH: u16 = 28;
@@ -183,7 +183,7 @@ impl Screen {
         let room = area.width.saturating_sub(send_width + 1 + title.width() as u16);
         if review_width <= room {
             let rect = Rect { x: send_rect.x - 1 - review_width, y: area.y, width: review_width, height: 1 };
-            let style = Style::new().fg(palette().accent).bg(palette().toolbar_bg);
+            let style = Style::new().fg(chips::chips().menu_fg).bg(palette().toolbar_bg);
             buf.set_span(rect.x, rect.y, &Span::styled(review, style), rect.width);
             self.geometry.review_button = Some(rect);
         }

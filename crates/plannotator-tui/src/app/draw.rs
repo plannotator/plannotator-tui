@@ -14,6 +14,7 @@ use super::{App, Focus, GUTTER, Geometry, Mode, TOOLBAR, glyph, label};
 use crate::gate::Gate;
 use crate::keys::Action;
 use crate::theme::palette;
+use crate::ui::chips::chips;
 use crate::ui::compose;
 use crate::wrap::wrap_line;
 
@@ -297,7 +298,7 @@ impl App {
         let mut spans = [0..0, 0..0, 0..0];
         for ((label, item), span) in labels.iter().zip(TOOLBAR.iter()).zip(spans.iter_mut()) {
             let w = label.width() as u16;
-            let style = Style::new().fg(accent(item.3)).bg(palette().toolbar_bg).bold();
+            let style = Style::new().fg(chips().toolbar(item.3)).bg(palette().toolbar_bg).bold();
             buf.set_span(x, rect.y, &Span::styled(label.as_str(), style), w);
             *span = x..x + w;
             x += w;
