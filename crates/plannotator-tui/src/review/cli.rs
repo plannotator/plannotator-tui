@@ -158,7 +158,9 @@ fn event_loop(
         if handled {
             dirty = true;
         } else {
-            let _ = ready.recv_timeout(TICK);
+            // A drag held past the diff's edge scrolls on the tick.
+            let wait = if screen.held_at_edge() { super::mouse::edge::STEP } else { TICK };
+            let _ = ready.recv_timeout(wait);
         }
     }
     Ok(())

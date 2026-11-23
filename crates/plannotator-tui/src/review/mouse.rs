@@ -5,15 +5,20 @@
 //! mouse selection in a document does. `c`, `s` and `y` then act on it like on a `v`
 //! selection. A shift-click grows it from the line first pressed.
 //!
-//! diffs-rs handles clicks and the wheel but has no drag, and cannot say which line is under
-//! a cell. So each step of a drag clicks the viewer at the pressed column on the pointer's
-//! row and reads the line the cursor landed on. The range is kept here and shown as a gutter
-//! mark until the release, because the viewer's selection follows its cursor (a cursor in
-//! another file drops it). Past the top or bottom of the pane, each step moves the cursor a
-//! line, which scrolls.
+//! diffs-rs handles clicks and the wheel but has no drag. So each step of a drag onto a line
+//! of code clicks the viewer at the pressed column on the pointer's row and reads the line the
+//! cursor landed on. The range is kept here and shown as a gutter mark until the release,
+//! because the viewer's selection follows its cursor (a cursor in another file drops it).
+//!
+//! A terminal can report the pointer many times for one cell, and several reports between two
+//! frames: a report for the cell already reported changes nothing, and no report scrolls. A
+//! drag inside the pane never moves the view; held past its top or bottom, the view scrolls
+//! on a timer (`edge`).
+
+pub(super) mod edge;
 
 use anyhow::Result;
-use diffs_rs::engine::Command;
+use diffs_rs::engine::DiffRowKind;
 use plannotator_tui_review::Side;
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
@@ -40,10 +45,16 @@ pub(super) struct Drag {
     anchor: Lines,
     /// The first and last line of the anchor's hunk on its side: the drag stays inside.
     span: (u32, u32),
+    /// The index of the anchor's hunk in its file.
+    hunk: usize,
     /// The line at the pointer's end, on the anchor's side.
     end: u32,
     /// Whether the pointer moved with the button down; a press and a release is a click.
     moved: bool,
+    /// The cell the pointer was last reported in, first the pressed one.
+    cell: (u16, u16),
+    /// The pane's edge the pointer is held past, if it is.
+    edge: Option<edge::Edge>,
     /// The view it started in (the whole file or the diff) and that view's patch, so a
     /// release over another one applies nothing.
     whole: bool,
@@ -67,12 +78,26 @@ impl Drag {
         Self {
             column: 0,
             span: (lines.first, lines.last),
+            hunk: 0,
             anchor: Lines { last: lines.first, ..lines },
             end,
             moved: true,
+            cell: (0, 0),
+            edge: None,
             whole: false,
             generation,
         }
+    }
+
+    /// End the range at the cursor's line, kept inside the anchor's hunk, when the cursor is
+    /// on the anchor's side of its file.
+    fn follow(&mut self, diff: &Diff) -> Result<()> {
+        if let Some((path, line)) = diff.line_on(self.anchor.side)?
+            && path == self.anchor.path
+        {
+            self.end = line.clamp(self.span.0, self.span.1);
+        }
+        Ok(())
     }
 
     /// The lines dragged over, once the pointer moved.
@@ -164,13 +189,16 @@ impl Screen {
         diff.handle_event(Event::Mouse(mouse))?;
         let anchor = if diff.selectable()? { diff.cursor()? } else { None };
         self.drag = anchor.and_then(|anchor| {
-            let span = diff.hunk_span(&anchor.path, anchor.side, anchor.first)?;
+            let (hunk, span) = diff.hunk_span(&anchor.path, anchor.side, anchor.first)?;
             Some(Drag {
                 column: mouse.column,
                 end: anchor.first,
                 anchor,
                 span,
+                hunk,
                 moved: false,
+                cell: (mouse.column, mouse.row),
+                edge: None,
                 whole,
                 generation,
             })
@@ -178,32 +206,44 @@ impl Screen {
         Ok(())
     }
 
-    /// The pointer moved with the button down: the line under it, or past the pane's top or
-    /// bottom the next line that way, ends the range, kept inside the anchor's hunk. A row
-    /// with nothing on the anchor's side, or in another file, leaves the range as it was.
+    /// The pointer moved with the button down: the line under it ends the range, kept inside
+    /// the anchor's hunk. A row with nothing on the anchor's side, or in another file, leaves
+    /// the range as it was; a row that is no code (a heading, a gap) takes no click, which
+    /// could open the gap or move the view. Past the pane's top or bottom the line at that
+    /// edge ends it, and the view scrolls from there while the pointer stays (`edge`).
     pub(super) fn drag_to(&mut self, mouse: MouseEvent) -> Result<()> {
         let Some(mut drag) = self.drag.take() else { return Ok(()) };
+        if drag.cell == (mouse.column, mouse.row) {
+            self.drag = Some(drag);
+            return Ok(());
+        }
+        drag.cell = (mouse.column, mouse.row);
+        drag.moved = true;
         let area = self.geometry.diff;
+        let held = drag.edge;
+        drag.edge = edge::Edge::past(mouse.row, area, held);
+        // Held past the same edge, the timer moves the cursor: a click would pull it back.
+        let rows = match drag.edge {
+            Some(edge) if held.is_some_and(|held| held.down() == edge.down()) => Vec::new(),
+            // The sticky heading can cover the top row.
+            Some(edge) if !edge.down() => vec![area.y, area.y + 1],
+            Some(_) => vec![area.bottom().saturating_sub(1)],
+            None => vec![mouse.row],
+        };
         let Some(diff) = self.active_diff_mut() else { return Ok(()) };
-        if mouse.row < area.y {
-            diff.run(Command::Up)?;
-        } else if mouse.row >= area.bottom() {
-            diff.run(Command::Down)?;
-        } else {
+        let code = rows
+            .into_iter()
+            .find(|&row| diff.row_at(drag.column, row).is_some_and(|shown| shown.kind == DiffRowKind::Code));
+        if let Some(row) = code {
             let click = MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
                 column: drag.column,
-                row: mouse.row,
+                row,
                 modifiers: KeyModifiers::NONE,
             };
             diff.handle_event(Event::Mouse(click))?;
+            drag.follow(diff)?;
         }
-        if let Some((path, line)) = diff.line_on(drag.anchor.side)?
-            && path == drag.anchor.path
-        {
-            drag.end = line.clamp(drag.span.0, drag.span.1);
-        }
-        drag.moved = true;
         self.drag = Some(drag);
         self.sync_markers();
         Ok(())
