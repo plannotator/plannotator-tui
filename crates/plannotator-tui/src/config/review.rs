@@ -81,6 +81,7 @@ pub(crate) enum Background {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SplitShare(u16);
 
+#[cfg_attr(not(unix), allow(dead_code, reason = "only the code review, Unix-only, changes and saves them"))]
 impl SplitShare {
     pub(crate) const EVEN: Self = Self(500);
     pub(crate) const MIN: u16 = 100;
@@ -132,6 +133,7 @@ impl<'de> Deserialize<'de> for SplitShare {
 
 /// The `[review]` table of a config file, whatever else the file holds.
 #[derive(Deserialize)]
+#[cfg_attr(not(unix), allow(dead_code, reason = "only the code review, Unix-only, changes and saves them"))]
 struct ReviewOnly {
     #[serde(default)]
     review: ReviewConfig,
@@ -141,6 +143,7 @@ struct ReviewOnly {
 /// and the table when they are missing. Only keys whose value differs from what the file
 /// says now (its value, or the default when it has none) are written; everything else in the
 /// file is kept byte for byte. A file that does not parse is left alone and is an error.
+#[cfg_attr(not(unix), allow(dead_code, reason = "only the code review, Unix-only, changes and saves them"))]
 pub(crate) fn save(path: &Path, review: ReviewConfig) -> Result<()> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
