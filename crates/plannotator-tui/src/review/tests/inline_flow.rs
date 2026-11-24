@@ -373,7 +373,6 @@ fn three_hundred_notes_lay_out_once_and_draw_only_what_shows() {
     check_boxes(&screen, &buffer, "300 notes");
     // Debug build, 41 frames with 300 boxes set: well under a second each.
     assert!(started.elapsed() < Duration::from_secs(20), "{:?}", started.elapsed());
-    eprintln!("41 frames with 300 notes: {:?}", started.elapsed());
 }
 
 #[test]
