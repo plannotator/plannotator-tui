@@ -276,3 +276,25 @@ fn the_review_menu_comments_on_the_whole_change_and_the_note_survives_reload_and
     let rows = frame(&mut again, 120, 40);
     assert!(row_with(&rows, "needs a changelog entry").contains('\u{2502}'), "{rows:#?}");
 }
+
+#[test]
+fn an_unedited_suggestion_keeps_the_code_exactly_carriage_returns_tabs_and_trailing_spaces() {
+    let fixture = Fixture::new("suggest-exact");
+    fixture.write("crlf.py", "def f():\r\n\treturn 1\r\n");
+    fixture.git(&["add", "."]);
+    fixture.git(&["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "crlf"]);
+    fixture.write("crlf.py", "def f():\r\n\tvalue = 1  \r\n\treturn value\r\n");
+    let mut screen = fixture.open();
+    screen.diff.reveal("crlf.py", Side::New, 2).expect("line 2");
+    keys(&mut screen, "vjs");
+    let code = "\tvalue = 1  \r\n\treturn value\r";
+    assert_eq!(screen.compose.value(), code);
+    // The box shows the tabs as four columns and no carriage return.
+    let rows = frame(&mut screen, 120, 40);
+    assert!(row_with(&rows, "value = 1").contains("    value = 1"), "{rows:#?}");
+    // A new line typed after the code goes; everything else stays.
+    screen.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT))).expect("key");
+    press(&mut screen, KeyCode::Enter);
+    let note = screen.store.annotations().iter().find(|n| n.file_path == "crlf.py").expect("saved");
+    assert_eq!(note.suggested_code.as_deref(), Some(code));
+}
