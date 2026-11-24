@@ -194,7 +194,6 @@ impl Screen {
     /// The comment box, next to what it is about (`compose_at`).
     fn draw_compose(&mut self, frame: &mut Frame, diff: Rect, draft: &Draft) {
         let rect = self.compose_rect(diff, draft);
-        self.geometry.compose_wrap = usize::from(rect.width.saturating_sub(compose::CHROME));
         let verb = match draft {
             Draft::Comment(lines) => {
                 format!("comment on {}", lines_label(lines))
@@ -208,7 +207,10 @@ impl Screen {
             Draft::Edit(_) => "edit".to_owned(),
         };
         let title = self.compose.heading(&verb, self.shift_enter, &self.keys);
-        self.geometry.compose_text = Some(compose::draw(frame, rect, &self.compose, &title));
+        let (text, first) = compose::draw(frame, rect, &self.compose, &title);
+        // The text wraps one column short of its area, which keeps a column for the cursor.
+        self.geometry.compose_wrap = usize::from(text.width.saturating_sub(1)).max(1);
+        self.geometry.compose_text = Some((text, first));
     }
 }
 

@@ -173,3 +173,58 @@ fn a_click_on_the_boxs_text_moves_the_text_cursor_there() {
     keys(&mut screen, "big ");
     assert_eq!(screen.compose.value(), "hello big world");
 }
+
+#[test]
+fn a_click_in_a_scrolled_box_moves_the_cursor_and_not_the_text() {
+    let (_fixture, mut screen) = composing("still-scrolled");
+    let text: Vec<String> = (0..50).map(|n| format!("line {n}")).collect();
+    screen.handle_event(Event::Paste(text.join("\n"))).expect("paste");
+    let shown = |screen: &mut Screen| {
+        let buffer = draw(screen, SIZE);
+        let found = the_box(&buffer, "comment on file0.py:20-22");
+        (found.top()..found.bottom())
+            .map(|y| (found.left()..found.right()).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+    };
+    let before = shown(&mut screen);
+    assert!(before.iter().any(|r| r.contains("line 42 ")) && before.iter().any(|r| r.contains("line 49")));
+    let at = locate(&draw(&mut screen, SIZE), "line 45");
+    report(&mut screen, MouseEventKind::Down(MouseButton::Left), at);
+    report(&mut screen, MouseEventKind::Up(MouseButton::Left), at);
+    assert_eq!(shown(&mut screen), before, "the rows shown stay");
+    let at = locate(&draw(&mut screen, SIZE), "line 43");
+    report(&mut screen, MouseEventKind::Down(MouseButton::Left), at);
+    keys(&mut screen, "X");
+    assert!(screen.compose.value().contains("\nXline 43\n"), "the second click lands on its line");
+}
+
+#[test]
+fn in_a_tiny_terminal_the_box_draws_inside_the_diff_or_not_at_all_and_keeps_the_draft() {
+    for size in [(60, 4), (60, 3), (50, 2)] {
+        let fixture = long("still-tiny", false);
+        let mut screen = fixture.open();
+        screen.diff.reveal("file0.py", Side::New, 3).expect("line 3");
+        draw(&mut screen, size);
+        press(&mut screen, KeyCode::Char('c'));
+        keys(&mut screen, "tiny");
+        let buffer = draw(&mut screen, size);
+        let pane = screen.geometry.diff;
+        for y in 0..size.1 {
+            let row: String = (0..size.0).map(|x| buffer[(x, y)].symbol()).collect();
+            let boxed = row.contains("tiny") || row.contains(['\u{256d}', '\u{2570}']);
+            assert!(
+                !boxed || (pane.top()..pane.bottom()).contains(&y),
+                "{size:?}: row {y} {row:?} is outside {pane:?}"
+            );
+        }
+        if let Some((text, _)) = screen.geometry.compose_text {
+            assert!(text.is_empty() || pane.union(text) == pane, "{size:?}: {text:?} in {pane:?}");
+        }
+        // Back to a usable size, the draft is there to save.
+        let found = the_box(&draw(&mut screen, SIZE), "comment on file0.py:3");
+        assert!(found.height >= 3);
+        press(&mut screen, KeyCode::Enter);
+        let note = screen.store.annotations().first().expect("saved");
+        assert_eq!((note.text.as_deref(), note.line_start), (Some("tiny"), 3), "{size:?}");
+    }
+}
