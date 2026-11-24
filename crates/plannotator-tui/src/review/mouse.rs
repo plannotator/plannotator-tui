@@ -13,9 +13,9 @@
 //! A terminal can report the pointer many times for one cell, and several reports between two
 //! frames: a report for the cell already reported changes nothing, and no report scrolls. A
 //! drag inside the pane never moves the view; held past its top or bottom, the view scrolls
-//! on a timer (`edge`).
+//! on a timer (`edge`, `ui::drag`).
 
-pub(super) mod edge;
+mod edge;
 
 use anyhow::Result;
 use diffs_rs::engine::DiffRowKind;
@@ -35,6 +35,7 @@ use super::{Focus, Screen};
 use crate::delivery::Delivery as _;
 use crate::keys::Action;
 use crate::theme::palette;
+use crate::ui::drag::Edge;
 
 /// A drag with the left button, from a line of code.
 #[derive(Debug, Clone)]
@@ -54,7 +55,7 @@ pub(super) struct Drag {
     /// The cell the pointer was last reported in, first the pressed one.
     cell: (u16, u16),
     /// The pane's edge the pointer is held past, if it is.
-    edge: Option<edge::Edge>,
+    edge: Option<Edge>,
     /// The view it started in (the whole file or the diff) and that view's patch, so a
     /// release over another one applies nothing.
     whole: bool,
@@ -221,7 +222,7 @@ impl Screen {
         drag.moved = true;
         let area = self.geometry.diff;
         let held = drag.edge;
-        drag.edge = edge::Edge::past(mouse.row, area, held);
+        drag.edge = Edge::past(mouse.row, area, held);
         // Held past the same edge, the timer moves the cursor: a click would pull it back.
         let rows = match drag.edge {
             Some(edge) if held.is_some_and(|held| held.down() == edge.down()) => Vec::new(),

@@ -115,6 +115,8 @@ enum Focus {
 /// Where things were drawn last frame, for the mouse.
 #[derive(Debug, Default, Clone)]
 struct Geometry {
+    /// The whole frame: a mouse report outside it is ignored (`ui::drag::on_screen`).
+    screen: Rect,
     diff: Rect,
     rail: Rect,
     /// The file list; empty while it is hidden.

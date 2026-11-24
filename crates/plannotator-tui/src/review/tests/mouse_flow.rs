@@ -10,8 +10,8 @@ use ratatui::style::Modifier;
 use super::whole_flow::settle_whole;
 use super::*;
 use crate::review::diff::Lines;
-use crate::review::mouse::edge::STEP;
 use crate::review::{Draft, Focus, Mode};
+use crate::ui::drag::STEP;
 
 pub(super) const COLS: u16 = 120;
 pub(super) const ROWS: u16 = 40;
@@ -319,9 +319,9 @@ fn dragging_past_the_bottom_scrolls_and_keeps_selecting() {
     let bottom = screen.geometry.diff.bottom();
     drag(&mut screen, from, (from.0, bottom - 1));
     let on_screen = screen.selected_lines().expect("dragging").last;
-    mouse(&mut screen, MouseEventKind::Drag(MouseButton::Left), (from.0, bottom + 2));
+    mouse(&mut screen, MouseEventKind::Drag(MouseButton::Left), (from.0, bottom));
     hold(&mut screen, 10);
-    release(&mut screen, (from.0, bottom + 2));
+    release(&mut screen, (from.0, bottom));
     let picked = selection(&screen).expect("selected");
     assert_eq!(picked.first, 1);
     assert!(picked.last > on_screen + 5, "{} grew past {on_screen}", picked.last);

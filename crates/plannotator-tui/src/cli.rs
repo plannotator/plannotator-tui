@@ -718,8 +718,15 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, mut app: App) -> Result<O
             app.record_frame(started.elapsed().as_secs_f64() * 1000.0);
             dirty = false;
         }
-        let wait_ms = if app.background_pending() { 25 } else { 250 };
-        if event::poll(Duration::from_millis(wait_ms))? {
+        // A selection held past the text's edge scrolls on the tick.
+        let wait = if app.background_pending() {
+            Duration::from_millis(25)
+        } else if app.held_at_edge() {
+            crate::ui::drag::STEP
+        } else {
+            Duration::from_millis(250)
+        };
+        if event::poll(wait)? {
             app.handle_event(&event::read()?)?;
             dirty = true;
             // Coalesce bursts (wheel, drag) into one redraw.
