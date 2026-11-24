@@ -212,6 +212,25 @@ fn with_wrap_on_the_box_opens_under_the_last_part_of_a_wrapped_line() {
     let fixture = long("near-wrap", true);
     let mut screen = fixture.open();
     press(&mut screen, KeyCode::Char('w'));
+    draw(&mut screen, size);
+    // A reveal leaves a line already on screen where it is, near the pane's foot here, where
+    // the wrapped lines would run past it: the wheel brings line 30 up to the top third.
+    let line_30 = Lines { path: "file0.py".into(), side: Side::New, first: 30, last: 30 };
+    let pane = screen.geometry.diff;
+    for _ in 0..40 {
+        if screen.diff.rows_showing(&line_30).is_some_and(|(first, _)| first < pane.y + pane.height / 3) {
+            break;
+        }
+        let at = (pane.x + pane.width / 2, pane.y + pane.height / 2);
+        let wheel = MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: at.0,
+            row: at.1,
+            modifiers: KeyModifiers::NONE,
+        };
+        screen.handle_event(Event::Mouse(wheel)).expect("wheel");
+        draw(&mut screen, size);
+    }
     screen.diff.reveal("file0.py", Side::New, 30).expect("line 30");
     draw(&mut screen, size);
     press(&mut screen, KeyCode::Char('v'));

@@ -63,7 +63,12 @@ fn report(screen: &mut Screen, kind: MouseEventKind, (column, row): (u16, u16), 
 /// Open the review at `size`, `keys` pressed, and scrolled `notches` of the wheel down.
 fn opened(tag: &str, size: Size, keys: &str, notches: usize) -> (Fixture, Screen) {
     let fixture = long(tag);
-    let mut screen = fixture.open();
+    let screen = fixture.open();
+    (fixture, ready_and_scrolled(screen, size, keys, notches))
+}
+
+/// `screen` with `keys` pressed, its viewer ready, and scrolled `notches` of the wheel down.
+fn ready_and_scrolled(mut screen: Screen, size: Size, keys: &str, notches: usize) -> Screen {
     for key in keys.chars() {
         press(&mut screen, KeyCode::Char(key));
     }
@@ -82,7 +87,7 @@ fn opened(tag: &str, size: Size, keys: &str, notches: usize) -> (Fixture, Screen
         report(&mut screen, MouseEventKind::ScrollDown, middle, KeyModifiers::NONE);
         draw(&mut screen, size);
     }
-    (fixture, screen)
+    screen
 }
 
 /// Two screen rows `rows` apart around the pane's middle that each start a line of code,
@@ -199,4 +204,58 @@ fn a_shift_click_above_the_line_first_pressed_leaves_the_view_where_it_is() {
     assert_eq!(screen.diff.selection().map(|lines| lines.first), first, "grew up to the clicked line");
     let (before, after) = kept(&before, &view(&mut screen, size));
     assert_eq!(after, before, "the view stayed");
+}
+
+/// One file of 300 tab-indented lines: the first six re-indented with spaces and nothing else
+/// (a hunk of whitespace changes only), then from line 20 every third re-indented, every
+/// ninth of those changed too: one hunk of pairs drawn as unchanged and real edits.
+fn reindented(tag: &str) -> Fixture {
+    let fixture = Fixture::new(tag);
+    let before = (1..=300).map(|i| format!("\tline_{i} = {i}\n")).collect::<Vec<_>>().concat();
+    let after: String = (1..=300)
+        .map(|i| match i {
+            1..=6 => format!("    line_{i} = {i}\n"),
+            20.. if i % 9 == 0 => format!("    line_{i} = {i} * 2\n"),
+            20.. if i % 3 == 0 => format!("    line_{i} = {i}\n"),
+            _ => format!("\tline_{i} = {i}\n"),
+        })
+        .collect();
+    fixture.write("long.py", &before);
+    fixture.git(&["add", "."]);
+    fixture.git(&["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "tabs"]);
+    fixture.write("long.py", &after);
+    fixture
+}
+
+#[test]
+fn with_whitespace_hidden_a_drag_up_after_scrolling_selects_its_lines_keeps_the_view_and_comments_on_them() {
+    use diffs_rs::engine::{InlineChanges, Whitespace};
+    let size = (160, 50);
+    for (width, keys) in [(2, ""), (8, ""), (2, "u"), (8, "u")] {
+        let name = format!("tab width {width}, keys {keys:?}");
+        let fixture = reindented(&format!("release-ws-{width}-{keys}"));
+        fixture.write_config(&format!(
+            "[ui]\ncopy_on_select = false\n[review]\nwhitespace = \"ignore-all\"\ntab_width = {width}\ninline_changes = \"none\"\n"
+        ));
+        let mut screen = ready_and_scrolled(fixture.open_configured(), size, keys, 8);
+        assert_eq!(screen.diff.drawn_with(), (width, InlineChanges::None, Whitespace::IgnoreAll), "{name}");
+        assert!(screen.diff.reveal("long.py", Side::New, 3).is_err(), "{name}: the first hunk is a heading");
+        for burst in [false, true] {
+            let (top, bottom) = rows_apart(&mut screen, size, 6);
+            let (before, after, lines) = drag(&mut screen, size, (bottom, top), burst);
+            let (before, after) = kept(&before, &after);
+            assert_eq!(after, before, "{name}, burst {burst}: the view moved on the release of a drag up");
+            let lines = lines.expect("selected");
+            let pair = (lines.first..=lines.last).find(|i| i % 3 == 0 && i % 9 != 0);
+            assert!(pair.is_some(), "{name}: the drag took a pair drawn as unchanged: {lines:?}");
+            press(&mut screen, KeyCode::Char('c'));
+            type_and_save(&mut screen, &format!("{name} {burst}"));
+            let note = screen.store.annotations().last().expect("saved");
+            assert_eq!(
+                (note.file_path.as_str(), note.side, note.line_start, note.line_end),
+                ("long.py", Side::New, lines.first, lines.last),
+                "{name}, burst {burst}"
+            );
+        }
+    }
 }
