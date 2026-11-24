@@ -23,6 +23,7 @@ fn a_selection_becomes_a_line_comment_marked_in_the_gutter_and_listed_in_the_rai
     assert_eq!((selected.first, selected.last, selected.side), (9, 10, Side::New));
     keys(&mut screen, "c");
     type_and_save(&mut screen, "name the total");
+    open_notes(&mut screen);
     let [note] = screen.store.annotations() else { panic!("one note") };
     assert_eq!((note.line_start, note.line_end, note.side), (9, 10, Side::New));
     assert_eq!(note.anchor_text.as_deref(), Some("    total = a + b\n    return total"));
@@ -144,6 +145,7 @@ fn reload_puts_a_note_whose_code_changed_under_outdated_without_a_marker() {
     at(&mut screen, 9);
     keys(&mut screen, "c");
     type_and_save(&mut screen, "name the total");
+    open_notes(&mut screen);
     fixture.write("app.py", &AFTER.replace("total = a + b", "result = a + b"));
     keys(&mut screen, "r");
     settle(&mut screen);
@@ -208,6 +210,7 @@ fn at_80_columns_the_header_footer_and_rail_all_fit() {
     at(&mut screen, 9);
     keys(&mut screen, "c");
     type_and_save(&mut screen, "name the total");
+    open_notes(&mut screen);
     let rows = frame(&mut screen, 80, 24);
     assert!(rows[0].starts_with(" Uncommitted \u{b7} 1 file +7 \u{2212}3"), "{:?}", rows[0]);
     assert!(rows[0].trim_end().ends_with("Send 1 new \u{25b8} test agent (E)"), "{:?}", rows[0]);
@@ -225,6 +228,7 @@ fn a_comment_on_the_whole_change_heads_the_rail_and_the_feedback() {
     at(&mut screen, 9);
     keys(&mut screen, "c");
     type_and_save(&mut screen, "name the total");
+    open_notes(&mut screen);
     keys(&mut screen, "M");
     assert_eq!(screen.mode, Mode::Compose(Draft::Change));
     let rows = frame(&mut screen, 120, 40);

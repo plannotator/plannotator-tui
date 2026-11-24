@@ -391,6 +391,7 @@ fn a_click_on_a_note_selects_it_and_shows_its_line() {
     at(&mut screen, 14);
     press(&mut screen, KeyCode::Char('c'));
     type_and_save(&mut screen, "second");
+    open_notes(&mut screen);
     at(&mut screen, 1);
     let bubble = locate(&mut screen, "first", true);
     mouse(&mut screen, MouseEventKind::Down(MouseButton::Left), bubble);

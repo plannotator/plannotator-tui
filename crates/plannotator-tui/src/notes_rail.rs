@@ -5,6 +5,10 @@
 //! `toggle-notes` (`z`) holds: no note, resize, file switch or reload opens it again, only the
 //! key or moving the focus to it. The last choice is remembered across sessions in
 //! `<data>/clients/plannotator-tui/ui-state.json` and beats the setting.
+//!
+//! The code review settles `when-notes` as it opens ([`NotesRail::settle`]): shown when the
+//! review opens with notes, away otherwise, and a note saved or removed later neither opens
+//! nor closes the rail, which would change the diff's width under the reader.
 
 use std::path::{Path, PathBuf};
 
@@ -46,12 +50,14 @@ pub(crate) struct NotesRail {
     closed: bool,
     /// Opened by the person this session: shown even with no notes yet.
     opened: bool,
+    /// `when-notes` was decided once, as the code review opened ([`Self::settle`]).
+    settled: bool,
 }
 
 impl NotesRail {
     /// A session that starts as `start` says, with nothing remembered.
     pub(crate) fn new(start: RailStart) -> Self {
-        Self { start, closed: start == RailStart::Hidden, opened: false }
+        Self { start, closed: start == RailStart::Hidden, opened: false, settled: false }
     }
 
     /// A session that starts as the last one left the rail, else as `start` says. An
@@ -62,14 +68,26 @@ impl NotesRail {
             .and_then(|bytes| serde_json::from_slice::<UiState>(&bytes).ok())
             .and_then(|state| state.notes_rail);
         match remembered {
-            Some(choice) => Self { start, closed: choice == Choice::Closed, opened: false },
+            Some(choice) => Self { start, closed: choice == Choice::Closed, opened: false, settled: false },
             None => Self::new(start),
         }
     }
 
     /// Whether the rail is shown, width allowing, when the review has notes or not.
     pub(crate) fn shown(self, has_notes: bool) -> bool {
-        !self.closed && (self.opened || self.start != RailStart::WhenNotes || has_notes)
+        !self.closed && (self.opened || self.start != RailStart::WhenNotes || (has_notes && !self.settled))
+    }
+
+    /// Decide `when-notes` now, for a session that opens with notes or without
+    /// (`has_notes`): with notes the rail shows, and stays when they are all removed;
+    /// without, it stays away until the key or the focus opens it. Notes coming or going
+    /// afterwards change nothing. The code review settles as it opens: a rail that appears
+    /// with the first note narrows the diff the moment that note is saved.
+    pub(crate) fn settle(&mut self, has_notes: bool) {
+        if self.start == RailStart::WhenNotes && !self.closed && has_notes {
+            self.opened = true;
+        }
+        self.settled = true;
     }
 
     /// Whether the person closed it, as the footer says: a rail away for want of notes is
@@ -139,6 +157,23 @@ mod tests {
         assert!(NotesRail::new(RailStart::Shown).shown(false));
         assert!(!NotesRail::new(RailStart::Hidden).shown(true));
         assert_eq!(RailStart::default(), RailStart::WhenNotes);
+    }
+
+    #[test]
+    fn a_settled_rail_neither_opens_for_a_note_nor_closes_without_one() {
+        let mut away = NotesRail::new(RailStart::WhenNotes);
+        away.settle(false);
+        assert!(!away.shown(false) && !away.shown(true), "no note opens it");
+        assert!(!away.closed(), "away is not closed by the person");
+        let mut open = NotesRail::new(RailStart::WhenNotes);
+        open.settle(true);
+        assert!(open.shown(true) && open.shown(false), "opened with notes, it stays");
+        let mut hidden = NotesRail::new(RailStart::Hidden);
+        hidden.settle(true);
+        assert!(!hidden.shown(true));
+        let mut shown = NotesRail::new(RailStart::Shown);
+        shown.settle(false);
+        assert!(shown.shown(false));
     }
 
     #[test]

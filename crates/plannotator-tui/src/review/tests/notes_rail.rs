@@ -1,6 +1,7 @@
-//! The notes rail (`toggle-notes`, `[ui] notes_rail`): away while the review has no notes,
-//! shown at the first, and once closed it stays closed. Hidden, the diff takes its columns
-//! and the notes keep their gutter marks and their count.
+//! The notes rail (`toggle-notes`, `[ui] notes_rail`): shown when the review opens with
+//! notes, away when it opens without, and a saved note never opens it (the diff would get
+//! narrower under the reader). Once closed it stays closed. Hidden, the diff takes its
+//! columns and the notes keep their gutter marks and their count.
 
 use ratatui::crossterm::event::KeyCode;
 
@@ -13,7 +14,8 @@ fn rail(cols: u16) -> u16 {
     (cols * 3 / 10).clamp(28, 36)
 }
 
-/// The fixture's review with a comment on lines 9-10 and one on line 14.
+/// The fixture's review with a comment on lines 9-10 and one on line 14, and the rail as a
+/// review that opens with notes has it: shown.
 fn noted(fixture: &Fixture) -> Screen {
     let mut screen = fixture.open();
     at(&mut screen, 9);
@@ -22,6 +24,9 @@ fn noted(fixture: &Fixture) -> Screen {
     at(&mut screen, 14);
     keys(&mut screen, "c");
     type_and_save(&mut screen, "read the name from argv");
+    assert!(!screen.rail_shown(), "saving a note opens no rail");
+    screen.start_notes_rail(RailStart::WhenNotes);
+    assert!(screen.rail_shown(), "a review that opens with notes shows them");
     keys(&mut screen, "gg");
     screen
 }
@@ -114,7 +119,7 @@ fn a_hidden_rail_stays_hidden_across_a_reload() {
 }
 
 #[test]
-fn a_review_without_notes_has_no_rail_until_its_first_note() {
+fn a_review_without_notes_has_no_rail_and_a_saved_note_does_not_open_it() {
     let fixture = Fixture::new("rail-first-note");
     let mut screen = fixture.open();
     let empty = frame(&mut screen, 120, 40);
@@ -124,7 +129,18 @@ fn a_review_without_notes_has_no_rail_until_its_first_note() {
     keys(&mut screen, "c");
     type_and_save(&mut screen, "name the total");
     let rows = frame(&mut screen, 120, 40);
-    assert!(row_with(&rows, "name the total").contains('\u{2502}'), "the rail comes with the first note");
+    assert!(row_with(&rows, "1 note").contains("note saved"), "the footer says so");
+    keys(&mut screen, "gg");
+    let rows = frame(&mut screen, 120, 40);
+    assert!(!rows.iter().any(|r| r.contains("name the total")), "no rail for the first note");
+    assert_eq!(screen.geometry.diff.width, 120, "the diff keeps its columns");
+    assert!(row_with(&rows, "total = a + b").contains('\u{258c}'), "the gutter marks the note");
+    assert!(row_with(&rows, "Uncommitted").contains("Send 1 new"), "the header counts it");
+    assert!(row_with(&rows, "1 note").contains("notes hidden: z shows them"), "and where it is");
+    assert!(!screen.notes_rail.closed(), "away, not closed: nobody closed it");
+    keys(&mut screen, "z");
+    let rows = frame(&mut screen, 120, 40);
+    assert!(row_with(&rows, "name the total").contains('\u{2502}'), "z shows it");
 }
 
 #[test]

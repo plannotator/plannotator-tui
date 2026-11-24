@@ -97,10 +97,11 @@ fn the_file_list_ticks_follow_the_marks_with_the_rail_open_or_hidden_and_across_
     fixture.write("notes.txt", "changed\n");
     let mut screen = fixture.open();
     screen.watch.every = Duration::ZERO;
-    // A note, so the rail shows beside the diff.
+    // A note, and the rail opened beside the diff.
     at(&mut screen, 9);
     keys(&mut screen, "c");
     type_and_save(&mut screen, "name the total");
+    open_notes(&mut screen);
     assert!(row_with(&frame(&mut screen, 160, 30), "name the total").contains('\u{2502}'), "the rail");
     assert!(!ticked(&mut screen, 160, "app.py") && !ticked(&mut screen, 160, "notes.txt"));
 

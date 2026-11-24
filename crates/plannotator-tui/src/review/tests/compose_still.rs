@@ -81,7 +81,7 @@ fn opening_typing_in_saving_and_closing_the_box_move_neither_the_view_nor_the_cu
 }
 
 #[test]
-fn the_first_note_keeps_its_lines_on_their_rows_when_the_rail_opens() {
+fn the_first_note_keeps_its_lines_on_their_rows_and_so_does_opening_the_rail() {
     let fixture = long("still-rail", false);
     let mut screen = fixture.open();
     drag(&mut screen, SIZE, Side::New, 20, 22);
@@ -96,6 +96,10 @@ fn the_first_note_keeps_its_lines_on_their_rows_when_the_rail_opens() {
     assert_eq!(screen.geometry.rail.width, 0);
     press(&mut screen, KeyCode::Char('c'));
     type_and_save(&mut screen, "first");
+    assert!(draw(&mut screen, SIZE).area.width > 0 && screen.geometry.rail.width == 0, "no rail opened");
+    assert_eq!(rows(&mut screen), before);
+    assert_eq!(screen.focus, Focus::Diff);
+    open_notes(&mut screen);
     assert!(draw(&mut screen, SIZE).area.width > 0 && screen.geometry.rail.width > 0, "the rail opened");
     assert_eq!(rows(&mut screen), before);
     assert_eq!(screen.focus, Focus::Diff);

@@ -1,5 +1,5 @@
-//! `layout = "auto"` follows the terminal's width, not the diff pane's: saving the first note
-//! (which opens the notes panel), closing or opening the file list or the notes, and dragging
+//! `layout = "auto"` follows the terminal's width, not the diff pane's: saving the first note,
+//! opening the notes panel then, closing or opening the file list or the notes, and dragging
 //! the lines between the panes never flip it. Resizing the terminal across the threshold
 //! does, and a layout chosen with `u` holds at any width.
 
@@ -54,8 +54,12 @@ fn saving_the_first_note_never_flips_an_auto_layout() {
             frame(&mut screen, cols, ROWS);
             type_and_save(&mut screen, "name the total");
             let after = split_at(&mut screen, cols);
-            assert!(screen.geometry.rail.width > 0, "{cols}: the notes panel opened");
+            assert_eq!(screen.geometry.rail.width, 0, "{cols}: a saved note opens no panel");
             assert_eq!(after, before, "{cols} columns, list {listed}: the layout held");
+            open_notes(&mut screen);
+            let opened = split_at(&mut screen, cols);
+            assert!(screen.geometry.rail.width > 0, "{cols}: the notes panel opened by hand");
+            assert_eq!(opened, before, "{cols} columns, list {listed}: the layout held");
         }
     }
 }
@@ -67,6 +71,7 @@ fn closing_opening_or_dragging_the_side_panels_never_flips_an_auto_layout() {
         at(&mut screen, 9);
         press(&mut screen, KeyCode::Char('c'));
         type_and_save(&mut screen, "name the total");
+        open_notes(&mut screen);
         let split = split_at(&mut screen, cols);
         assert_eq!(split, cols == 160);
         let check = |screen: &mut Screen, what: &str| {

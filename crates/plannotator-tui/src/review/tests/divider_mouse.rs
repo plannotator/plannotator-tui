@@ -23,7 +23,7 @@ fn drag_line(screen: &mut Screen, from: u16, to: u16, row: u16) {
     mouse(screen, MouseEventKind::Up(MouseButton::Left), to, row);
 }
 
-/// Two changed files, so the list shows, and a note, so the notes panel shows.
+/// Two changed files, so the list shows, and a note, with the notes panel opened.
 fn open(tag: &str) -> (Fixture, Screen) {
     let fixture = Fixture::new(tag);
     fixture.write("notes.txt", "changed\n");
@@ -31,6 +31,7 @@ fn open(tag: &str) -> (Fixture, Screen) {
     at(&mut screen, 9);
     keys(&mut screen, "c");
     type_and_save(&mut screen, "name the total");
+    open_notes(&mut screen);
     frame(&mut screen, COLS, ROWS);
     (fixture, screen)
 }

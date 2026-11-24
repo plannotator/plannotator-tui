@@ -112,8 +112,10 @@ dimmed. The keys also work without opening the menu.
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
 
-The notes rail on the right appears with the first note: a document or diff without notes
-gets every column. `z` closes it, and it stays closed until `z` or `Tab` opens it again: a
+The notes rail on the right appears with a document's first note: a document or diff
+without notes gets every column. In the code review a saved note never opens it, so the
+diff keeps its width; there it shows when the review opens with notes, and `z` or `Tab`
+opens it. `z` closes it, and it stays closed until `z` or `Tab` opens it again: a
 new note, a wider window, another file or a reload leave it closed, and the header and
 footer still count the notes, whose marks stay in the text. The next session starts the way
 you left it. `notes_rail` in the config file's `[ui]` table changes how it starts; it is
@@ -247,9 +249,12 @@ clicks on one cell, without moving) to let the list or the notes fit themselves 
 
 Notes appear in the rail on the right, grouped by file, and a mark in the diff shows their
 lines. Sent notes get a dimmer mark. `Tab` moves to the rail; `j`/`k` there moves to a
-note and the diff moves with it; `e` edits and `x` removes it. The rail appears with the
-first note; `z` closes it and gives the diff its columns, and `z` or `Tab` opens it again.
-Closed, it stays closed, as in a document review.
+note and the diff moves with it; `e` edits and `x` removes it. The rail shows when the
+review opens with notes. Saving a note never opens it, so the diff stays where it was: the
+note's lines get their mark, the footer says `note saved` and where the notes are
+(`notes hidden: z shows them`), and the header's Send counts it. `z` or `Tab` opens the
+rail, and `z` closes it and gives the diff its columns. Closed, it stays closed, as in a
+document review.
 
 `E` sends the new notes, `S` sends them and closes, and `P` picks the agent to send
 to. Sends go to the same place a document review's do (Herdr pane, Rex, Pi or the
@@ -494,7 +499,9 @@ and a narrower pane still narrows it:
 comment_width = 72
 ```
 
-The notes rail appears with a review's first note and stays away while there are none.
+The notes rail appears with a document review's first note and stays away while there are
+none. A code review decides as it opens: with notes the rail shows, without them it stays
+away until you open it, and a note saved later does not open it.
 `notes_rail` changes how a session starts:
 
 ```toml
@@ -505,7 +512,7 @@ notes_rail = "when-notes"   # default; or "shown" (always, notes or not) or "hid
 `z` (`toggle-notes`) closes or opens the rail in the document and the code review alike,
 and the last choice is remembered in `clients/plannotator-tui/ui-state.json` under the data
 folder. A remembered choice wins over `notes_rail`; with `when-notes`, a rail remembered
-open still waits for the first note before it takes any columns.
+open still waits for notes before it takes any columns.
 
 A mouse selection is copied to the clipboard when you release the button, in a document and
 in the code review (the selected lines' code). To leave the clipboard alone, as with Herdr's
@@ -574,8 +581,8 @@ opens a line hidden that way in the whole file. **Tab width** and **Changed text
 words, joined; characters; off) change how lines are drawn and marked, never which lines
 are shown. All three apply to the whole-file view too, where there are no changes to hide.
 
-`auto` decides by the terminal's width, never by the panes beside the diff, so saving the
-first note (which opens the notes panel), hiding or showing the file list or the notes, or
+`auto` decides by the terminal's width, never by the panes beside the diff, so saving a
+note, hiding or showing the file list or the notes, or
 dragging the lines between them never switches the layout under you; resizing the terminal
 decides again. A terminal of 141 columns or more splits: that leaves the diff 120 columns
 beside the file list at its narrowest, where the viewer's own auto splits a pane. A review

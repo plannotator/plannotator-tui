@@ -16,7 +16,7 @@ use plannotator_tui_review::{Capture, Side};
 
 use crate::config::review::ReviewConfig;
 use ratatui::Frame;
-use ratatui::crossterm::event::{Event, MouseEventKind};
+use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 
@@ -268,7 +268,14 @@ impl Diff {
             _ => None,
         };
         let growing = self.growing();
+        let clicked = match &event {
+            Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left) => Some(mouse.row),
+            _ => None,
+        };
         let acted = self.engine.handle_event(event, true)? != InputEffect::Ignored;
+        if acted && let Some(row) = clicked {
+            self.forget_column(row)?;
+        }
         if acted {
             self.keep_in_hunk(growing, step)?;
         }

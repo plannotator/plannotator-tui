@@ -134,7 +134,9 @@ impl Screen {
             };
             parts.push(format!("selected {span} {}", lines.side.as_str()));
         }
-        if self.notes_rail.closed() {
+        // Closed by the person, or away since the review opened without notes: the notes'
+        // marks are in the gutter, and the footer says where the notes themselves are.
+        if self.notes_rail.closed() || (!self.rail_shown() && !notes.is_empty()) {
             parts.push(match self.keys.hint(Action::ToggleNotes) {
                 key if key.is_empty() => "notes hidden".to_owned(),
                 key => format!("notes hidden: {key} shows them"),

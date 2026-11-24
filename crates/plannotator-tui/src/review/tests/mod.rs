@@ -30,6 +30,7 @@ mod place_flow;
 mod pull_flow;
 mod release_view;
 mod rex_picker;
+mod save_keeps_view;
 mod send_flow;
 mod settings_flow;
 mod split_drag;
@@ -238,6 +239,14 @@ pub(super) fn at(screen: &mut Screen, line: u32) {
 pub(super) fn type_and_save(screen: &mut Screen, text: &str) {
     screen.handle_event(Event::Paste(text.to_owned())).expect("paste");
     press(screen, KeyCode::Enter);
+}
+
+/// Open the notes rail by hand (`z`), as the person does: a saved note never opens it.
+pub(super) fn open_notes(screen: &mut Screen) {
+    if !screen.rail_shown() {
+        press(screen, KeyCode::Char('z'));
+    }
+    assert!(screen.rail_shown(), "the notes rail opened");
 }
 
 /// The part of a drawn row right of the file list and its divider: what the diff drew.
