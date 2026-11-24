@@ -6,11 +6,16 @@
  * - Adds the tool `plannotator_tui_note`, which leaves a note in a running
  *   plannotator-tui that has the file open.
  * - Adds the command `/plannotator-tui`, which lists the running plannotator-tui apps.
+ * - Adds the command `/plannotator-review`, which runs `plannotator-tui review --pick` in
+ *   this terminal (Pi's screen steps aside until it quits): pick the changes to review, and
+ *   Send comes back to this session. `PLANNOTATOR_TUI_BIN` names the binary, else
+ *   `plannotator-tui` on PATH.
  *
  * Install: `plannotator-tui pi install`, or copy this file to ~/.pi/agent/extensions/.
  * No dependencies beyond Node and Pi.
  */
 
+import { spawn } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
 import * as net from "node:net";
@@ -77,6 +82,40 @@ function removeQuietly(file: string | undefined): void {
 	try {
 		fs.unlinkSync(file);
 	} catch {}
+}
+
+/** The most of a review's error output kept for the notice after it exits. */
+const MAX_REVIEW_STDERR = 4096;
+
+/** How a terminal program run in Pi's place ended. */
+type Ran = { code: number | null; error?: string; stderr: string };
+
+/**
+ * Run `bin args` on Pi's terminal: stdin and stdout inherited, so a full-screen program draws
+ * there, stderr kept for the notice. Resolves when it exits; never rejects.
+ */
+function runInTerminal(bin: string, args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<Ran> {
+	return new Promise((resolve) => {
+		let stderr = "";
+		let settled = false;
+		const finish = (ran: Ran) => {
+			if (settled) return;
+			settled = true;
+			resolve(ran);
+		};
+		let child;
+		try {
+			child = spawn(bin, args, { cwd, env, stdio: ["inherit", "inherit", "pipe"] });
+		} catch (err) {
+			finish({ code: null, error: err instanceof Error ? err.message : String(err), stderr });
+			return;
+		}
+		child.stderr?.on("data", (chunk: Buffer) => {
+			if (stderr.length < MAX_REVIEW_STDERR) stderr = (stderr + chunk.toString("utf8")).slice(0, MAX_REVIEW_STDERR);
+		});
+		child.once("error", (err) => finish({ code: null, error: err.message, stderr }));
+		child.once("close", (code) => finish({ code, stderr }));
+	});
 }
 
 /** Signal 0 checks a pid without touching it. EPERM means it exists but is not ours. */
@@ -489,6 +528,42 @@ export default function plannotatorTui(pi: ExtensionAPI) {
 			}
 			if (last === "not_running") last = `no_plannotator_tui: the plannotator-tui that had ${file} open is gone`;
 			throw new Error(last);
+		},
+	});
+
+	pi.registerCommand("plannotator-review", {
+		description: "Pick changes in this folder's git repository to review in plannotator-tui; Send comes back here",
+		handler: async (_args, cmdCtx) => {
+			if (!cmdCtx.hasUI || cmdCtx.mode !== "tui") {
+				cmdCtx.ui.notify("/plannotator-review needs Pi's terminal UI", "error");
+				return;
+			}
+			const bin = process.env.PLANNOTATOR_TUI_BIN?.trim() || "plannotator-tui";
+			// Send finds this Pi's entry in the registry by pid (`PLANNOTATOR_TUI_PI_PID`).
+			const env = { ...process.env, PLANNOTATOR_TUI_PI_PID: String(process.pid) };
+			const ran = await cmdCtx.ui.custom<Ran>(async (tui, _theme, _keybindings, done) => {
+				// Pi's screen steps aside for the review's, as it does for the external editor.
+				tui.stop();
+				// A Ctrl+C the review leaves to the terminal must not end Pi.
+				const ignore = () => {};
+				process.on("SIGINT", ignore);
+				let result: Ran;
+				try {
+					result = await runInTerminal(bin, ["review", "--pick", cmdCtx.cwd], cmdCtx.cwd, env);
+				} finally {
+					process.removeListener("SIGINT", ignore);
+					tui.start();
+					tui.requestRender(true);
+				}
+				done(result);
+				return { render: () => [], invalidate() {} };
+			});
+			if (ran.error) {
+				cmdCtx.ui.notify(`Could not run ${bin}: ${ran.error}. Set PLANNOTATOR_TUI_BIN or put plannotator-tui on PATH.`, "error");
+			} else if (ran.code !== 0) {
+				const why = ran.stderr.trim() || `plannotator-tui exited with status ${ran.code}`;
+				cmdCtx.ui.notify(why, "error");
+			}
 		},
 	});
 

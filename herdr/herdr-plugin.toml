@@ -69,6 +69,15 @@ contexts = ["pane", "workspace"]
 platforms = ["macos", "linux"]
 command = ["./bin/plannotator-tui.exe", "herdr", "review"]
 
+# The change picker over the same repository: uncommitted, unstaged or staged changes, the
+# branch, or one of the recent commits. Nothing is captured first, so the pane opens at once.
+[[actions]]
+id = "review-pick"
+title = "Annotate: pick changes to review"
+contexts = ["pane", "workspace"]
+platforms = ["macos", "linux"]
+command = ["./bin/plannotator-tui.exe", "herdr", "review", "--pick"]
+
 [[link_handlers]]
 id = "markdown-file"
 title = "Annotate this file"

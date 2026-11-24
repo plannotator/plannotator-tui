@@ -26,6 +26,7 @@ M.keys = {
   annotate_last = "shift+cmd+o",
   annotate_newest = "alt+shift+cmd+o",
   annotate_open = "ctrl+cmd+o",
+  annotate_review_pick = "ctrl+cmd+p",
 }
 
 -- Each action reviews the focused pane: the agent in it, its folder, its repository's changes,
@@ -45,6 +46,8 @@ M.actions = {
     description = "Review the newest Markdown file the pane's output names." },
   { name = "annotate_review", title = "Annotate: Review Changes", args = { "review" },
     description = "Review the uncommitted changes in the pane's git repository and send feedback to its agent." },
+  { name = "annotate_review_pick", title = "Annotate: Pick Changes to Review", args = { "review", "--pick" },
+    description = "Pick what to review in the pane's git repository (uncommitted, unstaged, staged, a recent commit) and send feedback to its agent." },
 }
 
 local function launch(bin, placement, review, ctx)

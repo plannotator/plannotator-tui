@@ -156,15 +156,15 @@ fn rex_review_opens_the_blocks_repository_in_a_split_when_asked_wired_to_its_age
 }
 
 #[test]
-fn rex_review_opens_nothing_for_a_clean_repository_or_a_folder_that_is_none() {
+fn rex_review_opens_nothing_for_a_named_scope_with_nothing_or_a_folder_that_is_none() {
     let root = temp_root("rex refuses");
     let fake = fakes(&root);
     let repo = repo(&root);
 
-    let out = plannotator(&root, &fake, &repo, &["rex", "review", "--block", "block:b"]);
+    let out = plannotator(&root, &fake, &repo, &["rex", "review", "--unstaged", "--block", "block:b"]);
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("No uncommitted changes in app"), "{stderr}");
+    assert!(stderr.contains("No unstaged changes in app"), "{stderr}");
 
     let plain = root.join("plain");
     std::fs::create_dir_all(&plain).expect("plain folder");
@@ -177,6 +177,15 @@ fn rex_review_opens_nothing_for_a_clean_repository_or_a_folder_that_is_none() {
 
     let asked: Vec<String> = calls(&fake).into_iter().filter(|c| c.starts_with("rex api")).collect();
     assert_eq!(asked, [] as [String; 0], "Rex was never asked for a tab or a split");
+
+    // A bare review with nothing uncommitted opens the picker instead.
+    let out =
+        plannotator(&root, &fake, &repo, &["rex", "review", "--block", "block:b", "--placement", "split"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let split = new_split(&calls(&fake));
+    let command = split.pointer("/layout/block/options/command").and_then(Value::as_array).expect("command");
+    let command: Vec<&str> = command.iter().filter_map(Value::as_str).collect();
+    assert!(command.windows(2).any(|pair| pair == ["review", "pick"]), "{command:?}");
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -206,7 +215,7 @@ fn hc_review_starts_a_held_terminal_in_the_repository_and_shows_it() {
 }
 
 #[test]
-fn hc_review_starts_no_terminal_for_a_clean_repository() {
+fn hc_review_starts_no_terminal_for_a_named_scope_with_nothing_and_the_picker_for_a_bare_one() {
     let root = temp_root("hc refuses");
     let fake = fakes(&root);
     let repo = repo(&root);
@@ -217,9 +226,16 @@ fn hc_review_starts_no_terminal_for_a_clean_repository() {
     assert_eq!(started, 1);
 
     std::fs::remove_file(fake.join("calls.log")).expect("reset log");
-    let out = plannotator(&root, &fake, &repo, &["hc", "review", "--terminal", "t7"]);
-    assert!(String::from_utf8_lossy(&out.stderr).contains("No uncommitted changes in app"));
+    let out = plannotator(&root, &fake, &repo, &["hc", "review", "--unstaged", "--terminal", "t7"]);
+    assert!(String::from_utf8_lossy(&out.stderr).contains("No unstaged changes in app"));
     assert_eq!(calls(&fake), ["hc get --json t7"], "hc was asked about the terminal, nothing more");
+
+    // A bare review with nothing uncommitted starts the picker instead.
+    std::fs::remove_file(fake.join("calls.log")).expect("reset log");
+    let out = plannotator(&root, &fake, &repo, &["hc", "review", "--terminal", "t7"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let calls = calls(&fake);
+    assert!(calls.iter().any(|c| c.starts_with("hc run") && c.contains(" review pick ")), "{calls:?}");
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 

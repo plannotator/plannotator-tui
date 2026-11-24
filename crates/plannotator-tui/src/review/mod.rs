@@ -19,9 +19,11 @@
 //!   diff's sides.
 //! - [`settings`]: how the diff is drawn (`[review]`), its menu, and remembering the choices.
 //! - [`send`]: send, resend, finish and undo. [`pi`]: the Pi link.
+//! - [`pick`]: the change picker (`p`, `review --pick`): what to review, and switching to it.
 //! - [`watch`]: noticing that the diff changed on disk, for the footer.
 //! - [`whole`]: the whole-file view (`o`, `O`), a second diffs-rs engine.
-//! - [`cli`]: `plannotator-tui review [--staged | --base REF | --commit SHA | PR] [DIR]`.
+//! - [`cli`]: `plannotator-tui review [--staged | --unstaged | --base REF | --commit SHA | PR |
+//!   --pick] [DIR]`.
 //!
 //! A pull request review (`PR` is a GitHub link, `N` or `#N`) fetches the PR with the
 //! person's `gh` login into their clone or a cache repository ([`capture`]), and sends to the
@@ -43,6 +45,7 @@ mod mouse;
 mod notes;
 mod overlays;
 mod pi;
+pub(crate) mod pick;
 mod rail;
 pub(crate) mod scope;
 mod send;
@@ -152,6 +155,10 @@ struct Geometry {
 }
 
 /// The review screen.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent toggles and requests, none of them a state machine"
+)]
 pub(crate) struct Screen {
     repo: Repo,
     capture: Capture,
@@ -220,6 +227,8 @@ pub(crate) struct Screen {
     /// The key help's scroll, and how far it can scroll at the size drawn last.
     help_scroll: usize,
     help_room: std::cell::Cell<usize>,
+    /// `pick-changes` was pressed: the event loop opens the change picker over the review.
+    pick_request: bool,
     quit: bool,
 }
 
@@ -308,6 +317,7 @@ impl Screen {
             nav: jump::Nav::default(),
             help_scroll: 0,
             help_room: std::cell::Cell::new(0),
+            pick_request: false,
             quit: false,
         };
         screen.notes_rail.settle(!screen.store.annotations().is_empty());
@@ -382,6 +392,11 @@ impl Screen {
 
     pub(crate) fn wants_quit(&self) -> bool {
         self.quit
+    }
+
+    /// Whether `pick-changes` was pressed since the last call.
+    pub(crate) fn take_pick_request(&mut self) -> bool {
+        std::mem::take(&mut self.pick_request)
     }
 
     /// Take what the viewers, the Pi link, the disk watch and the agent finder have ready, and
@@ -548,29 +563,43 @@ impl Screen {
 /// nothing to show: `No uncommitted changes in app`. A pull request is fetched with `gh`
 /// into `dir`'s clone of its repository, else into a bare cache repository under the data
 /// dir (`clients/plannotator-tui/pulls/<host>/<owner>/<repo>.git`).
+#[cfg(test)]
 pub(crate) fn capture(dir: &Path, request: &plannotator_tui_review::Request) -> Result<(Repo, Capture)> {
-    use plannotator_tui_review::{Gh, Request, Scope};
-    let (repo, capture) = if let Request::PullRequest { pr } = request {
-        let cache = crate::workspace_paths::data_dir().join("clients").join("plannotator-tui").join("pulls");
-        Repo::pull_request(dir, pr, &cache, &Gh::default())
-            .with_context(|| format!("reviewing pull request {pr}"))?
-    } else {
-        let repo = Repo::discover(dir)?;
-        let capture = repo.open(request).with_context(|| format!("reviewing {}", repo.root().display()))?;
-        (repo, capture)
-    };
-    if capture.is_empty() {
-        let root = repo.root();
-        let name =
-            root.file_name().map_or_else(|| root.display().to_string(), |n| n.to_string_lossy().into());
-        let what = match &capture.scope {
-            Scope::Uncommitted => "uncommitted changes".to_owned(),
-            Scope::Staged => "staged changes".to_owned(),
-            Scope::Branch { base } => format!("changes since {base}"),
-            Scope::Commit { sha } => format!("changes in commit {}", sha.get(..7).unwrap_or(sha)),
-            Scope::PullRequest { url, .. } => anyhow::bail!("No changes in {url}"),
-        };
-        anyhow::bail!("No {what} in {name}");
+    let (repo, capture) = capture_any(dir, request)?;
+    match nothing_to_review(&repo, &capture) {
+        Some(nothing) => anyhow::bail!(nothing),
+        None => Ok((repo, capture)),
     }
+}
+
+/// [`capture`], empty or not.
+pub(crate) fn capture_any(dir: &Path, request: &plannotator_tui_review::Request) -> Result<(Repo, Capture)> {
+    use plannotator_tui_review::{Gh, Request};
+    if let Request::PullRequest { pr } = request {
+        let cache = crate::workspace_paths::data_dir().join("clients").join("plannotator-tui").join("pulls");
+        return Repo::pull_request(dir, pr, &cache, &Gh::default())
+            .with_context(|| format!("reviewing pull request {pr}"));
+    }
+    let repo = Repo::discover(dir)?;
+    let capture = repo.open(request).with_context(|| format!("reviewing {}", repo.root().display()))?;
     Ok((repo, capture))
+}
+
+/// What to say when `capture` has nothing to show: `No uncommitted changes in app`.
+pub(crate) fn nothing_to_review(repo: &Repo, capture: &Capture) -> Option<String> {
+    use plannotator_tui_review::Scope;
+    if !capture.is_empty() {
+        return None;
+    }
+    let root = repo.root();
+    let name = root.file_name().map_or_else(|| root.display().to_string(), |n| n.to_string_lossy().into());
+    let what = match &capture.scope {
+        Scope::Uncommitted => "uncommitted changes".to_owned(),
+        Scope::Staged => "staged changes".to_owned(),
+        Scope::Unstaged => "unstaged changes".to_owned(),
+        Scope::Branch { base } => format!("changes since {base}"),
+        Scope::Commit { sha } => format!("changes in commit {}", sha.get(..7).unwrap_or(sha)),
+        Scope::PullRequest { url, .. } => return Some(format!("No changes in {url}")),
+    };
+    Some(format!("No {what} in {name}"))
 }

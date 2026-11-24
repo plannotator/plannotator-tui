@@ -240,7 +240,19 @@ mod tests {
         ));
         let keys =
             text.split("M.keys = {").nth(1).and_then(|rest| rest.split('}').next()).unwrap_or_default();
-        assert!(keys.contains("annotate_last") && !keys.contains("annotate_review"), "{keys}");
+        assert!(keys.contains("annotate_last") && !keys.contains("annotate_review ="), "{keys}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_pick_action_runs_rex_review_pick_on_ctrl_cmd_p() {
+        let text = module(Path::new("/bin/pt")).expect("module");
+        assert!(text.contains(
+            r#"name = "annotate_review_pick", title = "Annotate: Pick Changes to Review", args = { "review", "--pick" }"#
+        ));
+        let keys =
+            text.split("M.keys = {").nth(1).and_then(|rest| rest.split('}').next()).unwrap_or_default();
+        assert!(keys.contains(r#"annotate_review_pick = "ctrl+cmd+p""#), "{keys}");
     }
 
     #[test]

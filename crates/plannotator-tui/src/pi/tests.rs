@@ -226,3 +226,17 @@ fn no_matching_session_is_a_no_pi_error_so_the_review_copies_instead() {
     let err = cli::pick_for_test(&[], "gone").expect_err("no session");
     assert!(err.is::<cli::NoPi>(), "{err:#}");
 }
+
+#[test]
+fn the_pi_that_started_a_review_is_its_send_target_by_pid() {
+    let root = temp_root("by-pid");
+    let (port, pi) = fake_pi(vec![json!({"ok": true, "busy": false, "name": "api", "id": "s1"})]);
+    entry(&root, port, "t");
+    let lookup = |pid: &'static str| move |k: &str| (k == target::PID_VAR).then(|| pid.to_owned());
+    let session = target::PiSession::from_lookup(lookup("42"), &root).expect("pid 42 is listed");
+    assert_eq!(crate::delivery::Delivery::describe(&session), "pi · api");
+    assert_eq!(pi.join().expect("fake pi")[0]["op"], "ping");
+    assert!(target::PiSession::from_lookup(lookup("7"), &root).is_none(), "no Pi has pid 7");
+    assert!(target::PiSession::from_lookup(|_: &str| None, &root).is_none(), "unset");
+    std::fs::remove_dir_all(root).expect("cleanup");
+}

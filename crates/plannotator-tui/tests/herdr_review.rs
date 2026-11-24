@@ -120,15 +120,15 @@ fn the_focused_panes_repository_opens_in_the_doc_pane_with_its_scope() {
 }
 
 #[test]
-fn no_pane_opens_for_a_clean_repository_or_a_folder_that_is_none() {
+fn no_pane_opens_for_a_named_scope_with_nothing_or_a_folder_that_is_none() {
     let root = temp_root("refuses");
     let fake = compile_fake(&root);
     let repo = repo(&root);
 
-    let out = plannotator(&root, &fake, &repo, &["herdr", "review"]);
+    let out = plannotator(&root, &fake, &repo, &["herdr", "review", "--unstaged"]);
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("No uncommitted changes in app"), "{stderr}");
+    assert!(stderr.contains("No unstaged changes in app"), "{stderr}");
 
     let plain = root.join("plain");
     std::fs::create_dir_all(&plain).expect("plain folder");
@@ -140,6 +140,15 @@ fn no_pane_opens_for_a_clean_repository_or_a_folder_that_is_none() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("takes no folder"));
 
     assert_eq!(calls(&fake), [] as [Value; 0], "Herdr was never asked for a pane");
+
+    // A bare review with nothing uncommitted opens the picker instead.
+    let out = plannotator(&root, &fake, &repo, &["herdr", "review"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let calls = calls(&fake);
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    let argv: Vec<&str> =
+        calls[0]["argv"].as_array().expect("argv").iter().filter_map(Value::as_str).collect();
+    assert!(argv.windows(2).any(|pair| pair == ["--env", "PLANNOTATOR_TUI_REVIEW=pick"]), "{argv:?}");
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 

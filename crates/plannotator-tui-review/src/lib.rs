@@ -15,6 +15,7 @@
 //! - [`progress`]: viewed marks, in the browser's review-progress format.
 //! - [`export`]: the feedback text, in the browser's `exportReviewFeedback` format.
 //! - [`stamp`]: a cheap fingerprint of what a scope's diff depends on, to notice changes.
+//! - [`listing`]: what a change picker lists: recent commits, the branch, each scope's size.
 //!
 //! No terminal, no diff viewer: the app draws, this crate owns the records.
 
@@ -25,6 +26,7 @@ pub mod error;
 pub mod export;
 mod git;
 pub mod github;
+pub mod listing;
 pub mod patch;
 pub mod progress;
 pub mod resolve;
@@ -45,6 +47,7 @@ pub use export::{
     pull_agent_feedback, pull_feedback, review_feedback,
 };
 pub use github::{Gh, PrRepo, PrSpec, PrView};
+pub use listing::{Commit, DiffStat};
 pub use patch::{FilePatch, FileStatus};
 pub use progress::Progress;
 pub use resolve::{Current, Resolution, apply, resolve};

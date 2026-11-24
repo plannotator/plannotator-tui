@@ -10,7 +10,7 @@
 //!
 //! | Scope | Watched |
 //! |---|---|
-//! | Uncommitted, Branch | HEAD, every changed or untracked file, and their mtime and size |
+//! | Uncommitted, Unstaged, Branch | HEAD, every changed or untracked file, and their mtime and size |
 //! | Staged | HEAD and the index side of each staged file (its blob id) |
 //! | Commit, Pull request | nothing: a commit does not change on disk |
 //!
@@ -32,7 +32,7 @@ pub struct DiskStamp(u64);
 impl Scope {
     /// Whether anything on disk can change this scope's diff.
     pub fn watches_disk(&self) -> bool {
-        matches!(self, Self::Uncommitted | Self::Staged | Self::Branch { .. })
+        matches!(self, Self::Uncommitted | Self::Staged | Self::Unstaged | Self::Branch { .. })
     }
 }
 

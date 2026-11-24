@@ -103,9 +103,11 @@ fn configured(placement: Option<RexPlacement>) -> Result<RexPlacement> {
     }
 }
 
-/// `plannotator-tui rex review [--staged | --base REF | --commit SHA | PR]`: a code review of the
-/// block's repository, beside it. A folder outside a repository, or with nothing to review,
-/// fails before any split opens.
+/// `plannotator-tui rex review [--staged | --unstaged | --base REF | --commit SHA | PR |
+/// --pick]`: a code review of the block's repository, beside it. A folder outside a
+/// repository, or a scope named with nothing to review, fails before any split opens; a bare
+/// review with nothing to show, and `--pick`, open the change picker, which captures nothing
+/// first.
 fn code_review(args: &[String]) -> Result<()> {
     #[cfg(unix)]
     {
@@ -239,7 +241,7 @@ mod tests {
         assert!(err(&["review", "--gate"]).starts_with("unknown flag --gate"));
         assert_eq!(
             err(&["review", "--staged", "--commit", "HEAD"]),
-            "pick one of --staged, --base, --commit and a pull request"
+            "pick one of --staged, --unstaged, --base, --commit and a pull request"
         );
         assert!(err(&["review", "--placement", "overlay"]).contains("split, popup or tab"));
     }

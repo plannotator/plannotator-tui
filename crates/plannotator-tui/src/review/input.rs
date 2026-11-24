@@ -254,6 +254,10 @@ impl Screen {
                 self.open_settings();
                 return Ok(());
             }
+            Some(Action::PickChanges) => {
+                self.pick_request = true;
+                return Ok(());
+            }
             _ => {}
         }
         if self.focus != Focus::Diff && self.whitespace_key(&key) {

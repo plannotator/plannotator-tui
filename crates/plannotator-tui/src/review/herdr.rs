@@ -1,8 +1,11 @@
-//! `plannotator-tui herdr review [--staged | --base REF | --commit SHA | PR] [--placement P]
-//! [--deliver-to PANE]`: a code review of the focused pane's repository in a Herdr pane.
+//! `plannotator-tui herdr review [--staged | --unstaged | --base REF | --commit SHA | PR |
+//! --pick] [--placement P] [--deliver-to PANE]`: a code review of the focused pane's
+//! repository in a Herdr pane.
 //!
 //! The launcher captures the diff before asking Herdr for a pane, so a folder that is no
-//! repository, or has nothing to review, fails where the person can read it. The pane is
+//! repository, or a scope named with nothing to review, fails where the person can read it.
+//! With `--pick` (and for a bare review with nothing to show) the pane opens the change
+//! picker, and the launcher only checks the folder is in a repository. The pane is
 //! told the scope in `PLANNOTATOR_TUI_REVIEW` and the repository in `PLANNOTATOR_TUI_REPO`; the
 //! pane side is [`super::scope::pane`].
 
@@ -12,7 +15,8 @@ use crate::config::Config;
 use crate::herdr::context::HerdrEnv;
 use crate::herdr::launch::{OpenArgs, plan_review, review_folder, run};
 
-/// The launcher: find the repository, check it has changes, open the pane.
+/// The launcher: find the repository, check it has changes (or only that it is one, to pick),
+/// open the pane.
 pub(crate) fn launch(args: &[String]) -> Result<()> {
     let mut open = OpenArgs::default();
     let mut scope = Vec::new();

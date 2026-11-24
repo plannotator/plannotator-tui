@@ -423,6 +423,11 @@ async function main() {
 		shown.message,
 	);
 
+	mark = events.length;
+	rpc({ type: "prompt", message: "/plannotator-review" });
+	const refused = await until("notify from /plannotator-review", eventFrom(mark, (e) => e.type === "extension_ui_request" && e.method === "notify"));
+	ok(/needs Pi's terminal UI/.test(refused.message), "/plannotator-review runs nothing outside Pi's terminal UI", refused.message);
+
 	// --- /new replaces the entry ----------------------------------------------
 	rpc({ type: "new_session" });
 	const newFile = await until("the new session's entry", () => {

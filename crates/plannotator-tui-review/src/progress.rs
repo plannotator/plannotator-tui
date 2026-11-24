@@ -282,6 +282,7 @@ fn browser_entries(root: &Path, capture: &Capture) -> (Vec<RawEntry>, Vec<String
             (tracked, untracked_files(root))
         }
         Scope::Staged => (raw(&["--staged"]), Vec::new()),
+        Scope::Unstaged => (raw(&[]), untracked_files(root)),
         Scope::Branch { base } => {
             if !has_head() {
                 return (Vec::new(), untracked_files(root));
