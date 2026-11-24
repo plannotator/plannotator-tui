@@ -522,7 +522,7 @@ file without the table opens diffs as before:
 
 ```toml
 [review]
-layout = "auto"         # auto (split from 120 columns, unified below; default) | split | unified
+layout = "auto"         # auto (split in a terminal 141 columns wide or more; default) | split | unified
 split_ratio = 0.5       # the old side's share of a split row, 0.1 to 0.9; the new side gets the rest
 wrap = false            # wrap long lines instead of scrolling them sideways
 line_numbers = true     # line numbers in the gutter; off keeps the +/- signs
@@ -539,6 +539,14 @@ Each review writes only the keys it changed, so two reviews open at once keep ea
 choices; a drag is remembered when you let go, to two decimals. If the remembered file
 cannot be read or written, the footer says so once and the review carries on with the
 settings it has.
+
+`auto` decides by the terminal's width, never by the panes beside the diff, so saving the
+first note (which opens the notes panel), hiding or showing the file list or the notes, or
+dragging the lines between them never switches the layout under you; resizing the terminal
+decides again. A terminal of 141 columns or more splits: that leaves the diff 120 columns
+beside the file list at its narrowest, where the viewer's own auto splits a pane. A review
+of one file has no list and splits from 120 columns. Only a diff too narrow for two sides
+of 20 columns is drawn unified anyway. `split` and `unified` hold at any width.
 
 Each side of a split row keeps at least 20 columns, so on a narrow screen the line may sit
 nearer the middle than the ratio says. `(` and `)` move it in steps of 0.05 from the nearest

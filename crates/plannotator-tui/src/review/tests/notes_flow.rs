@@ -6,6 +6,13 @@ use ratatui::crossterm::event::{Event, KeyCode};
 use super::*;
 use crate::review::{Draft, Mode};
 
+/// Whether a drawn row of a one-file review marks a note's line: the gutter's bar at the start
+/// of the row, unified, or right of the line between the sides, split. At 120 columns the
+/// diff stays split when the notes panel opens.
+fn marked(row: &str) -> bool {
+    row.starts_with('\u{258c}') || row.contains("\u{2502}\u{258c}")
+}
+
 #[test]
 fn a_selection_becomes_a_line_comment_marked_in_the_gutter_and_listed_in_the_rail() {
     let fixture = Fixture::new("comment");
@@ -22,8 +29,8 @@ fn a_selection_becomes_a_line_comment_marked_in_the_gutter_and_listed_in_the_rai
     assert_eq!(screen.diff.selection(), None, "the selection became the note");
     keys(&mut screen, "gg");
     let rows = frame(&mut screen, 120, 40);
-    assert!(row_with(&rows, "total = a + b").starts_with('\u{258c}'), "marked: {rows:#?}");
-    assert!(row_with(&rows, "return total").starts_with('\u{258c}'));
+    assert!(marked(row_with(&rows, "total = a + b")), "marked: {rows:#?}");
+    assert!(marked(row_with(&rows, "return total")));
     assert!(row_with(&rows, "9-10 new").contains("\u{1f4ac}"));
     assert!(row_with(&rows, "name the total").contains('\u{2502}'), "the bubble holds the text");
     assert!(row_with(&rows, "Uncommitted").contains("Send 1 new \u{25b8} test agent (E)"));
@@ -127,7 +134,7 @@ fn reload_moves_a_note_whose_lines_shifted_and_keeps_it_sent() {
     assert!(screen.status.as_deref().is_some_and(|s| s.contains("1 moved")), "{:?}", screen.status);
     keys(&mut screen, "gg");
     let rows = frame(&mut screen, 120, 40);
-    assert!(row_with(&rows, "total = a + b").starts_with('\u{258c}'), "the marker moved too");
+    assert!(marked(row_with(&rows, "total = a + b")), "the marker moved too");
 }
 
 #[test]
@@ -148,7 +155,7 @@ fn reload_puts_a_note_whose_code_changed_under_outdated_without_a_marker() {
             || rows.iter().any(|r| r.contains(" Outdated"))
     );
     assert!(row_with(&rows, "app.py 9 new").contains("\u{1f4ac}"), "an outdated note names its file");
-    assert!(!rows.iter().any(|r| r.starts_with('\u{258c}')), "no marker: {rows:#?}");
+    assert!(!rows.iter().any(|r| marked(r)), "no marker: {rows:#?}");
     let feedback = screen.feedback(&screen.store.annotations().iter().collect::<Vec<_>>());
     assert!(feedback.contains(plannotator_tui_review::OUTDATED_ANNOTATION_LABEL), "{feedback}");
 }
@@ -165,7 +172,7 @@ fn notes_are_saved_and_come_back_on_the_next_open() {
     let [note] = again.store.annotations() else { panic!("the note came back") };
     assert_eq!(note.text.as_deref(), Some("argv may be empty"));
     let rows = frame(&mut again, 120, 40);
-    assert!(row_with(&rows, "greet(sys.argv[1])").starts_with('\u{258c}'));
+    assert!(marked(row_with(&rows, "greet(sys.argv[1])")));
 }
 
 #[test]

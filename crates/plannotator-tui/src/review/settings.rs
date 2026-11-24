@@ -6,10 +6,14 @@
 //! and the choices remembered in the data folder (`state`). The menu's Reset forgets the
 //! choices and goes back to the config file's values.
 //!
+//! `layout = "auto"` is split or unified by the terminal's width (`auto`), never by the panes
+//! beside the diff.
+//!
 //! The settings here are the truth; the viewers follow them (`Diff::apply`), the main diff
 //! and the whole-file view alike. A change is remembered once nothing is being dragged, so a
 //! drag of the line between the sides is written once, when it ends.
 
+mod auto;
 mod menu;
 pub(crate) mod state;
 
@@ -38,6 +42,9 @@ pub(crate) struct Settings {
     notice: Option<String>,
     /// A write failed and the footer said so: later ones stay quiet.
     failed: bool,
+    /// What `auto` is for the terminal drawn last (`auto`): split or not; `None` before
+    /// the first frame.
+    auto_split: Option<bool>,
 }
 
 impl Default for Settings {
@@ -50,7 +57,7 @@ impl Settings {
     /// `config` (the config file's `[review]`) with the choices remembered at `path` over it.
     pub(crate) fn load(config: ReviewConfig, path: Option<PathBuf>) -> Self {
         let (now, notice) = path.as_deref().map_or((config, None), |path| state::load(path, config));
-        Self { now, config, remembered: now, path, notice, failed: false }
+        Self { now, config, remembered: now, path, notice, failed: false, auto_split: None }
     }
 
     /// Whether choices are remembered for the next review.
@@ -130,7 +137,7 @@ fn light() -> bool {
 impl Screen {
     /// Bring the viewers to the settings; cheap when nothing differs.
     pub(super) fn apply_settings(&mut self) -> anyhow::Result<()> {
-        let (settings, light) = (self.settings.now, light());
+        let (settings, light) = (self.settings.for_viewer(), light());
         self.diff.apply(settings, light)?;
         if let Some(diff) = self.whole.as_mut().and_then(super::whole::Whole::diff_mut) {
             diff.apply(settings, light)?;

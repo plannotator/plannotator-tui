@@ -81,6 +81,8 @@ impl Screen {
         self.geometry = Geometry { screen: area, diff, rail, files, ..Geometry::default() };
         self.dividers.notes_drawn(rail_width);
         self.dividers.place(files, rail);
+        // Before anything asks whether the diff is split: `auto` follows the terminal.
+        self.decide_auto(area.width, diff.width)?;
         self.draw_header(frame, header);
         let cursor_selected = self.cursor_selected();
         match &mut self.whole {

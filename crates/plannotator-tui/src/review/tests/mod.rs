@@ -2,6 +2,7 @@
 //! diff viewer, a `TestBackend` frame, and a stand-in for the agent (the one external seam).
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic, reason = "tests assert by panicking")]
 
+mod auto_layout;
 #[cfg(unix)]
 mod big;
 mod blocked_send;
