@@ -83,6 +83,7 @@ impl NotesRail {
     /// without, it stays away until the key or the focus opens it. Notes coming or going
     /// afterwards change nothing. The code review settles as it opens: a rail that appears
     /// with the first note narrows the diff the moment that note is saved.
+    #[cfg_attr(not(unix), allow(dead_code, reason = "only the code review, Unix-only, settles"))]
     pub(crate) fn settle(&mut self, has_notes: bool) {
         if self.start == RailStart::WhenNotes && !self.closed && has_notes {
             self.opened = true;
