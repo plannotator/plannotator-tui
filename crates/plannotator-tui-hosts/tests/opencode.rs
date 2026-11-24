@@ -31,6 +31,15 @@ CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, typ
 CREATE UNIQUE INDEX session_message_session_seq_idx ON session_message (session_id, seq);
 ";
 
+/// `OpenCode` 2.4 split a message's payload: one `session_part` row per part, ordered by
+/// `ordinal`. `packages/core/src/session/sql.ts`, migration `20261029002625_session_part`.
+const SCHEMA_V2_PARTS: &str = "
+CREATE TABLE session_part (message_id TEXT NOT NULL, session_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
+    type TEXT NOT NULL, call_id TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL,
+    data TEXT NOT NULL, CONSTRAINT session_part_pk PRIMARY KEY(message_id, ordinal));
+CREATE INDEX session_part_session_message_idx ON session_part (session_id, message_id, ordinal);
+";
+
 /// Current `OpenCode` writes this table alongside the legacy message/part tables while the
 /// session row remains in `session`.
 const CURRENT_SESSION_MESSAGE: &str = "
@@ -132,6 +141,115 @@ fn an_opencode2_session_in_the_same_database_wins_when_it_is_newer() {
     assert_eq!(messages[1].role, Role::Human);
     // n counts messages with text: the reasoning-only turn and the switch rows take no slot.
     assert_eq!(opencode::messages_for_session(&db, "ses2_new", Schema::V2, 1).expect("one").len(), 1);
+    drop(writer);
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+fn part_v2(c: &Connection, message: &str, session: &str, ordinal: i64, kind: &str, data: &str) {
+    c.execute(
+        "INSERT INTO session_part (message_id, session_id, ordinal, type, time_created, time_updated, data) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)",
+        params![message, session, ordinal, kind, ordinal + 1, data],
+    )
+    .expect("session_part");
+}
+
+/// A `OpenCode` 2.4 session whose replies are split between the message payload and
+/// `session_part` rows, as after the part-table migration: one reply in each format, one in
+/// both, a reasoning-only turn, and a prompt between them.
+fn populate_v2_parts(db: &Path) -> Connection {
+    let c = Connection::open(db).expect("create");
+    c.pragma_update(None, "journal_mode", "WAL").expect("wal");
+    c.execute_batch(SCHEMA_V2).expect("schema v2");
+    c.execute_batch(SCHEMA_V2_PARTS).expect("schema v2 parts");
+    session_v2(&c, "ses2_mixed", "/work/app", None, 7000, None);
+    message_v2(
+        &c,
+        "msg2_q1",
+        "ses2_mixed",
+        1,
+        "user",
+        r#"{"text":"mixed question","files":[],"time":{"created":70001}}"#,
+    );
+    message_v2(
+        &c,
+        "msg2_legacy",
+        "ses2_mixed",
+        2,
+        "assistant",
+        r#"{"content":[{"type":"text","text":"legacy reply"}],"time":{"created":70002}}"#,
+    );
+    message_v2(&c, "msg2_parts", "ses2_mixed", 3, "assistant", r#"{"content":[],"time":{"created":70003}}"#);
+    message_v2(
+        &c,
+        "msg2_both",
+        "ses2_mixed",
+        4,
+        "assistant",
+        r#"{"content":[{"type":"text","text":"both reply"}],"time":{"created":70004}}"#,
+    );
+    message_v2(
+        &c,
+        "msg2_q2",
+        "ses2_mixed",
+        5,
+        "user",
+        r#"{"text":"follow-up question","files":[],"time":{"created":70005}}"#,
+    );
+    message_v2(
+        &c,
+        "msg2_reasoning",
+        "ses2_mixed",
+        6,
+        "assistant",
+        r#"{"content":[{"type":"reasoning","text":"thinking"}],"time":{"created":70006}}"#,
+    );
+    // Written out of order on purpose: only `ordinal` decides how the reply reads.
+    part_v2(&c, "msg2_parts", "ses2_mixed", 3, "text", r#"{"type":"text","text":"part two"}"#);
+    part_v2(&c, "msg2_parts", "ses2_mixed", 1, "tool", r#"{"type":"tool","name":"read"}"#);
+    part_v2(&c, "msg2_parts", "ses2_mixed", 0, "text", r#"{"type":"text","text":"part one"}"#);
+    part_v2(&c, "msg2_parts", "ses2_mixed", 2, "text", r#"{"type":"text","text":"   "}"#);
+    part_v2(
+        &c,
+        "msg2_parts",
+        "ses2_mixed",
+        4,
+        "text",
+        r#"{"type":"text","text":"injected","synthetic":true}"#,
+    );
+    part_v2(&c, "msg2_both", "ses2_mixed", 0, "text", r#"{"type":"text","text":"part duplicate"}"#);
+    part_v2(&c, "msg2_reasoning", "ses2_mixed", 0, "tool", r#"{"type":"tool","name":"read"}"#);
+    c
+}
+
+#[test]
+fn replies_survive_the_part_table_once_each_in_order_and_under_the_limit() {
+    let dir = temp_dir("v2parts");
+    let db = dir.join("opencode.db");
+    let writer = populate_v2_parts(&db);
+    let messages = opencode::messages_for_session(&db, "ses2_mixed", Schema::V2, 25).expect("messages");
+    let texts: Vec<&str> = messages.iter().map(|m| m.text.as_str()).collect();
+    assert_eq!(
+        texts,
+        ["follow-up question", "both reply", "part one\n\npart two", "legacy reply", "mixed question"]
+    );
+    // A reply stored in both formats is one entry: the payload wins, its parts are not repeated.
+    assert_eq!(messages.iter().filter(|m| m.id == "msg2_both").count(), 1);
+    assert!(messages.iter().all(|m| !m.text.contains("part duplicate")));
+    let parts = messages.iter().find(|m| m.id == "msg2_parts").expect("parts reply");
+    assert_eq!(parts.role, Role::Assistant);
+    assert_eq!(parts.at.as_deref(), Some("1970-01-01T00:01:10.003Z"));
+    assert_eq!(messages[1].id, "msg2_both");
+    assert_eq!(messages[1].role, Role::Assistant);
+    assert_eq!(messages[1].at.as_deref(), Some("1970-01-01T00:01:10.004Z"));
+    assert_eq!(messages[0].role, Role::Human);
+    assert_eq!(messages[3].at.as_deref(), Some("1970-01-01T00:01:10.002Z"));
+    // Only the reasoning turn is invisible, so a limit of two replies still reaches the parts
+    // reply; a limit of one stops at the newest reply and keeps the prompt after it.
+    let one = opencode::messages_for_session(&db, "ses2_mixed", Schema::V2, 1).expect("one");
+    assert_eq!(one.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["msg2_q2", "msg2_both"]);
+    let two = opencode::messages_for_session(&db, "ses2_mixed", Schema::V2, 2).expect("two");
+    assert_eq!(two.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["msg2_q2", "msg2_both", "msg2_parts"]);
     drop(writer);
     std::fs::remove_dir_all(&dir).expect("cleanup");
 }

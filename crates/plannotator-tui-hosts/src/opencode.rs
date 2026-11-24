@@ -18,6 +18,11 @@
 //! assistant, `text` for a user). Other channels use `opencode-<channel>.db` next to it
 //! (`packages/cli/src/server-process.ts`). A v1 session and a v2 session can therefore both
 //! match one directory; the newest wins, whichever schema and file it lives in.
+//!
+//! `OpenCode` 2.4 (migration `20261029002625_session_part`) writes each part as its own
+//! `session_part` row (`message_id`, `session_id`, `ordinal`, `type`, `data`) and leaves the
+//! assistant payload's `content` empty. The text of such a reply is its `text` parts in
+//! `ordinal` order. A reply keeps whichever format carries its text; the two are never mixed.
 
 use std::path::Path;
 
@@ -198,9 +203,25 @@ fn messages_v1(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, Ho
     Ok(messages)
 }
 
-/// `OpenCode` 2: one `session_message` row per message; the payload carries the text directly.
+/// `OpenCode` 2: one `session_message` row per message; the payload carries the text directly,
+/// or, since 2.4 writes each part as its own row, in the message's `session_part` rows.
 fn messages_v2(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, HostError> {
     let connection = open_read_only(db, WHAT)?;
+    // The part table arrived in 2.4; a database written before it has none, and the message
+    // payload is then the only source. Checked once, the prepared statement serves every row.
+    let mut parts = if has_table(&connection, "session_part")? {
+        Some(
+            connection
+                .prepare(
+                    "SELECT data FROM session_part \
+                     WHERE session_id = ?1 AND message_id = ?2 AND type = 'text' \
+                     ORDER BY ordinal ASC",
+                )
+                .map_err(|e| sql_error(WHAT, &e))?,
+        )
+    } else {
+        None
+    };
     let mut statement = connection
         .prepare(
             "SELECT id, type, data, time_created FROM session_message \
@@ -227,7 +248,7 @@ fn messages_v2(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, Ho
         let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) else { continue };
         let (role, text) = match kind.as_str() {
             "assistant" => {
-                let parts: Vec<&str> = json
+                let blocks: Vec<&str> = json
                     .get("content")
                     .and_then(serde_json::Value::as_array)
                     .map(|items| {
@@ -239,7 +260,18 @@ fn messages_v2(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, Ho
                             .collect()
                     })
                     .unwrap_or_default();
-                (Role::Assistant, parts.join("\n\n"))
+                let payload = blocks.join("\n\n");
+                // The format is decided per reply: text in the payload wins, and only a reply
+                // without visible text falls back to its parts. Never both, never repeated.
+                let text = if payload.trim().is_empty() {
+                    match parts_for_message(&mut parts, session_id, &id)? {
+                        Some(text) => text,
+                        None => payload,
+                    }
+                } else {
+                    payload
+                };
+                (Role::Assistant, text)
             }
             "user" => (Role::Human, json.get("text").and_then(|t| t.as_str()).unwrap_or_default().to_owned()),
             _ => continue,
@@ -261,6 +293,30 @@ fn messages_v2(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, Ho
         )));
     }
     Ok(messages)
+}
+
+/// The part reader for one session: a statement prepared once and reused per message id.
+type PartStatement<'connection> = rusqlite::Statement<'connection>;
+
+/// The visible text of a reply's `session_part` rows, joined in `ordinal` order, or `None` when
+/// the reply has no visible text there. Tool calls, reasoning and injected parts are not text.
+fn parts_for_message(
+    statement: &mut Option<PartStatement<'_>>,
+    session_id: &str,
+    message_id: &str,
+) -> Result<Option<String>, HostError> {
+    let Some(statement) = statement.as_mut() else { return Ok(None) };
+    let rows = statement
+        .query_map(params![session_id, message_id], |row| row.get::<_, String>(0))
+        .map_err(|e| sql_error(WHAT, &e))?;
+    let mut parts = Vec::new();
+    for row in rows {
+        let data = row.map_err(|e| sql_error(WHAT, &e))?;
+        if let Some(text) = part_text(&data) {
+            parts.push(text);
+        }
+    }
+    Ok((!parts.is_empty()).then(|| parts.join("\n\n")))
 }
 
 /// How many of `messages` are assistant replies: `n` counts those, not prompts.
