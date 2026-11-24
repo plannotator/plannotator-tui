@@ -211,14 +211,16 @@ plannotator-tui review https://github.com/owner/repo/pull/123
   `## Global comments`, as the browser sends its global comments.
 
 The comment box opens right under the lines, or above them when they are at the bottom of
-the diff. In a split diff it opens over the side the lines are on. It covers none of the
+the diff. In a split diff it opens over the side the lines are on, wherever you dragged the
+line between the sides; a side narrower than the box gets the box from its outer edge. It covers none of the
 lines while there is room, and they stay shaded while you type. A note on a file opens
 under the file's heading. A note on the whole change opens in the middle, and editing a
 note from the rail opens the box under the note's lines. The box grows as you type, up to
 eight lines, and then scrolls. Opening, typing, saving or `Esc` never scrolls the diff or
 moves the cursor. While the box is open, a click on its text moves the text cursor there.
 A click anywhere else and the wheel do nothing, so a stray click never loses what you
-typed.
+typed: the header's switches and `Settings` button and the line between the sides stay as
+they are, and `,`, `u`, `w`, `(` and `)` are text in the box.
 
 The mouse works too. The wheel scrolls the diff, the file list or the notes under the
 pointer. A click puts the cursor on a line, on the old or new side you clicked; a click on a

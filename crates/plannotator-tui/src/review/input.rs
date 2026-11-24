@@ -96,6 +96,10 @@ impl Screen {
         if self.mode != Mode::Browse {
             self.cancel_drags();
         }
+        // With a draft open no line between panes can be dragged, so none is lit.
+        if matches!(self.mode, Mode::Compose(_)) {
+            self.dividers.unlight();
+        }
         // Whatever moved the diff (a key, a note picked in the rail, a jump, the mouse), the
         // file list and the footer follow the file its cursor is in; the frame asks again.
         self.track_current();
