@@ -6,7 +6,7 @@ use anyhow::Result;
 use diffs_rs::engine::{Command, DiffRow, DiffRowKind, InputEffect, Side};
 use diffs_rs::reading::SourceRange;
 
-use super::Diff;
+use super::{Diff, Lines};
 
 impl Diff {
     /// The viewer's index of the file the cursor is in. `None` before any file arrived.
@@ -29,6 +29,35 @@ impl Diff {
     pub(in crate::review) fn code_row(&self, y: u16) -> bool {
         self.row_at(self.area.right().saturating_sub(1), y)
             .is_some_and(|row| matches!(row.kind, DiffRowKind::Code | DiffRowKind::NoNewline))
+    }
+
+    /// The first and last screen row of the last frame that show any of `lines`, on their
+    /// side: in a split diff the cells of that side's pane. `None` when none is on screen.
+    pub(in crate::review) fn rows_showing(&self, lines: &Lines) -> Option<(u16, u16)> {
+        let old = lines.side == plannotator_tui_review::Side::Old;
+        let column = if old && self.split() { self.area.x + 1 } else { self.area.right().saturating_sub(2) };
+        let mut shown = (self.area.top()..self.area.bottom()).filter(|&y| {
+            self.row_at(column, y).is_some_and(|row| {
+                let line = if old { row.old_line } else { row.new_line };
+                row.kind == DiffRowKind::Code
+                    && self.paths.get(row.file) == Some(&lines.path)
+                    && line.is_some_and(|n| (lines.first..=lines.last).contains(&n))
+            })
+        });
+        let first = shown.next()?;
+        Some((first, shown.last().unwrap_or(first)))
+    }
+
+    /// The screen row of the last frame that shows the heading of the file at `path`: its own
+    /// heading, or the one kept over the top row while its lines scroll under it.
+    pub(in crate::review) fn heading_row(&self, path: &str) -> Option<u16> {
+        let column = self.area.right().saturating_sub(2);
+        (self.area.top()..self.area.bottom()).rev().find(|&y| {
+            self.row_at(column, y).is_some_and(|row| {
+                matches!(row.kind, DiffRowKind::Header | DiffRowKind::StickyHeader)
+                    && self.paths.get(row.file).is_some_and(|p| p == path)
+            })
+        })
     }
 
     /// Whether the diff shows its two sides next to each other, as last drawn.

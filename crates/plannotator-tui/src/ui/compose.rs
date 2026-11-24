@@ -219,7 +219,27 @@ impl Compose {
         let rows = self.rows(wrap_width);
         let (row, col) = self.cursor_position(&rows);
         let Some(target_row) = row.checked_add_signed(delta) else { return };
-        let Some(target) = rows.get(target_row) else { return };
+        if let Some(cursor) = self.index_at(&rows, target_row, col) {
+            self.cursor = cursor;
+        }
+    }
+
+    /// A click on the text: the cursor goes to display row `row` (the last, below the text) at
+    /// display column `col`, or the end of that row. While the box asks whether to discard,
+    /// a click is no answer and changes nothing.
+    pub(crate) fn click(&mut self, row: usize, col: usize, wrap_width: usize) {
+        if self.asking {
+            return;
+        }
+        let rows = self.rows(wrap_width);
+        if let Some(cursor) = self.index_at(&rows, row.min(rows.len().saturating_sub(1)), col) {
+            self.cursor = cursor;
+        }
+    }
+
+    /// The index shown on display row `row` of `rows` nearest display column `col`.
+    fn index_at(&self, rows: &[Range<usize>], row: usize, col: usize) -> Option<usize> {
+        let target = rows.get(row)?;
         let mut cursor = target.start;
         let mut used = 0;
         for &c in self.chars.get(target.clone()).unwrap_or_default() {
@@ -231,8 +251,8 @@ impl Compose {
             cursor += 1;
         }
         // A wrapped row's end is the next row's start, which displays on that next row.
-        let wraps = rows.get(target_row + 1).is_some_and(|next| next.start == target.end);
-        self.cursor = if wraps && cursor == target.end { cursor.saturating_sub(1) } else { cursor };
+        let wraps = rows.get(row + 1).is_some_and(|next| next.start == target.end);
+        Some(if wraps && cursor == target.end { cursor.saturating_sub(1) } else { cursor })
     }
 
     /// The range of `chars` each display row shows at `width`. Explicit newlines always
@@ -334,15 +354,18 @@ pub(crate) fn height(compose: &Compose, wrap_width: usize) -> u16 {
     content_rows(compose, wrap_width) as u16 + 2
 }
 
-/// Draw the box in `rect` (as tall as [`height`] says) with its text wrapped at
-/// `rect.width - CHROME`, and put the terminal cursor at the insertion point. A title too
-/// long for the top border continues on the bottom one. It is dim, and bold while the box
-/// asks to discard its text.
-pub(crate) fn draw(frame: &mut Frame, rect: Rect, compose: &Compose, title: &str) {
+/// Draw the box in `rect` with its text wrapped at `rect.width - CHROME`, and put the
+/// terminal cursor at the insertion point. The box shows as many rows of text as `rect` has
+/// inside its borders ([`height`] asks for them all, up to eight); taller text scrolls to keep
+/// the cursor's row in view. A title too long for the top border continues on the bottom
+/// one. It is dim, and bold while the box asks to discard its text.
+///
+/// Returns where the text is drawn and the first of its display rows shown there, for a click.
+pub(crate) fn draw(frame: &mut Frame, rect: Rect, compose: &Compose, title: &str) -> (Rect, usize) {
     let title_style = if compose.asking { Style::new().bold() } else { Style::new().dim() };
     let wrap_width = usize::from(rect.width.saturating_sub(CHROME));
     let (lines, cursor_row, cursor_col) = compose.wrapped(wrap_width);
-    let content_rows = content_rows(compose, wrap_width);
+    let content_rows = usize::from(rect.height.saturating_sub(2)).max(1);
     let (title, title_rest) = split_title(title, usize::from(rect.width.saturating_sub(2)));
     frame.render_widget(Clear, rect);
     let mut boxed = Block::default()
@@ -365,6 +388,8 @@ pub(crate) fn draw(frame: &mut Frame, rect: Rect, compose: &Compose, title: &str
     let cursor_x = inner.x + 1 + cursor_col as u16;
     let cursor_y = inner.y + (cursor_row - scroll) as u16;
     frame.set_cursor_position((cursor_x.min(inner.right().saturating_sub(1)), cursor_y));
+    let text = Rect { x: inner.x + 1, width: inner.width.saturating_sub(1), ..inner };
+    (text, scroll)
 }
 
 #[cfg(test)]
@@ -606,6 +631,17 @@ mod tests {
         compose.cursor = 7;
         send(&mut compose, KeyCode::Up, KeyModifiers::NONE);
         assert_eq!(compose.cursor, 1);
+    }
+
+    #[test]
+    fn a_click_puts_the_cursor_at_the_clicked_cell_or_the_end_of_its_row() {
+        let mut compose = Compose::with_text("the quick brown fox\njumps");
+        compose.click(0, 4, 10);
+        assert_eq!(compose.cursor, 4, "on the q");
+        compose.click(1, 40, 10);
+        assert_eq!(compose.cursor, 19, "past the end of the second display row: its end");
+        compose.click(7, 1, 10);
+        assert_eq!(compose.cursor, 21, "below the text: the last row");
     }
 
     #[test]

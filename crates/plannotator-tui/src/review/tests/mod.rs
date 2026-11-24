@@ -5,6 +5,8 @@
 #[cfg(unix)]
 mod big;
 mod blocked_send;
+mod compose_near;
+mod compose_still;
 mod disk_flow;
 mod divider_mouse;
 mod drag_burst;
