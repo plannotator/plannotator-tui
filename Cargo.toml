@@ -52,13 +52,6 @@ cast_sign_loss = "allow"
 cast_possible_wrap = "allow"
 cast_precision_loss = "allow"
 
-# diffs-rs's tab width, changed-text and whitespace settings (plannotator/diffs-rs#19), until
-# they are published. Its two forks come from the same checkout, so one copy of each is built.
-[patch.crates-io]
-diffs-rs = { git = "https://github.com/plannotator/diffs-rs", branch = "feat/more-options" }
-diffs-syntect = { git = "https://github.com/plannotator/diffs-rs", branch = "feat/more-options" }
-diffs-two-face = { git = "https://github.com/plannotator/diffs-rs", branch = "feat/more-options" }
-
 [profile.release]
 lto = "thin"
 # Shipped binaries carry no debug info; profile locally with `--profile profiling`.
