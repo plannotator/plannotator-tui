@@ -1,5 +1,5 @@
-//! Text we draw on a background we paint ourselves: the header buttons and the floating
-//! toolbar.
+//! Text we draw on a background we paint ourselves: the header buttons and switches, and the
+//! floating toolbar.
 //!
 //! Both colours of each pair come from the 256-colour cube and grey ramp, never from the 16
 //! ANSI colours: terminal themes remap those, so text taken from them can land on a
@@ -26,6 +26,13 @@ pub(crate) struct Chips {
     pub(crate) approve: Style,
     /// The Review ▾ menu button's text, on the toolbar grey.
     pub(crate) menu_fg: Color,
+    /// A header switch's option in force (`Split` of `Split │ Unified`, `Wrap` when on): a
+    /// pale chip on dark, a dark one on light, so it stands out of the toolbar grey.
+    #[cfg_attr(not(unix), allow(dead_code, reason = "only the code review reads it"))]
+    pub(crate) switch_on: Style,
+    /// A header switch's other options, on the toolbar grey.
+    #[cfg_attr(not(unix), allow(dead_code, reason = "only the code review reads it"))]
+    pub(crate) switch_off_fg: Color,
     /// The floating toolbar's labels, on the toolbar grey: comment, looks good, delete.
     toolbar_comment: Color,
     toolbar_looks_good: Color,
@@ -66,6 +73,8 @@ static DARK: Chips = Chips {
     send_idle_fg: Color::Indexed(250),
     approve: APPROVE,
     menu_fg: Color::Indexed(80),
+    switch_on: Style::new().fg(BLACK).bg(Color::Indexed(250)).bold(),
+    switch_off_fg: Color::Indexed(250),
     toolbar_comment: Color::Indexed(221),
     toolbar_looks_good: Color::Indexed(114),
     toolbar_delete: Color::Indexed(217),
@@ -80,6 +89,8 @@ static LIGHT: Chips = Chips {
     send_idle_fg: Color::Indexed(239),
     approve: APPROVE,
     menu_fg: Color::Indexed(23),
+    switch_on: Style::new().fg(Color::Indexed(231)).bg(Color::Indexed(239)).bold(),
+    switch_off_fg: Color::Indexed(239),
     toolbar_comment: Color::Indexed(58),
     toolbar_looks_good: Color::Indexed(22),
     toolbar_delete: Color::Indexed(124),
@@ -140,6 +151,8 @@ mod tests {
             ("send, at a dialog", style_in(theme, palette, &SendState::Blocked("dialog".into()), 3)),
             ("approve", chips.approve),
             ("review menu", on_toolbar(chips.menu_fg)),
+            ("header switch, in force", chips.switch_on),
+            ("header switch, the other option", on_toolbar(chips.switch_off_fg)),
             ("toolbar comment", on_toolbar(chips.toolbar(Kind::Comment))),
             ("toolbar looks good", on_toolbar(chips.toolbar(Kind::LooksGood))),
             ("toolbar delete", on_toolbar(chips.toolbar(Kind::Delete))),

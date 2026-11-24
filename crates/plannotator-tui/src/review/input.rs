@@ -96,9 +96,14 @@ impl Screen {
         if self.mode != Mode::Browse {
             self.cancel_drags();
         }
+        // With a draft open no line between panes can be dragged, so none is lit.
+        if matches!(self.mode, Mode::Compose(_)) {
+            self.dividers.unlight();
+        }
         // Whatever moved the diff (a key, a note picked in the rail, a jump, the mouse), the
         // file list and the footer follow the file its cursor is in; the frame asks again.
         self.track_current();
+        self.remember_settings();
         Ok(())
     }
 
@@ -140,6 +145,10 @@ impl Screen {
                 Ok(())
             }
             Mode::Menu(cursor) => self.menu_key(key, cursor),
+            Mode::Settings(cursor) => {
+                self.settings_key(key, cursor);
+                Ok(())
+            }
             Mode::PickTarget => {
                 match self.picker.key(&self.keys, &key, self.start_delivery.is_some()) {
                     PickerKey::Stay => {}
@@ -236,6 +245,10 @@ impl Screen {
                 self.toggle_notes();
                 return Ok(());
             }
+            Some(Action::DiffSettings) => {
+                self.open_settings();
+                return Ok(());
+            }
             _ => {}
         }
         match self.focus {
@@ -309,8 +322,18 @@ impl Screen {
             Action::PreviousHunk => Command::PreviousHunk,
             Action::NextFile => return self.step_file(true),
             Action::PreviousFile => return self.step_file(false),
-            Action::ToggleLayout => Command::ToggleLayout,
-            Action::ToggleWrap => Command::ToggleWrap,
+            Action::ToggleLayout => {
+                self.toggle_layout();
+                return Ok(());
+            }
+            Action::ToggleWrap => {
+                self.toggle_wrap();
+                return Ok(());
+            }
+            Action::SplitLeft | Action::SplitRight => {
+                self.step_split(action == Action::SplitRight);
+                return Ok(());
+            }
             Action::ToggleViewed => {
                 self.toggle_viewed();
                 return Ok(());
@@ -391,6 +414,10 @@ impl Screen {
                 self.mode = Mode::Browse;
                 return Ok(());
             }
+            Mode::Settings(_) => {
+                self.settings_mouse(mouse);
+                return Ok(());
+            }
             Mode::Help => {
                 let room = self.help_room.get();
                 match mouse.kind {
@@ -457,6 +484,20 @@ impl Screen {
         }
         if click && inside(self.geometry.review_button) {
             self.mode = Mode::Menu(0);
+            return Ok(());
+        }
+        if click && inside(self.geometry.settings_button) {
+            self.open_settings();
+            return Ok(());
+        }
+        if click && inside(self.geometry.wrap_switch) {
+            self.toggle_wrap();
+            return Ok(());
+        }
+        if let Some(&(_, split)) =
+            self.geometry.layout_switch.iter().find(|(rect, _)| click && rect.contains(at))
+        {
+            self.pick_layout(split);
             return Ok(());
         }
         if self.geometry.rail.contains(at) {

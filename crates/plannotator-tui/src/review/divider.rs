@@ -3,6 +3,11 @@
 //! width set either way stays for the rest of the review, through filters and reloads; the
 //! pane no longer fits itself to its contents. A double click gives the fitting back. The
 //! line brightens under the pointer and while it is dragged.
+//!
+//! The line between a split diff's sides works the same way: a drag shares the diff's width
+//! between the old and the new side, as `(`/`)` do, and a double click makes them even
+//! again. That ratio is a setting (`settings`), remembered for the next review when the drag
+//! ends. The viewer draws the line on rows of code only, so only those cells take a press.
 
 use std::time::{Duration, Instant};
 
@@ -26,6 +31,8 @@ pub(super) enum Divider {
     Files,
     /// Left of the notes panel.
     Notes,
+    /// Between the old and the new side of a split diff.
+    Split,
 }
 
 /// The lines' state: which one is dragged or under the pointer, and the notes panel's width.
@@ -54,6 +61,11 @@ impl Dividers {
     #[cfg(test)]
     pub(super) fn dragging(&self) -> bool {
         self.dragging.is_some()
+    }
+
+    /// Whether the line between a split diff's sides is being dragged.
+    pub(super) fn dragging_split(&self) -> bool {
+        matches!(self.dragging, Some((Divider::Split, _, _)))
     }
 
     /// Drop a drag in progress; the pane keeps the width it was dragged to so far.
@@ -101,9 +113,10 @@ impl Dividers {
     /// while dragged or under the pointer. Only the colour changes; a bold line is drawn
     /// with a shorter glyph in many terminals and would break into dashes.
     pub(super) fn draw(&self, frame: &mut Frame) {
-        let lit = self.dragging.map(|(divider, _, _)| divider).or(self.hover);
+        let lit = self.lit();
         let buf = frame.buffer_mut();
-        for (divider, rect) in &self.drawn {
+        // The viewer draws the line between the sides itself; `Screen::draw_split_line` lights it.
+        for (divider, rect) in self.drawn.iter().filter(|(divider, _)| *divider != Divider::Split) {
             let style = if lit == Some(*divider) {
                 Style::new().fg(crate::theme::palette().accent)
             } else {
@@ -116,7 +129,45 @@ impl Dividers {
     }
 }
 
+impl Dividers {
+    /// The line dragged, else the one under the pointer.
+    fn lit(&self) -> Option<Divider> {
+        self.dragging.map(|(divider, _, _)| divider).or(self.hover)
+    }
+}
+
 impl Screen {
+    /// Find the line between the sides of a split diff in the frame drawn: the column the
+    /// viewer says, on the rows it drew the line on that nothing covers since. Those cells take
+    /// a press, and light in the accent colour while dragged or under the pointer.
+    pub(super) fn draw_split_line(&mut self, frame: &mut Frame, diff: Rect) {
+        let Some(column) = self.whole.is_none().then(|| self.diff.split_line()).flatten() else { return };
+        let lit = self.dividers.lit() == Some(Divider::Split);
+        let buf = frame.buffer_mut();
+        let mut rows: Vec<u16> = Vec::new();
+        for y in diff.top()..diff.bottom() {
+            let drawn = buf.cell((column, y)).is_some_and(|cell| cell.symbol() == "\u{2502}");
+            if drawn && self.diff.code_row(y) {
+                rows.push(y);
+                if lit && let Some(cell) = buf.cell_mut((column, y)) {
+                    cell.set_fg(crate::theme::palette().accent);
+                }
+            }
+        }
+        // One rect per run of rows.
+        let mut runs: Vec<(u16, u16)> = Vec::new();
+        for y in rows {
+            match runs.last_mut() {
+                Some((_, last)) if *last + 1 == y => *last = y,
+                _ => runs.push((y, y)),
+            }
+        }
+        for (first, last) in runs {
+            let rect = Rect { x: column, y: first, width: 1, height: last - first + 1 };
+            self.dividers.drawn.push((Divider::Split, rect));
+        }
+    }
+
     /// A mouse event for the lines: a press on one starts a resize, a drag moves the line,
     /// the release ends it, and two clicks in a row on one cell give the pane its fitted
     /// width back. The line under the pointer lights. True when the event was the lines',
@@ -169,6 +220,7 @@ impl Screen {
                 let width = self.geometry.rail.right().saturating_sub(column + 1);
                 self.dividers.notes_width = Some(width.max(super::draw::RAIL_MIN_WIDTH));
             }
+            Divider::Split => self.drag_split(column),
         }
     }
 
@@ -177,6 +229,7 @@ impl Screen {
         match divider {
             Divider::Files => self.files.set_width(None),
             Divider::Notes => self.dividers.notes_width = None,
+            Divider::Split => self.even_split(),
         }
     }
 

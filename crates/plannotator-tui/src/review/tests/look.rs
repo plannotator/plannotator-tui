@@ -97,7 +97,8 @@ fn viewer(fixture: &Fixture, light: bool) -> Buffer {
         crate::review::capture(&fixture.repo(), &Request::Uncommitted { base: None }).expect("capture");
     let (wake, _ready) = std::sync::mpsc::sync_channel(1);
     let paths: Vec<String> = capture.files.iter().map(|f| f.path.clone()).collect();
-    let mut diff = Diff::open(&capture, &paths, light, wake).expect("viewer");
+    let settings = crate::config::review::ReviewConfig::DEFAULT;
+    let mut diff = Diff::open(&capture, &paths, settings, light, wake).expect("viewer");
     let mut terminal = Terminal::new(TestBackend::new(160, 40)).expect("terminal");
     let started = Instant::now();
     loop {

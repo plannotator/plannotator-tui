@@ -122,8 +122,11 @@ impl Screen {
                         "back / forward to where you jumped from",
                     ),
                     (key(&[Action::Back]), "clear the selection"),
-                    (key(&[Action::ToggleLayout]), "split / unified"),
+                    (key(&[Action::ToggleLayout]), "split / unified (or click the header)"),
                     (key(&[Action::ToggleWrap]), "wrap long lines"),
+                    (key(&[Action::SplitLeft, Action::SplitRight]), "move the line between the sides"),
+                    ("drag the middle".to_owned(), "resize the sides; double-click to even them"),
+                    (key(&[Action::DiffSettings]), "diff settings (remembered for next time)"),
                     (key(&[Action::ToggleFiles]), "the file list: open it and move there; there, close it"),
                     (key(&[Action::FilterFiles]), "filter the files by name"),
                     (

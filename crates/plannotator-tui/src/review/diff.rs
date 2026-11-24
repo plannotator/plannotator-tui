@@ -12,8 +12,9 @@ use std::sync::mpsc::SyncSender;
 use anyhow::{Context as _, Result};
 use diffs_rs::engine::{self, Command, Engine, Input, InputEffect, Marker, Options, SidebarPreference};
 use diffs_rs::reading::SourceRange;
-use diffs_rs::theme::Appearance;
 use plannotator_tui_review::{Capture, Side};
+
+use crate::config::review::ReviewConfig;
 use ratatui::Frame;
 use ratatui::crossterm::event::{Event, MouseEventKind};
 use ratatui::layout::Rect;
@@ -21,8 +22,10 @@ use ratatui::style::Style;
 
 mod place;
 mod sections;
+mod settings;
 
 use sections::Sections;
+use settings::{layout, options};
 
 /// A number no viewer's patch had before.
 fn next_generation() -> u64 {
@@ -67,6 +70,10 @@ pub(super) struct Diff {
     notice: Option<&'static str>,
     /// Drawn since its files last changed.
     drawn: bool,
+    /// Whether it draws on the terminal's own background, as last set.
+    terminal_background: bool,
+    /// The whole-file view: always unified, so no layout or split ratio applies.
+    whole: bool,
 }
 
 impl std::fmt::Debug for Diff {
@@ -78,33 +85,35 @@ impl std::fmt::Debug for Diff {
 impl Diff {
     /// Show the files at `paths` of `capture`'s patch, in that order. The engine reads them
     /// on its own thread and sends on `wake` when it has something to show.
+    /// `settings` say how it is drawn, `light` which colours `auto` means.
     pub(super) fn open(
         capture: &Capture,
         paths: &[String],
+        settings: ReviewConfig,
         light: bool,
         wake: SyncSender<()>,
     ) -> Result<Self> {
         let options = Options {
-            appearance: if light { Appearance::Light } else { Appearance::Dark },
+            layout: layout(settings.layout),
             // The header, footer, help and file list are this app's own (`review::draw`,
             // `review::files`).
             chrome: false,
             sidebar: SidebarPreference::Hide,
-            ..Options::default()
+            ..options(settings, light)
         };
         let sections = Sections::of(&capture.patch);
         let patch = sections.select(&capture.patch, paths);
         let input = input_bytes(&patch, capture.scope.title())?;
-        let mut engine = Engine::open(input, options, wake).context("opening the diff viewer")?;
-        // Draw on the terminal's own background and text colour, as the document screen does;
-        // the changed-line tints come from the light or dark palette picked above.
-        engine.set_terminal_background(true)?;
-        Ok(Self::with(engine, Some((capture.patch_key.clone(), sections)), None))
+        let engine = Engine::open(input, options, wake).context("opening the diff viewer")?;
+        let mut diff = Self::with(engine, Some((capture.patch_key.clone(), sections)), None);
+        diff.apply(settings, light)?;
+        Ok(diff)
     }
 
     fn with(engine: Engine, sections: Option<(String, Sections)>, fixed: Option<String>) -> Self {
         Self {
             engine,
+            whole: fixed.is_some(),
             sections,
             paths: Vec::new(),
             fixed,
@@ -112,23 +121,25 @@ impl Diff {
             generation: next_generation(),
             notice: None,
             drawn: false,
+            terminal_background: false,
         }
     }
 
     /// A whole-file view: `patch` is one file as a single unchanged hunk (`super::whole`),
-    /// shown unified, its lines named by `path`.
-    pub(super) fn open_whole(bytes: &[u8], name: &str, light: bool, wake: SyncSender<()>) -> Result<Self> {
-        let options = Options {
-            appearance: if light { Appearance::Light } else { Appearance::Dark },
-            layout: engine::Layout::Unified,
-            chrome: false,
-            ..Options::default()
-        };
+    /// shown unified, its lines named by `path`, drawn as `settings` say otherwise.
+    pub(super) fn open_whole(
+        bytes: &[u8],
+        name: &str,
+        settings: ReviewConfig,
+        light: bool,
+        wake: SyncSender<()>,
+    ) -> Result<Self> {
+        let options = Options { layout: engine::Layout::Unified, chrome: false, ..options(settings, light) };
         let input = input_bytes(bytes, name.to_owned())?;
-        let mut engine = Engine::open(input, options, wake).context("opening the whole-file view")?;
-        // The same terminal background as the diff, so both views match.
-        engine.set_terminal_background(true)?;
-        Ok(Self::with(engine, None, Some(name.to_owned())))
+        let engine = Engine::open(input, options, wake).context("opening the whole-file view")?;
+        let mut diff = Self::with(engine, None, Some(name.to_owned()));
+        diff.apply(settings, light)?;
+        Ok(diff)
     }
 
     /// Show the files at `paths` of `capture`, a new capture of the same review or the same

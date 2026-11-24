@@ -24,6 +24,7 @@ serde.workspace = true
 serde_json.workspace = true
 similar.workspace = true
 toml.workspace = true
+# Writes the review settings back into the config file, keeping its comments and layout.
 unicode-width.workspace = true
 time = { version = "0.3", features = ["formatting", "parsing", "local-offset"] }
 pulldown-cmark = { version = "0.13.4", default-features = false }
@@ -46,7 +47,7 @@ rustix = { version = "1", features = ["event", "fs", "stdio", "termios"] }
 # The diff viewer behind `plannotator-tui review` (src/review/). Unix only: its patch reader is.
 # Default features off: `dev-tty` would switch crossterm, for this whole build, to reading
 # /dev/tty, and `clipboard` is its own macOS clipboard; this app owns its input and copies.
-diffs-rs = { version = "0.2.2", default-features = false }
+diffs-rs = { version = "0.2.3", default-features = false }
 
 [dev-dependencies]
 rusqlite = { version = "0.31.0", features = ["bundled"] }

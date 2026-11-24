@@ -3,8 +3,8 @@
 //!
 //! - Lines (`c`, `s`, the toolbar, editing a line note): directly under the last row that
 //!   shows them, else above the first, so the box covers none of them; in a split diff over
-//!   that side's pane. Lines taller than the room keep the box at the end the person last
-//!   moved to, the cursor's end.
+//!   that side's pane, wherever the line between the sides was dragged. Lines taller than
+//!   the room keep the box at the end the person last moved to, the cursor's end.
 //! - A file (`C`, editing a file note): under the file's heading, else at the top of the pane.
 //! - The whole change (`M`, editing its note), or lines no longer on screen: centred.
 //!
@@ -21,7 +21,8 @@ use crate::ui::compose;
 
 /// The box's widest; code suggestions want the room.
 pub(super) const MAX_WIDTH: u16 = 84;
-/// A split pane narrower than this is too narrow for the box, which spans both.
+/// A split diff's side narrower than this is too narrow for the box, which then spans the
+/// other side too.
 const MIN_SIDE_WIDTH: u16 = 48;
 /// One row of text and its borders.
 const MIN_HEIGHT: u16 = 3;
@@ -58,9 +59,10 @@ impl Screen {
     /// the room it has there.
     pub(super) fn compose_rect(&mut self, pane: Rect, draft: &Draft) -> Rect {
         let anchor = self.anchor(draft);
-        let split = self.active_diff().is_some_and(super::diff::Diff::split);
+        // Where the viewer drew the line between a split diff's sides, wherever it was dragged.
+        let middle = self.active_diff().filter(|diff| diff.split()).and_then(super::diff::Diff::split_line);
         let (x, width) = match &anchor {
-            Anchor::Lines(lines) => columns(pane, split, lines.side),
+            Anchor::Lines(lines) => columns(pane, middle, lines.side),
             Anchor::File(_) | Anchor::Centre => (pane.x, pane.width.min(MAX_WIDTH)),
         };
         let wrap = usize::from(width.saturating_sub(compose::CHROME));
@@ -115,22 +117,26 @@ impl Screen {
     }
 }
 
-/// The box's first column and width: over the lines' side of a split diff when that pane
-/// is wide enough, else from the diff pane's left edge; never wider than [`MAX_WIDTH`] or
-/// the pane.
-fn columns(pane: Rect, split: bool, side: Side) -> (u16, u16) {
-    if split {
-        // Where the viewer draws its middle line (`mouse::tint_selection`).
-        let middle = pane.x + pane.width.saturating_sub(1) / 2;
-        let (x, width) = match side {
-            Side::Old => (pane.x, middle - pane.x),
-            Side::New => (middle + 1, pane.right().saturating_sub(middle + 1)),
-        };
-        if width >= MIN_SIDE_WIDTH {
-            return (x, width.min(MAX_WIDTH));
-        }
+/// The box's first column and width, never wider than [`MAX_WIDTH`] or the pane. In a split
+/// diff, `middle` the column of the line between its sides: over the lines' side when that
+/// side is wide enough, else as wide as the box can be from that side's outer edge, so it
+/// still starts (old) or ends (new) over the lines. Unified, from the pane's left edge.
+fn columns(pane: Rect, middle: Option<u16>, side: Side) -> (u16, u16) {
+    let widest = pane.width.min(MAX_WIDTH);
+    let Some(middle) = middle.filter(|&middle| (pane.left()..pane.right()).contains(&middle)) else {
+        return (pane.x, widest);
+    };
+    let (x, width) = match side {
+        Side::Old => (pane.x, middle - pane.x),
+        Side::New => (middle + 1, pane.right() - (middle + 1)),
+    };
+    if width >= MIN_SIDE_WIDTH {
+        return (x, width.min(MAX_WIDTH));
     }
-    (pane.x, pane.width.min(MAX_WIDTH))
+    match side {
+        Side::Old => (pane.x, widest),
+        Side::New => (pane.right() - widest, widest),
+    }
 }
 
 /// The box's first row, its height and where that puts it, for rows `first..=last` of

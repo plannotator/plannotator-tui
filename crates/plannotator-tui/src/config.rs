@@ -11,6 +11,8 @@ use std::str::FromStr;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+pub(crate) mod review;
+
 use crate::keys::Keymap;
 use crate::notes_rail::RailStart;
 use crate::theme::{Colors, ThemeSetting};
@@ -23,6 +25,8 @@ pub(crate) struct Config {
     pub(crate) deliver: DeliverConfig,
     pub(crate) ui: UiConfig,
     pub(crate) last: LastConfig,
+    /// How the code review draws its diff; its settings menu writes here.
+    pub(crate) review: review::ReviewConfig,
     pub(crate) keys: Keymap,
     pub(crate) colors: Colors,
 }
@@ -239,9 +243,13 @@ impl Config {
 
     /// Read the config file for this process; a missing file is the default config.
     pub(crate) fn load() -> Result<Self> {
+        Self::load_from(&Self::path())
+    }
+
+    /// Where this process reads its config file, and the code review writes its settings.
+    pub(crate) fn path() -> PathBuf {
         let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-        let path = config_path(|k| std::env::var(k).ok(), &home);
-        Self::load_from(&path)
+        config_path(|k| std::env::var(k).ok(), &home)
     }
 
     pub(crate) fn load_from(path: &Path) -> Result<Self> {

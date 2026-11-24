@@ -286,3 +286,34 @@ fn configs_written_before_copy_lines_load_and_keep_copy_on_the_document_screen()
     let err = parse("toggle-viewed = [\"y\"]\ncopy-lines = [\"y\"]\n").expect_err("both explicit");
     assert!(err.message().contains("copy-lines"), "{}", err.message());
 }
+
+#[test]
+fn the_settings_and_split_keys_yield_to_an_older_config_that_gave_them_away() {
+    let comma = press(KeyCode::Char(','), KeyModifiers::NONE);
+    let open = press(KeyCode::Char('('), KeyModifiers::SHIFT);
+    let close = press(KeyCode::Char(')'), KeyModifiers::SHIFT);
+    let keymap = Keymap::default();
+    assert_eq!(keymap.action(&comma, REVIEW_GLOBAL), Some(DiffSettings));
+    assert_eq!(keymap.action(&comma, SETTINGS), Some(DiffSettings));
+    assert_eq!(keymap.action(&open, DIFF), Some(SplitLeft));
+    assert_eq!(keymap.action(&close, DIFF), Some(SplitRight));
+    // (config, `diff-settings`, `split-left`, `split-right`)
+    let table = [
+        ("", ",", "(", ")"),
+        ("toggle-notes = [\",\"]\n", "", "(", ")"),
+        ("toggle-layout = [\"(\"]\ntoggle-wrap = [\")\"]\n", ",", "", ""),
+        ("jump-back = [\"(\"]\n", ",", "", ")"),
+        ("diff-settings = [\"ctrl+g\"]\n", "ctrl+g", "(", ")"),
+        ("split-left = [\"[\"]\nsplit-right = [\"]\"]\n", ",", "[", "]"),
+        ("diff-settings = []\nsplit-left = []\n", "", "", ")"),
+    ];
+    for (config, settings, left, right) in table {
+        let keymap = parse(config).unwrap_or_else(|err| panic!("{config:?} loads: {err}"));
+        assert_eq!(keymap.check(), Ok(()), "{config:?}");
+        assert_eq!(keymap.hint(DiffSettings), settings, "diff-settings in {config:?}");
+        assert_eq!(keymap.hint(SplitLeft), left, "split-left in {config:?}");
+        assert_eq!(keymap.hint(SplitRight), right, "split-right in {config:?}");
+    }
+    let keymap = parse("toggle-layout = [\"(\"]\n").expect("loads");
+    assert_eq!(keymap.action(&open, DIFF), Some(ToggleLayout), "the user's meaning stays");
+}

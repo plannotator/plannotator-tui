@@ -94,7 +94,12 @@ pub(super) fn open(args: ReviewArgs) -> Result<()> {
     let data_dir = crate::workspace_paths::data_dir();
     crate::cli::with_terminal(|terminal, session| {
         let (wake, ready) = mpsc::sync_channel(1);
-        let mut screen = Screen::open(repo, capture, &data_dir, crate::cli::delivery(true), wake.clone())?;
+        // The diff draws as `[review]` says, with the choices remembered from the last review
+        // over it; the review remembers its own in the data folder.
+        let remembered = super::settings::state::path(&data_dir);
+        let settings = super::settings::Settings::load(session.config.review, Some(remembered));
+        let mut screen =
+            Screen::open_with(repo, capture, &data_dir, crate::cli::delivery(true), wake.clone(), settings)?;
         screen.start_notes_rail(session.config.ui.notes_rail);
         screen.set_keys(session.config.keys, session.shift_enter);
         screen.enable_clipboard();

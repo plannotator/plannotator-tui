@@ -534,9 +534,9 @@ dependencies = [
 
 [[package]]
 name = "diffs-rs"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acb01d602be6cf4471ae02dbb68d5915c38bb4cc8fa48f34f07f579fa77130d8"
+checksum = "933e2c162167f191674b1779ef4f0a4768ec094eaac2e3e1859d8e1a25aefedb"
 dependencies = [
  "anyhow",
  "clap",
