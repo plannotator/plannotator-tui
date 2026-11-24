@@ -256,6 +256,10 @@ impl Screen {
             }
             _ => {}
         }
+        if self.focus != Focus::Diff && self.whitespace_key(&key) {
+            self.toggle_whitespace();
+            return Ok(());
+        }
         match self.focus {
             Focus::Diff => self.diff_key(key),
             Focus::Notes => self.notes_key(key),

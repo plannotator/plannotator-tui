@@ -35,11 +35,6 @@ impl Sections {
         sections
     }
 
-    /// Where the sections of `path` are in the patch, in patch order.
-    pub(super) fn ranges_of(&self, path: &str) -> impl Iterator<Item = Range<usize>> + '_ {
-        self.named.get(path).into_iter().flatten().cloned()
-    }
-
     /// The sections of `paths`, in that order, each path's in patch order, then the ones
     /// with no name, as one patch.
     pub(super) fn select(&self, patch: &[u8], paths: &[String]) -> Vec<u8> {

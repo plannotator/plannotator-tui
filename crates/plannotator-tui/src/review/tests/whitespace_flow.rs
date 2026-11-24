@@ -555,11 +555,61 @@ fn a_change_to_a_form_feed_is_not_whitespace_and_stays_shown_and_selectable_when
     buffer(&mut screen);
     assert_eq!(whitespace(&screen), diffs_rs::engine::Whitespace::IgnoreAll);
     let want = Lines { path: "ff.txt".into(), side: Side::New, first: 2, last: 2 };
-    assert!(!screen.diff.hides(&screen.capture, &want, Whitespace::IgnoreAll));
+    assert!(!screen.diff.hides(&want));
     screen.diff.reveal("ff.txt", Side::New, 2).expect("the changed line is shown");
     keys(&mut screen, "vv");
     assert_eq!(screen.diff.selection(), Some(want.clone()));
     let drawn = buffer(&mut screen);
     assert!(screen.diff.rows_showing(&want).is_some(), "{}", all(&drawn));
     assert!(all(&drawn).contains("2+"), "drawn as an added line, not as unchanged: {}", all(&drawn));
+}
+
+#[test]
+fn a_latin_1_letter_changed_to_another_is_not_whitespace_and_a_selection_on_it_stays() {
+    // `caf\xe9` to `caf\xe8`: two bytes that are not UTF-8 and differ. The viewer draws the
+    // line as a change with whitespace hidden, so the selection on it stays.
+    let fixture = Fixture::new("ws-latin-1");
+    let path = fixture.repo().join("latin.txt");
+    std::fs::write(&path, b"keep\ncaf\xe9\nend\n").expect("write");
+    fixture.git(&["add", "."]);
+    fixture.git(&["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "latin"]);
+    std::fs::write(&path, b"keep\ncaf\xe8\nend\n").expect("write");
+    let mut screen = fixture.open_configured();
+    buffer(&mut screen);
+    screen.diff.reveal("latin.txt", Side::New, 2).expect("the changed line");
+    keys(&mut screen, "vv");
+    let want = Lines { path: "latin.txt".into(), side: Side::New, first: 2, last: 2 };
+    assert_eq!(screen.diff.selection(), Some(want.clone()));
+    keys(&mut screen, "W");
+    let drawn = buffer(&mut screen);
+    assert_eq!(whitespace(&screen), diffs_rs::engine::Whitespace::IgnoreAll);
+    assert_eq!(screen.diff.selection(), Some(want.clone()), "kept: {:?}", screen.status);
+    assert!(
+        !screen.status.as_deref().unwrap_or_default().contains("selection cleared"),
+        "{:?}",
+        screen.status
+    );
+    assert!(screen.diff.rows_showing(&want).is_some(), "still drawn: {}", all(&drawn));
+    assert!(!screen.diff.hides(&want));
+}
+
+#[test]
+fn w_over_the_file_list_or_the_notes_hides_and_shows_whitespace_too() {
+    use crate::review::Focus;
+    let fixture = fixture("ws-files-focus");
+    let mut screen = fixture.open_configured();
+    buffer(&mut screen);
+    for focus in [Focus::Files, Focus::Notes] {
+        screen.focus = focus;
+        keys(&mut screen, "W");
+        let hidden = buffer(&mut screen);
+        assert_eq!(whitespace(&screen), diffs_rs::engine::Whitespace::IgnoreAll, "{focus:?}");
+        assert!(text(&hidden, 0).contains(" no ws "), "{focus:?}: the chip is lit");
+        assert_eq!(screen.focus, focus, "the focus stays");
+        keys(&mut screen, "W");
+        buffer(&mut screen);
+        assert_eq!(whitespace(&screen), diffs_rs::engine::Whitespace::Show, "{focus:?}");
+        assert_eq!(screen.status.as_deref(), Some("whitespace changes shown"));
+    }
+    assert_eq!(remembered(&fixture).whitespace, Whitespace::Show, "back to the default");
 }

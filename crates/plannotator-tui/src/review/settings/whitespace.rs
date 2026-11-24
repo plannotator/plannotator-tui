@@ -8,7 +8,9 @@
 //! cleared, so what `c` comments on is always what is lit.
 
 use anyhow::Result;
-use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
+use ratatui::crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+};
 use ratatui::layout::Position;
 
 use super::{ROWS, Row};
@@ -41,6 +43,20 @@ impl Screen {
         }
     }
 
+    /// Whether `key`, in the review, is `W`: the diff's key, which the file list and the notes
+    /// take too (whitespace is the whole review's, as the settings are) unless they give the
+    /// key to one of their own.
+    pub(in crate::review) fn whitespace_key(&self, key: &KeyEvent) -> bool {
+        let pane = match self.focus {
+            Focus::Diff => None,
+            Focus::Files => Some(keys::FILES),
+            Focus::Notes => Some(keys::NOTES),
+        };
+        self.keys.action(key, keys::REVIEW_GLOBAL).is_none()
+            && self.keys.action(key, keys::DIFF) == Some(Action::ToggleWhitespace)
+            && pane.is_none_or(|pane| self.keys.action(key, pane).is_none())
+    }
+
     /// Whether `event` changes the whitespace setting and nothing else, so a waiting change
     /// can wait on: `W` over the diff, a step of the menu's Whitespace row, a click on the
     /// chip or on that row. A key's release does nothing either.
@@ -48,11 +64,7 @@ impl Screen {
         match event {
             Event::Key(key) if key.kind == KeyEventKind::Release => true,
             Event::Key(key) => match self.mode {
-                Mode::Browse => {
-                    self.focus == Focus::Diff
-                        && self.keys.action(key, keys::REVIEW_GLOBAL).is_none()
-                        && self.keys.action(key, keys::DIFF) == Some(Action::ToggleWhitespace)
-                }
+                Mode::Browse => self.whitespace_key(key),
                 Mode::Settings(cursor) => {
                     let space =
                         key.code == KeyCode::Char(' ') && !key.modifiers.contains(KeyModifiers::CONTROL);
@@ -104,7 +116,7 @@ impl Screen {
         self.grown = None;
         if let Some(lines) = selection
             && self.diff.selection().is_some()
-            && self.diff.hides(&self.capture, &lines, wanted)
+            && self.diff.hides(&lines)
         {
             self.diff.clear_selection()?;
             self.status = Some("selection cleared: its lines changed only whitespace, now hidden".into());
@@ -121,7 +133,7 @@ impl Screen {
         line: u32,
     ) -> Option<String> {
         let lines = crate::review::diff::Lines { path: path.to_owned(), side, first: line, last: line };
-        if !self.diff.hides(&self.capture, &lines, self.settings.shown_whitespace) {
+        if !self.diff.hides(&lines) {
             return None;
         }
         let key = self.keys.labelled(Action::ToggleWhitespace, "shows them").unwrap_or_default();

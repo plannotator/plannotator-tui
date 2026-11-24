@@ -209,7 +209,7 @@ impl Diff {
 
 /// A hunk heading's first and last line on the old side and on the new one, from its
 /// `@@ -start,count +start,count @@`. A side with no lines has none.
-pub(super) fn spans(header: &str) -> Option<[Option<(u32, u32)>; 2]> {
+fn spans(header: &str) -> Option<[Option<(u32, u32)>; 2]> {
     let mut parts = header.strip_prefix("@@ ")?.split(' ');
     let side = |part: Option<&str>, sign: char| -> Option<Option<(u32, u32)>> {
         let range = part?.strip_prefix(sign)?;
