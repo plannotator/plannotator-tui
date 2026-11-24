@@ -134,9 +134,28 @@ impl Screen {
             };
             parts.push(format!("selected {span} {}", lines.side.as_str()));
         }
+        // Notes drawn in the diff: the ones that are not, and where they are.
+        let away = self.notes_not_inline();
+        if away > 0 {
+            let what = if away == 1 {
+                "1 note not shown inline".to_owned()
+            } else {
+                format!("{away} notes not shown inline")
+            };
+            let key = self.keys.hint(Action::ToggleNotes);
+            parts.push(if key.is_empty() || self.rail_shown() {
+                what
+            } else {
+                format!("{what} \u{b7} {key}")
+            });
+        }
         // Closed by the person, or away since the review opened without notes: the notes'
         // marks are in the gutter, and the footer says where the notes themselves are.
-        if self.notes_rail.closed() || (!self.rail_shown() && !notes.is_empty()) {
+        if self.settings.now.notes == crate::config::review::Notes::Inline {
+            if self.rail_shown() && width < RAIL_MIN_TOTAL_WIDTH {
+                parts.push("rail hidden: widen to \u{2265}80 cols".into());
+            }
+        } else if self.notes_rail.closed() || (!self.rail_shown() && !notes.is_empty()) {
             parts.push(match self.keys.hint(Action::ToggleNotes) {
                 key if key.is_empty() => "notes hidden".to_owned(),
                 key => format!("notes hidden: {key} shows them"),
@@ -217,6 +236,26 @@ impl Screen {
             return Vec::new();
         }
         let hints: Vec<Option<String>> = match self.focus {
+            Focus::Diff if self.cursor_note().is_some() => {
+                let besides = |action| self.keys.hint_besides(action, crate::keys::DIFF);
+                let edit: Vec<String> = [self.keys.hint(Action::Confirm), besides(Action::Edit)]
+                    .into_iter()
+                    .filter(|k| !k.is_empty())
+                    .collect();
+                let remove = besides(Action::Remove);
+                [
+                    (!edit.is_empty()).then(|| format!("{} edit", edit.join("/"))),
+                    (!remove.is_empty()).then(|| format!("{remove} remove")),
+                    pair(Action::Down, Action::Up, "move"),
+                    key(Action::ToggleViewed, "viewed"),
+                    (!self.store.annotations().is_empty())
+                        .then(|| key(Action::CycleFocus, "notes"))
+                        .flatten(),
+                ]
+                .into_iter()
+                .chain(tail)
+                .collect()
+            }
             Focus::Diff if self.diff.selection().is_some() => vec![
                 self.diff.selecting().then(|| key(Action::Visual, "end selection")).flatten(),
                 key(Action::Comment, "comment"),

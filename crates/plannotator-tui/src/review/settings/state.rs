@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result};
 
 use crate::config::review::{
-    Background, DiffTheme, InlineChanges, Layout, ReviewConfig, SplitShare, TabWidth, Whitespace,
+    Background, DiffTheme, InlineChanges, Layout, Notes, ReviewConfig, SplitShare, TabWidth, Whitespace,
 };
 
 /// The state file in the data folder `data_dir`.
@@ -25,7 +25,7 @@ pub(crate) fn path(data_dir: &Path) -> PathBuf {
 }
 
 /// The keys the file holds, as `[review]` names them.
-const KEYS: [&str; 9] = [
+const KEYS: [&str; 10] = [
     "layout",
     "wrap",
     "line_numbers",
@@ -35,6 +35,7 @@ const KEYS: [&str; 9] = [
     "whitespace",
     "tab_width",
     "inline_changes",
+    "notes",
 ];
 
 /// `settings` with the file's good keys over it, and what was wrong with the file, if
@@ -63,6 +64,7 @@ pub(in crate::review) fn load(path: &Path, settings: ReviewConfig) -> (ReviewCon
             "whitespace" => value.try_into::<Whitespace>().map(|v| out.whitespace = v).is_ok(),
             "tab_width" => value.try_into::<TabWidth>().map(|v| out.tab_width = v).is_ok(),
             "inline_changes" => value.try_into::<InlineChanges>().map(|v| out.inline_changes = v).is_ok(),
+            "notes" => value.try_into::<Notes>().map(|v| out.notes = v).is_ok(),
             _ => false,
         };
         if !taken {
@@ -103,6 +105,11 @@ pub(super) fn changes(before: ReviewConfig, now: ReviewConfig) -> Vec<(&'static 
         InlineChanges::Char => "char",
         InlineChanges::None => "none",
     };
+    let notes = |notes| match notes {
+        Notes::Panel => "panel",
+        Notes::Inline => "inline",
+        Notes::Both => "both",
+    };
     let mut out = Vec::new();
     if before.layout != now.layout {
         out.push(("layout", text(layout(now.layout))));
@@ -131,6 +138,9 @@ pub(super) fn changes(before: ReviewConfig, now: ReviewConfig) -> Vec<(&'static 
     }
     if before.inline_changes != now.inline_changes {
         out.push(("inline_changes", text(inline_changes(now.inline_changes))));
+    }
+    if before.notes != now.notes {
+        out.push(("notes", text(notes(now.notes))));
     }
     out
 }
@@ -224,6 +234,7 @@ mod tests {
             whitespace: Whitespace::IgnoreChange,
             tab_width: TabWidth::new(8),
             inline_changes: InlineChanges::WordAlt,
+            notes: Notes::Inline,
             ..config
         };
         write(&file, &changes(config, now)).expect("written");
@@ -231,6 +242,7 @@ mod tests {
         assert!(text.contains("split_ratio = 0.62"), "two decimals: {text}");
         assert!(text.contains("whitespace = \"ignore-change\""), "{text}");
         assert!(text.contains("tab_width = 8") && text.contains("inline_changes = \"word-alt\""), "{text}");
+        assert!(text.contains("notes = \"inline\""), "{text}");
         assert!(!text.contains("wrap"), "an unchanged key is not written: {text}");
         let (read, notice) = load(&file, config);
         assert_eq!(notice, None);
@@ -268,9 +280,14 @@ mod tests {
             assert!(notice.contains(key), "{notice}");
         }
         assert!(!notice.contains("wrap") && !notice.contains("inline_changes"), "{notice}");
-        for text in
-            ["tab_width = 17\n", "tab_width = \"8\"\n", "whitespace = 1\n", "inline_changes = \"words\"\n"]
-        {
+        for text in [
+            "tab_width = 17\n",
+            "tab_width = \"8\"\n",
+            "whitespace = 1\n",
+            "inline_changes = \"words\"\n",
+            "notes = \"rail\"\n",
+            "notes = 2\n",
+        ] {
             std::fs::write(&file, text).expect("write");
             let (read, notice) = load(&file, ReviewConfig::DEFAULT);
             assert_eq!(read, ReviewConfig::DEFAULT, "{text:?}");

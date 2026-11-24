@@ -30,6 +30,9 @@ pub(crate) struct ReviewConfig {
     pub(crate) tab_width: TabWidth,
     /// How the changed text inside a changed line is marked, by Pierre's names.
     pub(crate) inline_changes: InlineChanges,
+    /// Where the notes show: the panel beside the diff, boxes in the diff under their lines,
+    /// or both.
+    pub(crate) notes: Notes,
 }
 
 impl ReviewConfig {
@@ -44,6 +47,7 @@ impl ReviewConfig {
         whitespace: Whitespace::Show,
         tab_width: TabWidth::DEFAULT,
         inline_changes: InlineChanges::Word,
+        notes: Notes::Panel,
     };
 }
 
@@ -110,6 +114,19 @@ pub(crate) enum InlineChanges {
     Char,
     /// No marks inside lines; the lines' colours still show the change.
     None,
+}
+
+/// `[review] notes`: where the code review shows its notes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Notes {
+    /// In the notes panel beside the diff, with a mark in the gutter.
+    #[default]
+    Panel,
+    /// In boxes in the diff under their lines; the panel opens only by hand.
+    Inline,
+    /// In boxes in the diff and in the panel.
+    Both,
 }
 
 /// `[review] tab_width`: the columns a tab advances to, from 1 to 16.
@@ -239,6 +256,7 @@ mod tests {
                 whitespace: Whitespace::Show,
                 tab_width: TabWidth::new(4),
                 inline_changes: InlineChanges::Word,
+                notes: Notes::Panel,
             }
         );
     }
@@ -280,7 +298,7 @@ mod tests {
 
     #[test]
     fn every_review_setting_is_read_and_roundtrips() {
-        let text = "[review]\nlayout = \"unified\"\nwrap = true\nline_numbers = false\ntheme = \"light\"\nbackground = \"theme\"\nsplit_ratio = 0.62\nwhitespace = \"ignore-all\"\ntab_width = 8\ninline_changes = \"word-alt\"\n";
+        let text = "[review]\nlayout = \"unified\"\nwrap = true\nline_numbers = false\ntheme = \"light\"\nbackground = \"theme\"\nsplit_ratio = 0.62\nwhitespace = \"ignore-all\"\ntab_width = 8\ninline_changes = \"word-alt\"\nnotes = \"both\"\n";
         let config = Config::parse(text).expect("parses");
         let review = config.review;
         assert_eq!(review.layout, Layout::Unified);
@@ -291,11 +309,14 @@ mod tests {
         assert_eq!(review.whitespace, Whitespace::IgnoreAll);
         assert_eq!(review.tab_width.get(), 8);
         assert_eq!(review.inline_changes, InlineChanges::WordAlt);
+        assert_eq!(review.notes, Notes::Both);
         let shown = config.to_toml().expect("toml");
         assert!(shown.contains("[review]\nlayout = \"unified\""), "{shown}");
         assert!(shown.contains("split_ratio = 0.62\n"), "{shown}");
         assert!(
-            shown.contains("whitespace = \"ignore-all\"\ntab_width = 8\ninline_changes = \"word-alt\"\n"),
+            shown.contains(
+                "whitespace = \"ignore-all\"\ntab_width = 8\ninline_changes = \"word-alt\"\nnotes = \"both\"\n"
+            ),
             "{shown}"
         );
         assert_eq!(Config::parse(&shown).expect("reparses"), config);
@@ -316,6 +337,10 @@ mod tests {
         ] {
             let config = Config::parse(&format!("[review]\ninline_changes = \"{name}\"\n")).expect("parses");
             assert_eq!(config.review.inline_changes, value, "{name}");
+        }
+        for (name, value) in [("panel", Notes::Panel), ("inline", Notes::Inline), ("both", Notes::Both)] {
+            let config = Config::parse(&format!("[review]\nnotes = \"{name}\"\n")).expect("parses");
+            assert_eq!(config.review.notes, value, "{name}");
         }
         for width in 1..=16 {
             let config = Config::parse(&format!("[review]\ntab_width = {width}\n")).expect("parses");
@@ -338,6 +363,8 @@ mod tests {
             ("[review]\nwhitespace = \"hide\"\n", "hide"),
             ("[review]\nwhitespace = true\n", "wanted string"),
             ("[review]\ninline_changes = \"words\"\n", "words"),
+            ("[review]\nnotes = \"rail\"\n", "rail"),
+            ("[review]\nnotes = true\n", "wanted string"),
         ] {
             let err = Config::parse(text).expect_err("rejected");
             assert!(err.to_string().contains(named), "{text:?}: {err}");

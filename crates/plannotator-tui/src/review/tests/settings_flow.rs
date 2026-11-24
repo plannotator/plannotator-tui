@@ -10,7 +10,7 @@ use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
 use super::*;
-use crate::config::review::{Background, DiffTheme, Layout, ReviewConfig, SplitShare};
+use crate::config::review::{Background, DiffTheme, Layout, Notes, ReviewConfig, SplitShare};
 use crate::review::Mode;
 use crate::review::settings::{Settings, state};
 use crate::ui::chips;
@@ -135,6 +135,7 @@ fn the_settings_menu_changes_every_setting_live_and_remembers_each_change() {
         "Layout",
         "Split ratio",
         "Wrap",
+        "Notes",
         "Line numbers",
         "Whitespace",
         "Tab width",
@@ -173,9 +174,19 @@ fn the_settings_menu_changes_every_setting_live_and_remembers_each_change() {
     press(&mut screen, KeyCode::Left);
     buffer(&mut screen, COLS, ROWS);
     assert_eq!(remembered(&fixture).split_ratio.permille(), 450);
-    // Wrap with Space, line numbers with Enter, then colours and the background.
+    // Wrap with Space, notes inline and then both, line numbers with Enter, then colours and
+    // the background.
     keys(&mut screen, "j ");
     assert!(screen.diff.options().wrap);
+    keys(&mut screen, "j");
+    let drawn = buffer(&mut screen, COLS, ROWS);
+    let shown: String = (0..ROWS).map(|y| text(&drawn, y)).collect::<Vec<_>>().join("\n");
+    assert!(shown.contains("Notes") && shown.contains("panel"), "{shown}");
+    press(&mut screen, KeyCode::Right);
+    assert_eq!(screen.settings.now.notes, Notes::Inline);
+    assert_eq!(remembered(&fixture).notes, Notes::Inline);
+    press(&mut screen, KeyCode::Enter);
+    assert_eq!(screen.settings.now.notes, Notes::Both);
     keys(&mut screen, "j");
     press(&mut screen, KeyCode::Enter);
     buffer(&mut screen, COLS, ROWS);
@@ -196,6 +207,7 @@ fn the_settings_menu_changes_every_setting_live_and_remembers_each_change() {
         ReviewConfig {
             layout: Layout::Auto,
             wrap: true,
+            notes: Notes::Both,
             line_numbers: false,
             theme: DiffTheme::Light,
             background: Background::Theme,

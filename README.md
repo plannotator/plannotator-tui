@@ -298,8 +298,8 @@ The header shows the layout as a switch, `Split  Unified` with the one in force 
 the line between the old and the new side to give one side more of the width, or press `(`
 and `)`; a double click on the line makes the sides even again. Each side keeps at least 20
 columns. `,` (or the header's `Settings` button) opens the diff settings: layout, split
-ratio, wrap, line numbers, whitespace, tab width, changed text, colours and background, each
-with its value. `↑`/`↓` pick one,
+ratio, wrap, notes, line numbers, whitespace, tab width, changed text, colours and background,
+each with its value. `↑`/`↓` pick one,
 `←`/`→` change it, `enter` or `space` moves it on (and evens the split ratio), a click on a row
 does the same, and `esc` closes the menu. Every change applies at once and is remembered for
 the next review, however you made it (the menu, the switches, a key or a drag); the menu's
@@ -307,6 +307,21 @@ last row, **Reset to defaults**, forgets those choices and goes back to
 [`[review]`](#how-diffs-open) in the config file, else the defaults. A narrow header gives up
 the key hints first, then the `Wrap` switch, the `Settings` button and the `Review` button,
 and keeps the layout switch longest (as `S  U` when it must).
+
+The settings' **Notes** row draws the notes in the diff, as a pull request's comments sit
+in its diff: `panel` (the default) keeps them in the notes panel only, `inline` draws each in
+a box under the last line it is about, and `both` does both. A box sits over its side of a
+split diff (across both sides when that side is too narrow), several on one line stack in the
+order they were made, and a note on the whole file sits under the file's heading. The box
+shows the note's kind and lines, its author when it is not you, `sent` once sent, and up to
+six lines of its text (a suggestion's code as `-`/`+` lines); `… enter for more` says there
+is more. The cursor stops once on each box: `enter` or `e` opens the note in the comment box
+over it, `delete` removes it, and a click on a box picks its note (in the panel too). A drag
+selects code only, and boxes never move the line you are on. Notes on the whole change, and
+notes whose lines the diff does not show now (outdated, in a hunk hidden with `W`, in a
+filtered-out file), get no box: the footer counts them (`2 notes not shown inline · z`) and
+the panel lists them. With `inline` the panel starts away whatever notes there are; `z`
+opens it for the session. The whole-file view (`o`/`O`) keeps its notes in the panel.
 
 The changed files are listed left of the diff as a folder tree. A chain of folders with
 one folder each is one row (`crates/app/src/`), and the list is as wide as its names
@@ -535,6 +550,7 @@ file without the table opens diffs as before:
 layout = "auto"         # auto (split in a terminal 141 columns wide or more; default) | split | unified
 split_ratio = 0.5       # the old side's share of a split row, 0.1 to 0.9; the new side gets the rest
 wrap = false            # wrap long lines instead of scrolling them sideways
+notes = "panel"         # panel (the notes panel only; default) | inline (boxes in the diff) | both
 line_numbers = true     # line numbers in the gutter; off keeps the +/- signs
 theme = "auto"          # the diff's colours: auto (follow [ui] theme, default) | dark | light
 background = "terminal" # terminal (the terminal's own background, default) | theme (the diff theme's)

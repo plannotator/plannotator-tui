@@ -21,7 +21,7 @@ mod whitespace;
 use std::path::PathBuf;
 
 use crate::config::review::{
-    Background, DiffTheme, InlineChanges, Layout, ReviewConfig, SplitShare, TabWidth, Whitespace,
+    Background, DiffTheme, InlineChanges, Layout, Notes, ReviewConfig, SplitShare, TabWidth, Whitespace,
 };
 use crate::theme::{Theme, theme};
 
@@ -100,6 +100,8 @@ pub(super) enum Row {
     Layout,
     SplitRatio,
     Wrap,
+    /// Where the notes show: the panel, boxes in the diff, or both.
+    Notes,
     LineNumbers,
     Whitespace,
     TabWidth,
@@ -111,10 +113,11 @@ pub(super) enum Row {
 }
 
 /// The menu's rows, in display order.
-pub(super) const ROWS: [Row; 10] = [
+pub(super) const ROWS: [Row; 11] = [
     Row::Layout,
     Row::SplitRatio,
     Row::Wrap,
+    Row::Notes,
     Row::LineNumbers,
     Row::Whitespace,
     Row::TabWidth,
@@ -133,6 +136,7 @@ impl Row {
             Self::Layout => "Layout",
             Self::SplitRatio => "Split ratio",
             Self::Wrap => "Wrap",
+            Self::Notes => "Notes",
             Self::LineNumbers => "Line numbers",
             Self::Whitespace => "Whitespace",
             Self::TabWidth => "Tab width",
@@ -214,6 +218,10 @@ impl Screen {
         if let Err(error) = self.apply_settings() {
             self.status = Some(format!("{error:#}"));
         }
+        if self.inline.view != self.settings.now.notes {
+            self.inline.view = self.settings.now.notes;
+            self.notes_view_changed();
+        }
     }
 
     /// Remember the keys changed since the state file was last read or written here, once no
@@ -261,6 +269,12 @@ impl Screen {
             Row::SplitRatio if split => now.split_ratio.to_string(),
             Row::SplitRatio => format!("{} \u{b7} when split", now.split_ratio),
             Row::Wrap => on_off(now.wrap).to_owned(),
+            Row::Notes => match now.notes {
+                Notes::Panel => "panel",
+                Notes::Inline => "inline, in the diff",
+                Notes::Both => "both, diff and panel",
+            }
+            .to_owned(),
             Row::LineNumbers => on_off(now.line_numbers).to_owned(),
             Row::Whitespace => whitespace_label(now.whitespace).to_owned(),
             Row::TabWidth => format!("{} columns", now.tab_width.get()),
@@ -304,6 +318,7 @@ impl Screen {
                 };
             }
             Row::Wrap => now.wrap = !now.wrap,
+            Row::Notes => now.notes = cycle(&[Notes::Panel, Notes::Inline, Notes::Both], now.notes, back),
             Row::LineNumbers => now.line_numbers = !now.line_numbers,
             Row::Whitespace => {
                 let order = [Whitespace::Show, Whitespace::IgnoreAll, Whitespace::IgnoreChange];

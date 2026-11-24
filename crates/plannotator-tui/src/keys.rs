@@ -636,6 +636,14 @@ impl Keymap {
         self.keys(action).first().map(|key| key.hint()).unwrap_or_default()
     }
 
+    /// The action's first key that no action of `context` takes, as the hints spell it;
+    /// empty when there is none.
+    pub(crate) fn hint_besides(&self, action: Action, context: &[Action]) -> String {
+        let taken =
+            |key: &Key| context.iter().any(|&other| other != action && self.keys(other).contains(key));
+        self.keys(action).iter().find(|key| !taken(key)).map(|key| key.hint()).unwrap_or_default()
+    }
+
     /// `key label` for a hint line, or nothing when the action is unbound, so an unbound
     /// action leaves no bare label behind.
     pub(crate) fn labelled(&self, action: Action, label: &str) -> Option<String> {

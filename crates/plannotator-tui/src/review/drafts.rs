@@ -1,5 +1,5 @@
-//! Making and changing notes: what `c`, `s`, `C`, `M` and the rail's `e` and `x` do, and
-//! saving what the comment box holds.
+//! Making and changing notes: what `c`, `s`, `C`, `M` and the rail's `e` and `x` do (and
+//! Enter and Delete on a note's box in the diff), and saving what the comment box holds.
 
 use anyhow::Result;
 use plannotator_tui_review::{CodeAnnotation, NoteType, Side};
@@ -66,14 +66,22 @@ impl Screen {
     /// `e` in the rail: the comment box with the note's comment, or its code for a
     /// suggestion.
     pub(super) fn start_edit(&mut self) {
-        let Some(note) = self.selected_note() else { return };
+        if let Some(id) = self.selected_note().map(|note| note.id.clone()) {
+            self.edit_note(&id);
+        }
+    }
+
+    /// The comment box with note `id`'s comment, or its code for a suggestion; the rail
+    /// selects the note.
+    pub(super) fn edit_note(&mut self, id: &str) {
+        let Some(note) = self.store.annotations().iter().find(|note| note.id == id) else { return };
         let text = match note.kind {
             NoteType::Suggestion => note.suggested_code.clone(),
             NoteType::Comment | NoteType::Concern => note.text.clone(),
         };
-        let id = note.id.clone();
         self.compose = Compose::with_text(&text.unwrap_or_default());
-        self.mode = Mode::Compose(Draft::Edit(id));
+        self.mode = Mode::Compose(Draft::Edit(id.to_owned()));
+        self.select_note(id);
     }
 
     /// Save what the comment box holds. An empty comment saves nothing.
@@ -137,16 +145,21 @@ impl Screen {
         // The selection became the note; the next one starts fresh.
         let _ = self.diff.clear_selection();
         self.after_note_change();
-        if let Some(position) = self.rail_order().iter().position(|&i| self.note_id(i) == Some(id.as_str())) {
-            self.rail_cursor = position;
-        }
+        self.select_note(&id);
         Ok(())
     }
 
     /// `x` in the rail.
     pub(super) fn remove_selected(&mut self) -> Result<()> {
-        let Some(id) = self.selected_note().map(|n| n.id.clone()) else { return Ok(()) };
-        if self.store.remove(&id)? {
+        match self.selected_note().map(|n| n.id.clone()) {
+            Some(id) => self.remove_note(&id),
+            None => Ok(()),
+        }
+    }
+
+    /// Remove note `id`, at once, as the rail's `x` does.
+    pub(super) fn remove_note(&mut self, id: &str) -> Result<()> {
+        if self.store.remove(id)? {
             self.status = Some("note removed".into());
         }
         self.after_note_change();

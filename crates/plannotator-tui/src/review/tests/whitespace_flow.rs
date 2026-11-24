@@ -26,7 +26,7 @@ const ROWS: u16 = 45;
 const GO_BEFORE: &str = "package main\n\nfunc total(items []int) int {\n\tsum := 0\n\tfor _, n := range items {\n\t\tsum += n\n\t}\n\treturn sum\n}\n\n// one\n// two\n// three\n// four\n// five\n// six\n// seven\n// eight\nfunc greet(name string) {\n\tprintln(\"hello\", name)\n\tprintln(\"bye\", name)\n}\n// a\n// b\n// c\n// d\n// e\n// f\n// g\n// h\nfunc main() {\n\tprintln(total([]int{1,2,3}))\n}\n";
 const GO_AFTER: &str = "package main\n\nfunc total(items []int) int {\n    sum := 0\n    for _, n := range items {\n        sum += n * 2\n    }\n    return sum\n}\n\n// one\n// two\n// three\n// four\n// five\n// six\n// seven\n// eight\nfunc greet(name string) {\n\tprintln(\"hello\", name)  \n\tprintln(\"bye\", name)  \n}\n// a\n// b\n// c\n// d\n// e\n// f\n// g\n// h\nfunc main() {\n\tprintln(total([]int{1, 2, 3}))\n}\n";
 
-fn fixture(tag: &str) -> Fixture {
+pub(super) fn fixture(tag: &str) -> Fixture {
     let fixture = Fixture::new(tag);
     fixture.write("ws.go", GO_BEFORE);
     fixture.git(&["add", "."]);

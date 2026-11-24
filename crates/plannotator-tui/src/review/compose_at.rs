@@ -7,6 +7,8 @@
 //!   the room keep the box at the end the person last moved to, the cursor's end.
 //! - A file (`C`, editing a file note): under the file's heading, else at the top of the pane.
 //! - The whole change (`M`, editing its note), or lines no longer on screen: centred.
+//! - Editing a note whose box the diff shows (`inline`): over the box, as wide as it. Notes'
+//!   boxes under the lines of a new one count as theirs: the box opens below them.
 //!
 //! The box only draws over the diff: opening, typing in and closing it never move the view
 //! or the cursor. It grows with its text on the side it opened on and, out of room there,
@@ -23,7 +25,7 @@ use crate::ui::compose;
 pub(super) const MAX_WIDTH: u16 = 84;
 /// A split diff's side narrower than this is too narrow for the box, which then spans the
 /// other side too.
-const MIN_SIDE_WIDTH: u16 = 48;
+pub(super) const MIN_SIDE_WIDTH: u16 = 48;
 /// One row of text and its borders.
 const MIN_HEIGHT: u16 = 3;
 /// The room a side needs for the box to open there: three rows of text to grow into.
@@ -52,6 +54,8 @@ enum Anchor {
     Lines(Lines),
     File(String),
     Centre,
+    /// A note's box in the diff, as last drawn.
+    Over(Rect),
 }
 
 impl Screen {
@@ -64,15 +68,24 @@ impl Screen {
         let (x, width) = match &anchor {
             Anchor::Lines(lines) => columns(pane, middle, lines.side),
             Anchor::File(_) | Anchor::Centre => (pane.x, pane.width.min(MAX_WIDTH)),
+            Anchor::Over(rect) => (rect.x, rect.width),
         };
         let wrap = usize::from(width.saturating_sub(compose::CHROME));
         let wanted = compose::height(&self.compose, wrap).min(pane.height);
+        if let Anchor::Over(rect) = anchor {
+            // From the box's top down, else as low as it fits.
+            let y = rect.y.min(pane.bottom().saturating_sub(wanted.max(ROOM.min(pane.height))));
+            return Rect { x, y, width, height: wanted.min(pane.bottom() - y) };
+        }
         let diff = self.active_diff();
+        let boxes = self.notes_inline() && self.whole.is_none();
         let rows = match &anchor {
             Anchor::Lines(lines) => diff.and_then(|diff| diff.rows_showing(lines)).map(|(first, last)| {
                 let at_first = diff.and_then(|diff| diff.line_on(lines.side).ok().flatten());
                 let top = lines.first < lines.last
                     && at_first.is_some_and(|(path, line)| path == lines.path && line == lines.first);
+                // Below the notes' boxes under the lines, never over them.
+                let last = if boxes { diff.map_or(last, |diff| diff.under_boxes(last)) } else { last };
                 (first, last, top)
             }),
             Anchor::File(path) => match diff.and_then(|diff| diff.heading_row(path)) {
@@ -80,7 +93,7 @@ impl Screen {
                 // No heading on screen: at the top of the pane.
                 None => return Rect { x, y: pane.y, width, height: wanted },
             },
-            Anchor::Centre => None,
+            Anchor::Centre | Anchor::Over(_) => None,
         };
         let Some((first, last, top)) = rows else {
             let x = pane.x + (pane.width - width) / 2;
@@ -103,6 +116,7 @@ impl Screen {
             }
             Draft::File(path) => Anchor::File(path.clone()),
             Draft::Change => Anchor::Centre,
+            Draft::Edit(id) if let Some(rect) = self.drawn_box(id) => Anchor::Over(rect),
             Draft::Edit(id) => match self.store.annotations().iter().find(|note| note.id == *id) {
                 Some(note) if note.scope == NoteScope::File => Anchor::File(note.file_path.clone()),
                 Some(note) if note.scope == NoteScope::Line => Anchor::Lines(Lines {
