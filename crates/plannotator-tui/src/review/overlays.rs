@@ -124,6 +124,7 @@ impl Screen {
                     (key(&[Action::Back]), "clear the selection"),
                     (key(&[Action::ToggleLayout]), "split / unified (or click the header)"),
                     (key(&[Action::ToggleWrap]), "wrap long lines"),
+                    (key(&[Action::ToggleWhitespace]), "hide whitespace-only changes, or show them (no ws)"),
                     (key(&[Action::SplitLeft, Action::SplitRight]), "move the line between the sides"),
                     ("drag the middle".to_owned(), "resize the sides; double-click to even them"),
                     (key(&[Action::DiffSettings]), "diff settings (remembered for next time)"),

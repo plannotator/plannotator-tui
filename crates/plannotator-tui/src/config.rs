@@ -25,7 +25,8 @@ pub(crate) struct Config {
     pub(crate) deliver: DeliverConfig,
     pub(crate) ui: UiConfig,
     pub(crate) last: LastConfig,
-    /// How the code review draws its diff; its settings menu writes here.
+    /// How the code review draws its diff by default. The review never writes it; it
+    /// remembers the person's choices apart (`review::settings::state`).
     pub(crate) review: review::ReviewConfig,
     pub(crate) keys: Keymap,
     pub(crate) colors: Colors,
@@ -246,7 +247,7 @@ impl Config {
         Self::load_from(&Self::path())
     }
 
-    /// Where this process reads its config file, and the code review writes its settings.
+    /// Where this process reads its config file.
     pub(crate) fn path() -> PathBuf {
         let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         config_path(|k| std::env::var(k).ok(), &home)
@@ -257,6 +258,21 @@ impl Config {
             Ok(text) => Self::parse(&text).with_context(|| format!("in {}", path.display())),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
+        }
+    }
+
+    /// The config for a screen: the file at `path`, or the defaults when it cannot be loaded,
+    /// with one line for the footer that says so and why.
+    pub(crate) fn load_for_screen(path: &Path) -> (Self, Option<String>) {
+        match Self::load_from(path) {
+            Ok(config) => (config, None),
+            Err(error) => {
+                let reason = error.root_cause();
+                (
+                    Self::default(),
+                    Some(format!("config not loaded: {reason}; using defaults ({})", path.display())),
+                )
+            }
         }
     }
 
@@ -438,6 +454,31 @@ mod tests {
     fn copy_on_select_defaults_on_and_turns_off() {
         assert!(Config::default().ui.copy_on_select);
         assert!(!Config::parse("[ui]\ncopy_on_select = false\n").expect("parses").ui.copy_on_select);
+    }
+
+    #[test]
+    fn a_config_that_does_not_load_gives_the_defaults_and_one_line_naming_the_problem() {
+        let dir = std::env::temp_dir().join(format!("plannotator-tui-config-notice-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("config.toml");
+        assert_eq!(Config::load_for_screen(&path), (Config::default(), None), "a missing file is fine");
+        // One bad value anywhere drops the whole file, `copy_on_select = false` with it.
+        std::fs::write(&path, "[ui]\ncopy_on_select = false\n\n[review]\nwhitespace = \"hide\"\n")
+            .expect("write");
+        let (config, notice) = Config::load_for_screen(&path);
+        assert_eq!(config, Config::default());
+        assert!(config.ui.copy_on_select, "the fallback is unchanged: the defaults");
+        let notice = notice.expect("a notice");
+        assert!(notice.starts_with("config not loaded: "), "{notice}");
+        assert!(
+            notice.contains("hide") && notice.contains("; using defaults ("),
+            "the problem first: {notice}"
+        );
+        assert!(notice.ends_with("config.toml)"), "then the file: {notice}");
+        std::fs::write(&path, "[ui]\ncopy_on_select = false\n").expect("write");
+        let (config, notice) = Config::load_for_screen(&path);
+        assert!(!config.ui.copy_on_select && notice.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -31,9 +31,11 @@ pub(in crate::review) fn splits(terminal: u16, listed: bool, pane: u16) -> bool 
 
 impl Settings {
     /// The settings for the viewer: `auto` as this screen decided it, once it has drawn a
-    /// frame; before that the viewer's own auto, which no frame draws with.
+    /// frame; before that the viewer's own auto, which no frame draws with. Whitespace as the
+    /// viewer was last brought to it (`whitespace`).
     pub(in crate::review) fn for_viewer(&self) -> ReviewConfig {
         let mut settings = self.now;
+        settings.whitespace = self.shown_whitespace;
         if settings.layout == Layout::Auto
             && let Some(split) = self.auto_split
         {

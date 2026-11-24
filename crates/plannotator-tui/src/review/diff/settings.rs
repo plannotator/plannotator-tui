@@ -2,11 +2,13 @@
 //! bringing an open viewer to them.
 
 use anyhow::Result;
-use diffs_rs::engine::{self, Command, Options, SplitRatio};
+use diffs_rs::engine::{self, Command, Options, SplitRatio, TabWidth};
 use diffs_rs::theme::Appearance;
 
 use super::Diff;
-use crate::config::review::{Background, DiffTheme, Layout, ReviewConfig, SplitShare};
+use crate::config::review::{
+    Background, DiffTheme, InlineChanges, Layout, ReviewConfig, SplitShare, Whitespace,
+};
 
 impl Diff {
     /// Bring the viewer to `settings`: only what differs changes, so this is cheap to call
@@ -39,7 +41,27 @@ impl Diff {
             self.engine.set_terminal_background(terminal)?;
             self.terminal_background = terminal;
         }
+        let tab_width = TabWidth::new(settings.tab_width.get());
+        if self.engine.tab_width() != tab_width {
+            self.engine.set_tab_width(tab_width)?;
+        }
+        let changes = inline_changes(settings.inline_changes);
+        if self.engine.inline_changes() != changes {
+            self.engine.set_inline_changes(changes)?;
+        }
+        // Tens of milliseconds on a huge diff: the screen holds a change until a frame or
+        // another key needs it (`settings::whitespace`).
+        let hidden = whitespace(settings.whitespace);
+        if self.engine.whitespace() != hidden {
+            self.engine.set_whitespace(hidden)?;
+        }
         Ok(())
+    }
+
+    /// The tab width, changed-text marks and whitespace the viewer draws with, for tests.
+    #[cfg(test)]
+    pub(in crate::review) fn drawn_with(&self) -> (u8, engine::InlineChanges, engine::Whitespace) {
+        (self.engine.tab_width().get(), self.engine.inline_changes(), self.engine.whitespace())
     }
 
     /// The viewer's options now, for tests.
@@ -75,6 +97,23 @@ pub(super) fn layout(layout: Layout) -> engine::Layout {
         Layout::Auto => engine::Layout::Auto,
         Layout::Split => engine::Layout::Split,
         Layout::Unified => engine::Layout::Unified,
+    }
+}
+
+fn inline_changes(changes: InlineChanges) -> engine::InlineChanges {
+    match changes {
+        InlineChanges::Word => engine::InlineChanges::Word,
+        InlineChanges::WordAlt => engine::InlineChanges::WordAlt,
+        InlineChanges::Char => engine::InlineChanges::Char,
+        InlineChanges::None => engine::InlineChanges::None,
+    }
+}
+
+fn whitespace(whitespace: Whitespace) -> engine::Whitespace {
+    match whitespace {
+        Whitespace::Show => engine::Whitespace::Show,
+        Whitespace::IgnoreAll => engine::Whitespace::IgnoreAll,
+        Whitespace::IgnoreChange => engine::Whitespace::IgnoreChange,
     }
 }
 

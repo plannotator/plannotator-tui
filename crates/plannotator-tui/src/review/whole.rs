@@ -368,8 +368,15 @@ impl Screen {
             None => path.to_owned(),
         };
         let light = crate::theme::theme() == crate::theme::Theme::Light;
-        let mut whole =
-            Whole::load(&self.capture, path, version, line, self.settings.now, light, self.wake.clone());
+        let mut whole = Whole::load(
+            &self.capture,
+            path,
+            version,
+            line,
+            self.settings.for_viewer(),
+            light,
+            self.wake.clone(),
+        );
         whole.opened_on = opened_on;
         self.status = None;
         self.whole = Some(whole);
@@ -443,6 +450,11 @@ impl Screen {
             Action::Bottom => Command::LastSource,
             Action::ToggleWrap => {
                 self.toggle_wrap();
+                return Ok(());
+            }
+            // The whole file has no changes to hide; the diff behind it does.
+            Action::ToggleWhitespace => {
+                self.toggle_whitespace();
                 return Ok(());
             }
             _ => return Ok(()),

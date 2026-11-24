@@ -121,7 +121,8 @@ impl Screen {
         match place {
             Ok((side, line)) => {
                 if let Err(err) = self.diff.reveal(&path, side, line) {
-                    self.status = Some(format!("{err:#}"));
+                    let hidden = self.hidden_whitespace_reason(&path, side, line);
+                    self.status = Some(hidden.unwrap_or_else(|| format!("{err:#}")));
                 }
             }
             Err(status) => self.status = Some(status),

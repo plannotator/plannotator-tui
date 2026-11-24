@@ -39,7 +39,7 @@ fn ctrl(screen: &mut Screen, c: char) {
 }
 
 /// Tick until the search has answered.
-fn settle_search(screen: &mut Screen) {
+pub(super) fn settle_search(screen: &mut Screen) {
     let started = Instant::now();
     while screen.nav.notice().is_some() {
         screen.tick().expect("tick");

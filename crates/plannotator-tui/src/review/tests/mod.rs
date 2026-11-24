@@ -33,6 +33,7 @@ mod send_flow;
 mod settings_flow;
 mod split_drag;
 mod viewed_flow;
+mod whitespace_flow;
 mod whole_flow;
 
 use std::cell::{Cell, RefCell};

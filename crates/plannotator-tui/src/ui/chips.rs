@@ -30,6 +30,9 @@ pub(crate) struct Chips {
     /// pale chip on dark, a dark one on light, so it stands out of the toolbar grey.
     #[cfg_attr(not(unix), allow(dead_code, reason = "only the code review reads it"))]
     pub(crate) switch_on: Style,
+    /// The code review's `no ws` chip: changes are hidden, so it warns rather than reports.
+    #[cfg_attr(not(unix), allow(dead_code, reason = "only the code review reads it"))]
+    pub(crate) whitespace_hidden: Style,
     /// A header switch's other options, on the toolbar grey.
     #[cfg_attr(not(unix), allow(dead_code, reason = "only the code review reads it"))]
     pub(crate) switch_off_fg: Color,
@@ -74,6 +77,7 @@ static DARK: Chips = Chips {
     approve: APPROVE,
     menu_fg: Color::Indexed(80),
     switch_on: Style::new().fg(BLACK).bg(Color::Indexed(250)).bold(),
+    whitespace_hidden: Style::new().fg(BLACK).bg(Color::Indexed(222)).bold(),
     switch_off_fg: Color::Indexed(250),
     toolbar_comment: Color::Indexed(221),
     toolbar_looks_good: Color::Indexed(114),
@@ -90,6 +94,7 @@ static LIGHT: Chips = Chips {
     approve: APPROVE,
     menu_fg: Color::Indexed(23),
     switch_on: Style::new().fg(Color::Indexed(231)).bg(Color::Indexed(239)).bold(),
+    whitespace_hidden: Style::new().fg(Color::Indexed(231)).bg(Color::Indexed(94)).bold(),
     switch_off_fg: Color::Indexed(239),
     toolbar_comment: Color::Indexed(58),
     toolbar_looks_good: Color::Indexed(22),
@@ -153,6 +158,7 @@ mod tests {
             ("review menu", on_toolbar(chips.menu_fg)),
             ("header switch, in force", chips.switch_on),
             ("header switch, the other option", on_toolbar(chips.switch_off_fg)),
+            ("whitespace hidden", chips.whitespace_hidden),
             ("toolbar comment", on_toolbar(chips.toolbar(Kind::Comment))),
             ("toolbar looks good", on_toolbar(chips.toolbar(Kind::LooksGood))),
             ("toolbar delete", on_toolbar(chips.toolbar(Kind::Delete))),

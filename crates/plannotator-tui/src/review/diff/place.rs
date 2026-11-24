@@ -98,9 +98,17 @@ impl Diff {
                     self.engine.execute(Command::NextFile)?;
                     Command::PreviousFile
                 }
-                // The only file: up to its first row.
+                // The only file: up to its first row. The viewer reports a move up from the
+                // top as a redraw, so stop once the cursor stays where it is.
                 std::cmp::Ordering::Equal => {
-                    while self.engine.execute(Command::Up)? != InputEffect::Ignored {}
+                    let mut before = self.cursor_row();
+                    while self.engine.execute(Command::Up)? != InputEffect::Ignored {
+                        let now = self.cursor_row();
+                        if now == before {
+                            break;
+                        }
+                        before = now;
+                    }
                     break;
                 }
             };
@@ -168,7 +176,7 @@ impl Diff {
 
 /// A hunk heading's first and last line on the old side and on the new one, from its
 /// `@@ -start,count +start,count @@`. A side with no lines has none.
-fn spans(header: &str) -> Option<[Option<(u32, u32)>; 2]> {
+pub(super) fn spans(header: &str) -> Option<[Option<(u32, u32)>; 2]> {
     let mut parts = header.strip_prefix("@@ ")?.split(' ');
     let side = |part: Option<&str>, sign: char| -> Option<Option<(u32, u32)>> {
         let range = part?.strip_prefix(sign)?;
