@@ -55,10 +55,13 @@ fn ratio_written(fixture: &Fixture) -> u16 {
     Config::load_from(&fixture.config()).expect("config").review.split_ratio.permille()
 }
 
-/// What a frame shows left of the line's old column, the rows that hold no code aside:
-/// the scroll position, independent of where the line is.
+/// The first columns of the diff on each row: the old side's line numbers and the start of its
+/// code, left of anywhere the line can be (each side keeps 20 columns). The scroll position,
+/// independent of where the line is.
 fn rows_shown(screen: &mut Screen) -> Vec<String> {
-    frame(screen, COLS, ROWS).into_iter().map(|row| row.chars().take(18).collect()).collect()
+    let rows = frame(screen, COLS, ROWS);
+    let left = usize::from(screen.geometry.diff.x);
+    rows.into_iter().map(|row| row.chars().skip(left).take(16).collect()).collect()
 }
 
 #[test]
@@ -241,4 +244,30 @@ fn selected_lines_are_shaded_up_to_the_line_wherever_it_is() {
         assert_ne!(drawn.cell((line_at - 1, y)).map(|c| c.bg), Some(shade), "nor the old side");
         assert_eq!(drawn.cell((COLS - 1, y)).map(|c| c.bg), Some(shade), "the new side to its end");
     }
+}
+
+#[test]
+fn the_line_dragged_past_the_diffs_edges_or_off_the_screen_never_scrolls() {
+    let (fixture, mut screen) = open("split-edges", false);
+    let (column, row) = line(&mut screen);
+    let before = rows_shown(&mut screen);
+    let cursor = screen.diff.cursor().expect("cursor");
+    mouse(&mut screen, DOWN, column, row);
+    mouse(&mut screen, DRAG, column - 20, ROWS - 1);
+    // A report no terminal reporting cells sends is ignored; it is not the pointer past an edge.
+    mouse(&mut screen, DRAG, 900, 900);
+    assert!(!screen.held_at_edge(), "a line's drag has no edge to hold");
+    for step in 1..=10u32 {
+        let later = Instant::now() + crate::ui::drag::STEP * step;
+        assert!(!screen.step_at_edge(later).expect("step"));
+    }
+    mouse(&mut screen, DRAG, column - 20, 0);
+    mouse(&mut screen, UP, column - 20, 0);
+    assert_eq!(line(&mut screen).0, column - 20, "the column the pointer was in counts, any row");
+    assert_eq!(screen.diff.cursor().expect("cursor"), cursor);
+    assert!(screen.diff.selection().is_none() && screen.drag.is_none());
+    // The line moved, so compare what stays left of both places it was drawn.
+    let after = rows_shown(&mut screen);
+    assert_eq!(after, before, "nothing scrolled");
+    assert_eq!(ratio_written(&fixture), u16::try_from((59 * 1000u32).div_ceil(159)).expect("small"));
 }
