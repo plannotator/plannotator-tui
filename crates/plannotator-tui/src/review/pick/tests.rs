@@ -232,7 +232,7 @@ fn p_opens_the_picker_over_the_review_and_a_new_target_keeps_the_old_ones_unsent
     let screen = shown.screen_mut().expect("the commit's review");
     assert!(matches!(screen.capture.scope, Scope::Commit { .. }), "{:?}", screen.capture.scope);
     assert_eq!(screen.delivery.describe(), "test agent", "the delivery came along");
-    assert!(screen.store.annotations().is_empty());
+    assert_eq!(screen.store.annotations().len(), 0, "the commit has notes of its own: none yet");
     let rows = crate::review::tests::frame(screen, 120, 30);
     assert!(rows.iter().any(|r| r.contains("1 unsent note kept on Uncommitted")), "{}", rows.join("\n"));
 
