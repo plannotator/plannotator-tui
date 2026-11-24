@@ -23,6 +23,7 @@ use ratatui::style::Style;
 mod place;
 mod sections;
 mod settings;
+mod whitespace;
 
 use sections::Sections;
 use settings::{layout, options};

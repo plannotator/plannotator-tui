@@ -294,3 +294,17 @@ fn the_footer_hints_take_one_row_on_a_wide_screen_and_two_on_a_narrow_one() {
         assert!(footer.iter().all(|r| r.contains(" \u{b7} ")), "{cols} columns: {footer:#?}");
     }
 }
+
+#[test]
+fn filtering_a_one_file_review_from_below_its_heading_goes_to_the_heading_and_returns() {
+    // The viewer reports a move up from the first row as a redraw; going to the only file's
+    // heading once looped on it for ever.
+    let fixture = Fixture::new("files-one");
+    let mut screen = fixture.open();
+    keys(&mut screen, "G");
+    frame(&mut screen, 160, 30);
+    keys(&mut screen, "/app");
+    press(&mut screen, KeyCode::Enter);
+    let row = screen.diff.cursor_row().expect("a cursor");
+    assert_eq!((row.path.as_str(), row.kind), ("app.py", diffs_rs::engine::DiffRowKind::Header));
+}

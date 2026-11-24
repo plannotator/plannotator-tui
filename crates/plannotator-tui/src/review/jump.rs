@@ -249,6 +249,11 @@ impl Screen {
         }
         self.close_whole()?;
         if let Err(err) = self.diff.reveal(&place.path, place.side, place.line) {
+            // A line of a hunk hidden for its whitespace changes shows in the whole file.
+            if self.hidden_whitespace_reason(&place.path, place.side, place.line).is_some() {
+                self.show_whole(&place.path, Version::of(place.side), Some(place.line));
+                return Ok(true);
+            }
             self.status = Some(format!("{err:#}"));
             return Ok(false);
         }

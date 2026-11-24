@@ -241,6 +241,24 @@ fn a_status_leads_the_footer_so_a_narrow_pane_cannot_truncate_it_away() {
 }
 
 #[test]
+fn a_config_that_did_not_load_is_said_in_the_footer_ahead_of_the_screens_own_status() {
+    let path = scratch_data_dir().join("config.toml");
+    std::fs::create_dir_all(path.parent().expect("dir")).expect("dir");
+    std::fs::write(&path, "[ui]\ncopy_on_select = false\n[review]\ntab_width = 99\n").expect("write");
+    let (_, notice) = crate::config::Config::load_for_screen(&path);
+    let mut app = app(Box::new(Discard));
+    app.set_status("comment saved".to_owned());
+    app.add_notice(notice.expect("a notice"));
+    let rows = draw_sized(&mut app, 200, 20);
+    let footer = row(&rows, 19);
+    assert!(footer.trim_start().starts_with("config not loaded: tab_width 99 is out of range"), "{footer:?}");
+    assert!(
+        footer.contains("; using defaults (") && footer.contains("config.toml) \u{b7} comment saved"),
+        "{footer:?}"
+    );
+}
+
+#[test]
 fn a_status_leads_the_footer_and_the_name_counters_and_key_help_stay() {
     let mut app = app(Box::new(Discard));
     app.add_block_annotation(0, Kind::Comment, "x".to_owned()).expect("annotation");

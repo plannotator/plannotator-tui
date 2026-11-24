@@ -17,7 +17,7 @@
 //!   [`header`], [`footer`], [`rail`] and [`overlays`]: the frame; [`compose_at`]: where the
 //!   comment box opens. [`divider`]: dragging the lines between the panes and between a split
 //!   diff's sides.
-//! - [`settings`]: how the diff is drawn (`[review]`), its menu, and writing it back.
+//! - [`settings`]: how the diff is drawn (`[review]`), its menu, and remembering the choices.
 //! - [`send`]: send, resend, finish and undo. [`pi`]: the Pi link.
 //! - [`watch`]: noticing that the diff changed on disk, for the footer.
 //! - [`whole`]: the whole-file view (`o`, `O`), a second diffs-rs engine.
@@ -134,6 +134,8 @@ struct Geometry {
     /// The layout switch's two halves: `true` for Split.
     layout_switch: Vec<(Rect, bool)>,
     wrap_switch: Option<Rect>,
+    /// The `no ws` chip, while whitespace changes are hidden.
+    whitespace_chip: Option<Rect>,
     /// Rail bubbles drawn last frame, with their note's index.
     bubbles: Vec<(Rect, usize)>,
     menu_rows: Vec<(Rect, usize)>,
@@ -316,6 +318,14 @@ impl Screen {
         };
         screen.derive_send_state();
         Ok(screen)
+    }
+
+    /// Say `notice` in the footer ahead of what it says already, as the review opens.
+    pub(crate) fn add_notice(&mut self, notice: String) {
+        self.status = Some(match self.status.take() {
+            Some(status) => format!("{notice} \u{b7} {status}"),
+            None => notice,
+        });
     }
 
     pub(crate) fn set_keys(&mut self, keys: Keymap, shift_enter: bool) {

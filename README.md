@@ -108,7 +108,7 @@ dimmed. The keys also work without opening the menu.
 | file/folder review | `E` send new · `m` review menu (`R` resend all · `F` finish review · `U` undo · `H` archive) |
 | folder review | `Ctrl+P` open a file by name, including in collapsed folders: type, `↑`/`↓` or click, `Enter`, `Esc` |
 | tree | `j`/`k`; `Enter` open; `.` show/hide dot-prefixed entries (`.agents/`, `.github/`); `E` sends new notes across all reviewed files, including collapsed folders |
-| code review | drag with the mouse or `v` select, `v` again to end; `c` comment; `y` copy the selected lines; `s` suggest code; `C` note on the file; `M` note on the whole change; `o`/`O` whole file now/before; `d` go to definition, `ctrl+o`/`ctrl+i` back/forward; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `(`/`)` move the line between the sides (or drag it); `,` diff settings; `f` the file list; `/` filter files by name; `t` filter by kind; `H` hide viewed files; `<`/`>` list width; `{`/`}` notes width (or drag the line between the panes); `z` hide or show the notes; `r` read the diff again (the footer says when it changed on disk); `?` keys |
+| code review | drag with the mouse or `v` select, `v` again to end; `c` comment; `y` copy the selected lines; `s` suggest code; `C` note on the file; `M` note on the whole change; `o`/`O` whole file now/before; `d` go to definition, `ctrl+o`/`ctrl+i` back/forward; `]`/`[` hunk; `n`/`N` file; `x` viewed; `ctrl+n` next not viewed; `h`/`l` old/new side; `u` split/unified; `w` wrap; `W` hide or show whitespace-only changes; `(`/`)` move the line between the sides (or drag it); `,` diff settings; `f` the file list; `/` filter files by name; `t` filter by kind; `H` hide viewed files; `<`/`>` list width; `{`/`}` notes width (or drag the line between the panes); `z` hide or show the notes; `r` read the diff again (the footer says when it changed on disk); `?` keys |
 
 These are the defaults; every key can be rebound under `[keys]` (see [Keys](#keys)).
 
@@ -220,7 +220,7 @@ eight lines, and then scrolls. Opening, typing, saving or `Esc` never scrolls th
 moves the cursor. While the box is open, a click on its text moves the text cursor there.
 A click anywhere else and the wheel do nothing, so a stray click never loses what you
 typed: the header's switches and `Settings` button and the line between the sides stay as
-they are, and `,`, `u`, `w`, `(` and `)` are text in the box.
+they are, and `,`, `u`, `w`, `W`, `(` and `)` are text in the box.
 
 The mouse works too. The wheel scrolls the diff, the file list or the notes under the
 pointer. A click puts the cursor on a line, on the old or new side you clicked; a click on a
@@ -293,7 +293,8 @@ The header shows the layout as a switch, `Split  Unified` with the one in force 
 the line between the old and the new side to give one side more of the width, or press `(`
 and `)`; a double click on the line makes the sides even again. Each side keeps at least 20
 columns. `,` (or the header's `Settings` button) opens the diff settings: layout, split
-ratio, wrap, line numbers, colours and background, each with its value. `↑`/`↓` pick one,
+ratio, wrap, line numbers, whitespace, tab width, changed text, colours and background, each
+with its value. `↑`/`↓` pick one,
 `←`/`→` change it, `enter` or `space` moves it on (and evens the split ratio), a click on a row
 does the same, and `esc` closes the menu. Every change applies at once and is remembered for
 the next review, however you made it (the menu, the switches, a key or a drag); the menu's
@@ -528,10 +529,15 @@ wrap = false            # wrap long lines instead of scrolling them sideways
 line_numbers = true     # line numbers in the gutter; off keeps the +/- signs
 theme = "auto"          # the diff's colours: auto (follow [ui] theme, default) | dark | light
 background = "terminal" # terminal (the terminal's own background, default) | theme (the diff theme's)
+whitespace = "show"     # show (default) | ignore-all (hide whitespace-only changes, like git diff -w)
+                        #   | ignore-change (hide changes in the amount of whitespace, like git diff -b)
+tab_width = 4           # the columns a tab advances to, 1 to 16 (the menu offers 2, 4 and 8)
+inline_changes = "word" # changed text inside a line: word (default) | word-alt (as word, two changes
+                        #   one character apart marked as one) | char | none (Pierre's lineDiffType names)
 ```
 
 The app never writes this file. What you choose in the review (the settings menu, the
-header's switches, `u`, `w`, `(`/`)`, dragging the line between the sides) is remembered in
+header's switches, `u`, `w`, `W`, `(`/`)`, dragging the line between the sides) is remembered in
 `clients/plannotator-tui/review-settings.toml` under the data folder, and wins over
 `[review]` the next time; a key you never changed there keeps coming from `[review]`, then
 the defaults. **Reset to defaults**, the menu's last row, forgets the remembered choices.
@@ -539,6 +545,34 @@ Each review writes only the keys it changed, so two reviews open at once keep ea
 choices; a drag is remembered when you let go, to two decimals. If the remembered file
 cannot be read or written, the footer says so once and the review carries on with the
 settings it has.
+
+A bad value in `[review]` is an error like any other in the file: the review then opens
+with every default, and its footer says so once (`config not loaded: …; using defaults`),
+as the document screen does. A bad value in the remembered file is skipped and named once;
+its other keys still count. A remembered file that cannot be read at all (not UTF-8, say)
+is named once and replaced the next time a choice is remembered or Reset runs.
+
+`W` (or the menu's **Whitespace** row) hides the changes that only touch whitespace, as
+GitHub's "Hide whitespace" does, and `W` again shows them. While they are hidden, a lit
+`no ws` chip in the header says so; a click on it shows them again. Hidden, a removed line
+and an added line that differ only in whitespace are drawn as one unchanged line with both
+line numbers (unified, with the new text), and a hunk whose every change is like that shows
+only its heading, marked `whitespace only`. `W` hides as `-w` does unless you last chose
+`-b` in the menu, or `[review]` or the remembered choice says `ignore-change`. The diff
+works from the patch, not from the two files, so it differs from running `git diff -w`:
+lines pair only within one run of removed and added lines, a removed or added line with no
+partner (a blank one included) stays a change, a hunk with a real change keeps all its
+lines, and a file whose only changes are whitespace keeps its heading. The counts in the
+header and the file list stay those of the patch.
+
+Notes keep their lines: a note on a line drawn unchanged marks that row, a note in a hunk
+shown as its heading has no mark until the whitespace shows again (the rail says why when
+you pick it), and a comment written while whitespace is hidden is saved on the line and side
+it was written on. A selection keeps its lines when whitespace is hidden or shown, unless
+its hunk is now a heading alone; then it is cleared, and the footer says so. Go to definition
+opens a line hidden that way in the whole file. **Tab width** and **Changed text** (words;
+words, joined; characters; off) change how lines are drawn and marked, never which lines
+are shown. All three apply to the whole-file view too, where there are no changes to hide.
 
 `auto` decides by the terminal's width, never by the panes beside the diff, so saving the
 first note (which opens the notes panel), hiding or showing the file list or the notes, or
@@ -609,6 +643,7 @@ added in a later release leaves its default key to whatever your file already bo
 | `change-comment` | `M` | code review: a note on the whole change |
 | `next-hunk` `previous-hunk` `next-file` `previous-file` | `]` `[` `n` `N` | code review: move by hunk or file |
 | `toggle-layout` `toggle-wrap` `toggle-files` | `u` `w` `f` | code review: split or unified view; wrap; open the file list and move to it, or close it from there |
+| `toggle-whitespace` | `W` | code review: hide changes that only touch whitespace (`git diff -w`), or show them again |
 | `diff-settings` | `,` | code review: the diff settings menu, remembered for the next review (see [`[review]`](#how-diffs-open)) |
 | `split-left` `split-right` | `(` `)` | code review: move the line between a split diff's sides by a twentieth of the width |
 | `filter-files` `filter-kinds` `hide-viewed` | `/` `t` `H` | code review: filter the file list and the diff by name; by kind; hide viewed files |

@@ -131,8 +131,18 @@ fn the_settings_menu_changes_every_setting_live_and_remembers_each_change() {
     assert_eq!(screen.mode, Mode::Settings(0));
     let drawn = buffer(&mut screen, COLS, ROWS);
     let shown: String = (0..ROWS).map(|y| text(&drawn, y)).collect::<Vec<_>>().join("\n");
-    for row in ["Layout", "Split ratio", "Wrap", "Line numbers", "Colors", "Background", "Reset to defaults"]
-    {
+    for row in [
+        "Layout",
+        "Split ratio",
+        "Wrap",
+        "Line numbers",
+        "Whitespace",
+        "Tab width",
+        "Changed text",
+        "Colors",
+        "Background",
+        "Reset to defaults",
+    ] {
         assert!(shown.contains(row), "{row}:\n{shown}");
     }
     assert!(shown.contains("auto \u{b7} split now") && shown.contains("50 : 50"), "{shown}");
@@ -170,7 +180,8 @@ fn the_settings_menu_changes_every_setting_live_and_remembers_each_change() {
     press(&mut screen, KeyCode::Enter);
     buffer(&mut screen, COLS, ROWS);
     assert!(!screen.diff.options().line_numbers);
-    keys(&mut screen, "j");
+    // Whitespace, tab width and changed text (`whitespace_flow`), then the colours.
+    keys(&mut screen, "jjjj");
     press(&mut screen, KeyCode::Right);
     assert_eq!(screen.settings.now.theme, DiffTheme::Dark);
     press(&mut screen, KeyCode::Right);
@@ -189,11 +200,12 @@ fn the_settings_menu_changes_every_setting_live_and_remembers_each_change() {
             theme: DiffTheme::Light,
             background: Background::Theme,
             split_ratio: SplitShare::from_permille(450),
+            ..ReviewConfig::DEFAULT
         }
     );
     // The last row, Reset, stays the last.
     keys(&mut screen, "jjj");
-    assert_eq!(screen.mode, Mode::Settings(6));
+    assert_eq!(screen.mode, Mode::Settings(crate::review::settings::ROWS.len() - 1));
 
     press(&mut screen, KeyCode::Esc);
     assert_eq!(screen.mode, Mode::Browse);
@@ -219,7 +231,7 @@ fn reset_forgets_the_choices_and_goes_back_to_the_config_file_or_the_defaults() 
     assert!(!next.diff.split() && !next.diff.options().wrap);
     // Reset, by Enter on the last row.
     keys(&mut next, ",");
-    for _ in 0..6 {
+    for _ in 0..crate::review::settings::ROWS.len() - 1 {
         keys(&mut next, "j");
     }
     press(&mut next, KeyCode::Enter);

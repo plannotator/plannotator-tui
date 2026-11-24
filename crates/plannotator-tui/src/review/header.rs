@@ -1,10 +1,12 @@
 //! The header row: what is reviewed on the left; on the right the layout switch
-//! (`Split │ Unified`, the one in force lit), the wrap switch, the Settings and Review menus,
-//! and the Send button on the edge. Each is clickable.
+//! (`Split │ Unified`, the one in force lit), the wrap switch, the `no ws` chip while
+//! whitespace changes are hidden, the Settings and Review menus, and the Send button on the
+//! edge. Each is clickable.
 //!
 //! A narrow header gives way in steps, the richest arrangement that fits winning. What stays
-//! longest: Send, then the layout switch, the Review menu, the Settings menu, the wrap switch
-//! and last the key hints in the menus. On the way the Settings label shrinks to `≡`, the
+//! longest: Send, then the `no ws` chip (nobody should review with changes hidden without
+//! seeing it), the layout switch, the Review menu, the Settings menu, the wrap switch and last
+//! the key hints in the menus. On the way the Settings label shrinks to `≡`, the
 //! title loses its viewed count and then its tail (cut with `…`), and the switch can shrink
 //! to `S │ U`.
 
@@ -30,9 +32,14 @@ pub(super) enum Chip {
         compact: bool,
     },
     Wrap,
+    /// `no ws`: whitespace changes are hidden; a click shows them.
+    Whitespace,
     Settings(String),
     Review(String),
 }
+
+/// The chip that says whitespace changes are hidden.
+const NO_WS: &str = " no ws ";
 
 impl Chip {
     fn width(&self) -> usize {
@@ -40,6 +47,7 @@ impl Chip {
             Self::Layout { compact: false } => " Split ".width() + " Unified ".width(),
             Self::Layout { compact: true } => " S ".width() + " U ".width(),
             Self::Wrap => " Wrap ".width(),
+            Self::Whitespace => NO_WS.width(),
             Self::Settings(label) | Self::Review(label) => label.width(),
         }
     }
@@ -74,14 +82,14 @@ fn ellipsize(text: &str, width: usize) -> String {
 
 /// The title and the chips that fit `width` cells beside a Send button `send` cells wide:
 /// the first arrangement, richest first, whose title and chips fit. `layout` is false while
-/// the layout switch does not apply (the whole-file view). `short` is the title without its
-/// viewed count.
+/// the layout switch does not apply (the whole-file view), `hidden` true while whitespace
+/// changes are hidden. `short` is the title without its viewed count.
 pub(super) fn arrange(
     width: usize,
     send: usize,
     (full, short): (&str, &str),
     labels: &Labels,
-    layout: bool,
+    (layout, hidden): (bool, bool),
 ) -> (String, Vec<Chip>) {
     let [settings, settings_short, settings_tiny] = &labels.settings;
     let [review, review_short] = &labels.review;
@@ -111,7 +119,12 @@ pub(super) fn arrange(
         (None, [None, None, None, None]),
     ];
     for (title, chips) in candidates {
-        let chips: Vec<Chip> = chips.into_iter().flatten().collect();
+        let mut chips: Vec<Chip> = chips.into_iter().flatten().collect();
+        // Beside the wrap switch, or after the layout switch when the wrap switch gave way.
+        if hidden {
+            let at = chips.iter().take_while(|c| matches!(c, Chip::Layout { .. } | Chip::Wrap)).count();
+            chips.insert(at, Chip::Whitespace);
+        }
         let used: usize = chips.iter().map(|chip| chip.width() + 1).sum::<usize>() + send;
         let room = width.saturating_sub(used);
         match title {
@@ -165,7 +178,7 @@ impl Screen {
             usize::from(send_width) + 1,
             (&full, &short),
             &labels,
-            self.whole.is_none(),
+            (self.whole.is_none(), self.settings.now.whitespace != crate::config::review::Whitespace::Show),
         );
         let buf = frame.buffer_mut();
         buf.set_span(
@@ -194,6 +207,7 @@ impl Screen {
                     ]
                 }
                 Chip::Wrap => vec![(" Wrap ".to_owned(), if self.settings.now.wrap { on } else { off })],
+                Chip::Whitespace => vec![(NO_WS.to_owned(), chips::chips().whitespace_hidden)],
                 Chip::Settings(label) | Chip::Review(label) => vec![(label.clone(), menu)],
             };
             for (index, (text, style)) in parts.into_iter().enumerate() {
@@ -202,6 +216,7 @@ impl Screen {
                 match &chip {
                     Chip::Layout { .. } => self.geometry.layout_switch.push((rect, index == 0)),
                     Chip::Wrap => self.geometry.wrap_switch = Some(rect),
+                    Chip::Whitespace => self.geometry.whitespace_chip = Some(rect),
                     Chip::Settings(_) => self.geometry.settings_button = Some(rect),
                     Chip::Review(_) => self.geometry.review_button = Some(rect),
                 }
@@ -229,7 +244,7 @@ mod tests {
     const SENDS: [usize; 2] = [17, 30];
 
     fn shown(width: usize, send: usize) -> (String, Vec<Chip>) {
-        arrange(width, send, (FULL, SHORT), &labels(), true)
+        arrange(width, send, (FULL, SHORT), &labels(), (true, false))
     }
 
     /// Each chip's rank: what stays longest first.
@@ -239,6 +254,7 @@ mod tests {
             Chip::Review(_) => 1,
             Chip::Settings(_) => 2,
             Chip::Wrap => 3,
+            Chip::Whitespace => usize::MAX,
         }
     }
 
@@ -289,7 +305,7 @@ mod tests {
         }
         // At 80 with a long Send label the title keeps its counts: the switch shrinks first.
         let (full, short) = (" Uncommitted · 1 file +7 −3 · 0/1 viewed ", " Uncommitted · 1 file +7 −3 ");
-        let (title, chips) = arrange(80, 30, (full, short), &labels(), true);
+        let (title, chips) = arrange(80, 30, (full, short), &labels(), (true, false));
         assert_eq!(title, short);
         assert_eq!(chips, [Chip::Layout { compact: true }, Chip::Review(" Review ▾ ".into())]);
         let (_, chips) = shown(120, 17);
@@ -298,9 +314,29 @@ mod tests {
 
     #[test]
     fn the_whole_file_view_has_no_layout_switch() {
-        let (_, chips) = arrange(200, 24, (FULL, FULL), &labels(), false);
+        let (_, chips) = arrange(200, 24, (FULL, FULL), &labels(), (false, false));
         assert!(!chips.iter().any(|c| matches!(c, Chip::Layout { .. })), "{chips:?}");
         assert!(chips.contains(&Chip::Wrap));
+        let (_, chips) = arrange(200, 24, (FULL, FULL), &labels(), (false, true));
+        assert_eq!(chips.get(1), Some(&Chip::Whitespace), "the whole file's diff hides it: {chips:?}");
+    }
+
+    #[test]
+    fn hidden_whitespace_shows_beside_wrap_and_stays_longest_down_to_60_columns() {
+        let hidden = |width, send| arrange(width, send, (FULL, SHORT), &labels(), (true, true));
+        let (_, chips) = hidden(200, 17);
+        assert_eq!(chips.get(1..3), Some(&[Chip::Wrap, Chip::Whitespace][..]), "{chips:?}");
+        for send in SENDS {
+            for width in 60..=200 {
+                let (title, chips) = hidden(width, send);
+                let used = title.width() + chips.iter().map(|c| c.width() + 1).sum::<usize>() + send;
+                assert!(used <= width, "{width}: {title:?} {chips:?}");
+                assert!(chips.contains(&Chip::Whitespace), "{width}/{send}: {chips:?}");
+            }
+            // At 60 columns the layout switch stays beside it.
+            let (_, chips) = hidden(60, send);
+            assert!(chips.iter().any(|c| matches!(c, Chip::Layout { .. })), "{send}: {chips:?}");
+        }
     }
 
     #[test]

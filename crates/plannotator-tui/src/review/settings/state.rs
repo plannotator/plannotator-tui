@@ -15,7 +15,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
 
-use crate::config::review::{Background, DiffTheme, Layout, ReviewConfig, SplitShare};
+use crate::config::review::{
+    Background, DiffTheme, InlineChanges, Layout, ReviewConfig, SplitShare, TabWidth, Whitespace,
+};
 
 /// The state file in the data folder `data_dir`.
 pub(crate) fn path(data_dir: &Path) -> PathBuf {
@@ -23,7 +25,17 @@ pub(crate) fn path(data_dir: &Path) -> PathBuf {
 }
 
 /// The keys the file holds, as `[review]` names them.
-const KEYS: [&str; 6] = ["layout", "wrap", "line_numbers", "theme", "background", "split_ratio"];
+const KEYS: [&str; 9] = [
+    "layout",
+    "wrap",
+    "line_numbers",
+    "theme",
+    "background",
+    "split_ratio",
+    "whitespace",
+    "tab_width",
+    "inline_changes",
+];
 
 /// `settings` with the file's good keys over it, and what was wrong with the file, if
 /// anything: one line for the footer.
@@ -48,6 +60,9 @@ pub(in crate::review) fn load(path: &Path, settings: ReviewConfig) -> (ReviewCon
             "theme" => value.try_into::<DiffTheme>().map(|v| out.theme = v).is_ok(),
             "background" => value.try_into::<Background>().map(|v| out.background = v).is_ok(),
             "split_ratio" => value.try_into::<SplitShare>().map(|v| out.split_ratio = v).is_ok(),
+            "whitespace" => value.try_into::<Whitespace>().map(|v| out.whitespace = v).is_ok(),
+            "tab_width" => value.try_into::<TabWidth>().map(|v| out.tab_width = v).is_ok(),
+            "inline_changes" => value.try_into::<InlineChanges>().map(|v| out.inline_changes = v).is_ok(),
             _ => false,
         };
         if !taken {
@@ -77,6 +92,17 @@ pub(super) fn changes(before: ReviewConfig, now: ReviewConfig) -> Vec<(&'static 
         Background::Terminal => "terminal",
         Background::Theme => "theme",
     };
+    let whitespace = |whitespace| match whitespace {
+        Whitespace::Show => "show",
+        Whitespace::IgnoreAll => "ignore-all",
+        Whitespace::IgnoreChange => "ignore-change",
+    };
+    let inline_changes = |changes| match changes {
+        InlineChanges::Word => "word",
+        InlineChanges::WordAlt => "word-alt",
+        InlineChanges::Char => "char",
+        InlineChanges::None => "none",
+    };
     let mut out = Vec::new();
     if before.layout != now.layout {
         out.push(("layout", text(layout(now.layout))));
@@ -97,16 +123,25 @@ pub(super) fn changes(before: ReviewConfig, now: ReviewConfig) -> Vec<(&'static 
         let hundredths = (now.split_ratio.permille() + 5) / 10;
         out.push(("split_ratio", toml::Value::Float(f64::from(hundredths) / 100.0)));
     }
+    if before.whitespace != now.whitespace {
+        out.push(("whitespace", text(whitespace(now.whitespace))));
+    }
+    if before.tab_width != now.tab_width {
+        out.push(("tab_width", toml::Value::Integer(i64::from(now.tab_width.get()))));
+    }
+    if before.inline_changes != now.inline_changes {
+        out.push(("inline_changes", text(inline_changes(now.inline_changes))));
+    }
     out
 }
 
 /// Write `changes` onto the file as it is now: its other keys, good or not, stay. A file
-/// that does not parse is replaced: it was ignored anyway.
+/// that does not parse, or cannot be read, is replaced: it was ignored anyway.
 pub(super) fn write(path: &Path, changes: &[(&str, toml::Value)]) -> Result<()> {
     if changes.is_empty() {
         return Ok(());
     }
-    let mut table = read_table(path)?;
+    let mut table = read_table(path);
     for (key, value) in changes {
         table.insert((*key).to_owned(), value.clone());
     }
@@ -115,7 +150,7 @@ pub(super) fn write(path: &Path, changes: &[(&str, toml::Value)]) -> Result<()> 
 
 /// Drop every setting from the file, and the file when nothing else is left in it.
 pub(super) fn forget(path: &Path) -> Result<()> {
-    let mut table = read_table(path)?;
+    let mut table = read_table(path);
     for key in KEYS {
         table.remove(key);
     }
@@ -130,13 +165,10 @@ pub(super) fn forget(path: &Path) -> Result<()> {
     replace(path, &toml::to_string(&table)?)
 }
 
-/// The file's table: empty when it is missing or does not parse.
-fn read_table(path: &Path) -> Result<toml::Table> {
-    match std::fs::read_to_string(path) {
-        Ok(text) => Ok(text.parse::<toml::Table>().unwrap_or_default()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(toml::Table::new()),
-        Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
-    }
+/// The file's table: empty when it is missing, cannot be read (not UTF-8, say) or does not
+/// parse, so writing replaces it. Whatever stands in the way of the rename still fails it.
+fn read_table(path: &Path) -> toml::Table {
+    std::fs::read_to_string(path).ok().and_then(|text| text.parse::<toml::Table>().ok()).unwrap_or_default()
 }
 
 /// Put `text` at `path` all at once: written to a temporary file beside it (one per process,
@@ -189,11 +221,16 @@ mod tests {
             theme: DiffTheme::Light,
             background: Background::Theme,
             split_ratio: SplitShare::from_permille(617),
+            whitespace: Whitespace::IgnoreChange,
+            tab_width: TabWidth::new(8),
+            inline_changes: InlineChanges::WordAlt,
             ..config
         };
         write(&file, &changes(config, now)).expect("written");
         let text = std::fs::read_to_string(&file).expect("read");
         assert!(text.contains("split_ratio = 0.62"), "two decimals: {text}");
+        assert!(text.contains("whitespace = \"ignore-change\""), "{text}");
+        assert!(text.contains("tab_width = 8") && text.contains("inline_changes = \"word-alt\""), "{text}");
         assert!(!text.contains("wrap"), "an unchanged key is not written: {text}");
         let (read, notice) = load(&file, config);
         assert_eq!(notice, None);
@@ -212,16 +249,33 @@ mod tests {
         std::fs::create_dir_all(file.parent().expect("dir")).expect("dir");
         std::fs::write(
             &file,
-            "layout = \"diagonal\"\nwrap = true\nsplit_ratio = 5.0\ntab_width = 8\ntheme = \"dark\"\n",
+            "layout = \"diagonal\"\nwrap = true\nsplit_ratio = 5.0\ntab_size = 8\ntheme = \"dark\"\n\
+             whitespace = \"hide\"\ntab_width = 0\ninline_changes = \"char\"\n",
         )
         .expect("write");
         let (read, notice) = load(&file, ReviewConfig::DEFAULT);
-        assert_eq!(read, ReviewConfig { wrap: true, theme: DiffTheme::Dark, ..ReviewConfig::DEFAULT });
+        assert_eq!(
+            read,
+            ReviewConfig {
+                wrap: true,
+                theme: DiffTheme::Dark,
+                inline_changes: InlineChanges::Char,
+                ..ReviewConfig::DEFAULT
+            }
+        );
         let notice = notice.expect("a notice");
-        for key in ["layout", "split_ratio", "tab_width"] {
+        for key in ["layout", "split_ratio", "tab_size", "whitespace", "tab_width"] {
             assert!(notice.contains(key), "{notice}");
         }
-        assert!(!notice.contains("wrap"), "{notice}");
+        assert!(!notice.contains("wrap") && !notice.contains("inline_changes"), "{notice}");
+        for text in
+            ["tab_width = 17\n", "tab_width = \"8\"\n", "whitespace = 1\n", "inline_changes = \"words\"\n"]
+        {
+            std::fs::write(&file, text).expect("write");
+            let (read, notice) = load(&file, ReviewConfig::DEFAULT);
+            assert_eq!(read, ReviewConfig::DEFAULT, "{text:?}");
+            assert!(notice.is_some(), "{text:?}");
+        }
 
         std::fs::write(&file, "wrap = [true\n").expect("write");
         let (read, notice) = load(&file, ReviewConfig::DEFAULT);
@@ -252,6 +306,28 @@ mod tests {
         let leftovers: Vec<_> =
             std::fs::read_dir(dir).expect("dir").flatten().map(|e| e.file_name()).collect();
         assert!(leftovers.is_empty(), "no temporary file left: {leftovers:?}");
+        cleanup(&file);
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_read_is_named_once_and_replaced_by_a_write_or_a_reset() {
+        let file = scratch("unreadable");
+        std::fs::create_dir_all(file.parent().expect("dir")).expect("dir");
+        let not_utf8 = b"wrap = true\nlayout = \"\xff\xfe\"\n";
+        std::fs::write(&file, not_utf8).expect("write");
+        let (read, notice) = load(&file, ReviewConfig::DEFAULT);
+        assert_eq!(read, ReviewConfig::DEFAULT);
+        assert!(notice.expect("a notice").contains("could not read"));
+        // A write replaces it with the keys changed.
+        write(&file, &[("tab_width", toml::Value::Integer(8))]).expect("written over it");
+        assert_eq!(
+            load(&file, ReviewConfig::DEFAULT),
+            (ReviewConfig { tab_width: TabWidth::new(8), ..ReviewConfig::DEFAULT }, None)
+        );
+        // Reset forgets it whole.
+        std::fs::write(&file, not_utf8).expect("write");
+        forget(&file).expect("forgotten");
+        assert!(!file.exists(), "nothing readable was left to keep");
         cleanup(&file);
     }
 

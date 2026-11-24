@@ -105,6 +105,9 @@ pub(super) fn open(args: ReviewArgs) -> Result<()> {
         screen.enable_clipboard();
         screen.set_copy_on_select(session.config.ui.copy_on_select);
         screen.start_pi_link();
+        if let Some(notice) = session.config_notice {
+            screen.add_notice(notice);
+        }
         let events = read_events(wake)?;
         let result = event_loop(terminal, &mut screen, &ready, &events);
         // Join the viewer's workers either way, and report their failure only when the

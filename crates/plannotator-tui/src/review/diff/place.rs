@@ -131,9 +131,17 @@ impl Diff {
                     self.engine.execute(Command::NextFile)?;
                     Command::PreviousFile
                 }
-                // The only file: up to its first row.
+                // The only file: up to its first row. The viewer reports a move up from the
+                // top as a redraw, so stop once the cursor stays where it is.
                 std::cmp::Ordering::Equal => {
-                    while self.engine.execute(Command::Up)? != InputEffect::Ignored {}
+                    let mut before = self.cursor_row();
+                    while self.engine.execute(Command::Up)? != InputEffect::Ignored {
+                        let now = self.cursor_row();
+                        if now == before {
+                            break;
+                        }
+                        before = now;
+                    }
                     break;
                 }
             };

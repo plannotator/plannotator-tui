@@ -24,6 +24,12 @@ pub(crate) struct ReviewConfig {
     pub(crate) background: Background,
     /// The old side's share of a split row, from 0.1 to 0.9; the new side takes the rest.
     pub(crate) split_ratio: SplitShare,
+    /// Changes that only touch whitespace: shown, or hidden as `git diff -w` or `-b` hide them.
+    pub(crate) whitespace: Whitespace,
+    /// How many columns a tab advances to, from 1 to 16.
+    pub(crate) tab_width: TabWidth,
+    /// How the changed text inside a changed line is marked, by Pierre's names.
+    pub(crate) inline_changes: InlineChanges,
 }
 
 impl ReviewConfig {
@@ -35,6 +41,9 @@ impl ReviewConfig {
         theme: DiffTheme::Auto,
         background: Background::Terminal,
         split_ratio: SplitShare::EVEN,
+        whitespace: Whitespace::Show,
+        tab_width: TabWidth::DEFAULT,
+        inline_changes: InlineChanges::Word,
     };
 }
 
@@ -71,6 +80,76 @@ pub(crate) enum Background {
     #[default]
     Terminal,
     Theme,
+}
+
+/// `[review] whitespace`: what `git diff` shows (`show`), `-w` (`ignore-all`) or `-b`
+/// (`ignore-change`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum Whitespace {
+    #[default]
+    Show,
+    /// Lines equal once all whitespace is removed match, as `git diff -w`.
+    IgnoreAll,
+    /// A change in the amount of whitespace, and whitespace at a line's end, match, as
+    /// `git diff -b`.
+    IgnoreChange,
+}
+
+/// `[review] inline_changes`: the changed text inside a changed line, by the names of
+/// Pierre's `lineDiffType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum InlineChanges {
+    /// Changed words.
+    #[default]
+    Word,
+    /// Changed words, two changes one character apart marked as one.
+    WordAlt,
+    /// Changed characters.
+    Char,
+    /// No marks inside lines; the lines' colours still show the change.
+    None,
+}
+
+/// `[review] tab_width`: the columns a tab advances to, from 1 to 16.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub(crate) struct TabWidth(u8);
+
+#[cfg_attr(not(unix), allow(dead_code, reason = "only the code review, Unix-only, changes them"))]
+impl TabWidth {
+    pub(crate) const DEFAULT: Self = Self(4);
+    pub(crate) const MIN: u8 = 1;
+    pub(crate) const MAX: u8 = 16;
+
+    /// `columns`, kept within 1 and 16.
+    pub(crate) fn new(columns: u8) -> Self {
+        Self(columns.clamp(Self::MIN, Self::MAX))
+    }
+
+    pub(crate) fn get(self) -> u8 {
+        self.0
+    }
+}
+
+impl Default for TabWidth {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+impl<'de> Deserialize<'de> for TabWidth {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let columns = i64::deserialize(deserializer)?;
+        match u8::try_from(columns) {
+            Ok(columns) if (Self::MIN..=Self::MAX).contains(&columns) => Ok(Self(columns)),
+            _ => Err(serde::de::Error::custom(format!(
+                "tab_width {columns} is out of range; expected {} to {} columns",
+                Self::MIN,
+                Self::MAX
+            ))),
+        }
+    }
 }
 
 /// The old side's share of a split row, in thousandths, written as a fraction: `0.5`.
@@ -157,13 +236,51 @@ mod tests {
                 theme: DiffTheme::Auto,
                 background: Background::Terminal,
                 split_ratio: SplitShare::from_permille(500),
+                whitespace: Whitespace::Show,
+                tab_width: TabWidth::new(4),
+                inline_changes: InlineChanges::Word,
             }
         );
     }
 
     #[test]
+    fn configs_written_for_0_11_2_load_unchanged_and_draw_whitespace_tabs_and_changes_as_before() {
+        // [review] as 0.11.2 read it, with every key it knew; the keys added since default.
+        let table = [
+            ("[review]\n", ReviewConfig::DEFAULT),
+            (
+                "[review]\nlayout = \"split\"\nwrap = true\n",
+                ReviewConfig { layout: Layout::Split, wrap: true, ..ReviewConfig::DEFAULT },
+            ),
+            (
+                "[ui]\ncopy_on_select = false\n\n[review]\nline_numbers = false\ntheme = \"dark\"\nbackground = \"theme\"\nsplit_ratio = 0.62\n",
+                ReviewConfig {
+                    line_numbers: false,
+                    theme: DiffTheme::Dark,
+                    background: Background::Theme,
+                    split_ratio: SplitShare::from_permille(620),
+                    ..ReviewConfig::DEFAULT
+                },
+            ),
+            (
+                "[review]\nlayout = \"unified\"\nwrap = false\nline_numbers = true\ntheme = \"light\"\nbackground = \"terminal\"\nsplit_ratio = 0.5\n",
+                ReviewConfig { layout: Layout::Unified, theme: DiffTheme::Light, ..ReviewConfig::DEFAULT },
+            ),
+        ];
+        for (text, review) in table {
+            let config = Config::parse(text).unwrap_or_else(|e| panic!("{text:?} loads: {e}"));
+            assert_eq!(config.review, review, "{text:?}");
+            assert_eq!(
+                (config.review.whitespace, config.review.tab_width.get(), config.review.inline_changes),
+                (Whitespace::Show, 4, InlineChanges::Word),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
     fn every_review_setting_is_read_and_roundtrips() {
-        let text = "[review]\nlayout = \"unified\"\nwrap = true\nline_numbers = false\ntheme = \"light\"\nbackground = \"theme\"\nsplit_ratio = 0.62\n";
+        let text = "[review]\nlayout = \"unified\"\nwrap = true\nline_numbers = false\ntheme = \"light\"\nbackground = \"theme\"\nsplit_ratio = 0.62\nwhitespace = \"ignore-all\"\ntab_width = 8\ninline_changes = \"word-alt\"\n";
         let config = Config::parse(text).expect("parses");
         let review = config.review;
         assert_eq!(review.layout, Layout::Unified);
@@ -171,10 +288,39 @@ mod tests {
         assert_eq!((review.theme, review.background), (DiffTheme::Light, Background::Theme));
         assert_eq!(review.split_ratio.permille(), 620);
         assert_eq!(review.split_ratio.to_string(), "62 : 38");
+        assert_eq!(review.whitespace, Whitespace::IgnoreAll);
+        assert_eq!(review.tab_width.get(), 8);
+        assert_eq!(review.inline_changes, InlineChanges::WordAlt);
         let shown = config.to_toml().expect("toml");
         assert!(shown.contains("[review]\nlayout = \"unified\""), "{shown}");
         assert!(shown.contains("split_ratio = 0.62\n"), "{shown}");
+        assert!(
+            shown.contains("whitespace = \"ignore-all\"\ntab_width = 8\ninline_changes = \"word-alt\"\n"),
+            "{shown}"
+        );
         assert_eq!(Config::parse(&shown).expect("reparses"), config);
+        // Every value of the three by its name in the file, and any width from 1 to 16.
+        for (name, value) in [
+            ("show", Whitespace::Show),
+            ("ignore-all", Whitespace::IgnoreAll),
+            ("ignore-change", Whitespace::IgnoreChange),
+        ] {
+            let config = Config::parse(&format!("[review]\nwhitespace = \"{name}\"\n")).expect("parses");
+            assert_eq!(config.review.whitespace, value, "{name}");
+        }
+        for (name, value) in [
+            ("word", InlineChanges::Word),
+            ("word-alt", InlineChanges::WordAlt),
+            ("char", InlineChanges::Char),
+            ("none", InlineChanges::None),
+        ] {
+            let config = Config::parse(&format!("[review]\ninline_changes = \"{name}\"\n")).expect("parses");
+            assert_eq!(config.review.inline_changes, value, "{name}");
+        }
+        for width in 1..=16 {
+            let config = Config::parse(&format!("[review]\ntab_width = {width}\n")).expect("parses");
+            assert_eq!(config.review.tab_width.get(), width);
+        }
     }
 
     #[test]
@@ -184,7 +330,14 @@ mod tests {
             ("[review]\nsplit_ratio = 0.95\n", "0.95"),
             ("[review]\nsplit_ratio = 0.05\n", "0.05"),
             ("[review]\nbackground = \"black\"\n", "black"),
-            ("[review]\ntab_width = 8\n", "tab_width"),
+            ("[review]\ntab_size = 8\n", "tab_size"),
+            ("[review]\ntab_width = 0\n", "tab_width 0"),
+            ("[review]\ntab_width = 17\n", "tab_width 17"),
+            ("[review]\ntab_width = -4\n", "tab_width -4"),
+            ("[review]\ntab_width = \"8\"\n", "8"),
+            ("[review]\nwhitespace = \"hide\"\n", "hide"),
+            ("[review]\nwhitespace = true\n", "wanted string"),
+            ("[review]\ninline_changes = \"words\"\n", "words"),
         ] {
             let err = Config::parse(text).expect_err("rejected");
             assert!(err.to_string().contains(named), "{text:?}: {err}");

@@ -590,6 +590,9 @@ fn run_review(build: impl FnOnce(usize) -> Result<App>) -> Result<Option<Decisio
         app.ui = session.config.ui;
         app.start_notes_rail();
         app.editor = crate::editor::from_env(|key| std::env::var(key).ok());
+        if let Some(notice) = session.config_notice {
+            app.add_notice(notice);
+        }
         event_loop(terminal, app)
     })
 }
@@ -597,6 +600,9 @@ fn run_review(build: impl FnOnce(usize) -> Result<App>) -> Result<Option<Decisio
 /// What a screen learns while the terminal is being taken over.
 pub(crate) struct Session {
     pub(crate) config: Config,
+    /// The config file could not be loaded and the defaults are in force: the line that
+    /// says so, for the screen's footer.
+    pub(crate) config_notice: Option<String>,
     /// Whether the terminal reports Shift+Enter distinctly (kitty keyboard protocol).
     pub(crate) shift_enter: bool,
 }
@@ -610,8 +616,8 @@ pub(crate) fn with_terminal<T>(
     // Settle the palette before the screen is ours: the background-colour query talks to
     // the terminal directly, and it must not race the alternate screen or the event loop.
     // A config that fails to parse never kept the plain TUI from starting; it still does
-    // not. `plannotator-tui config` is where the error is reported.
-    let config = Config::load().unwrap_or_default();
+    // not, but the screen says so in its footer. `plannotator-tui config` reports it too.
+    let (config, config_notice) = Config::load_for_screen(&Config::path());
     crate::theme::install(
         crate::theme::resolve(|key| std::env::var(key).ok(), config.ui.theme, crate::theme::detect)?,
         &config.colors,
@@ -637,7 +643,7 @@ pub(crate) fn with_terminal<T>(
     let shift_enter = ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
     pushed.store(shift_enter, std::sync::atomic::Ordering::Release);
     claim_input(shift_enter);
-    let result = run(&mut terminal, Session { config, shift_enter });
+    let result = run(&mut terminal, Session { config, config_notice, shift_enter });
     release_input(shift_enter);
     ratatui::restore();
     result

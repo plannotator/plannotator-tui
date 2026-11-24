@@ -503,6 +503,14 @@ impl App {
         self.status = Some(status);
     }
 
+    /// Say `notice` in the footer ahead of what it says already, as the screen opens.
+    pub(crate) fn add_notice(&mut self, notice: String) {
+        self.status = Some(match self.status.take() {
+            Some(status) => format!("{notice} \u{b7} {status}"),
+            None => notice,
+        });
+    }
+
     /// Mark this as a terminal review whose wrapper broke tokens at `breaks` (sorted).
     pub(crate) fn set_terminal_breaks(&mut self, breaks: Vec<usize>) {
         self.terminal_breaks = Some(breaks);

@@ -1,5 +1,5 @@
 //! The diff's settings: what they are now, changing them from the settings menu (`,`), the
-//! header's switches, `u`, `w`, `(`/`)` and the line between a split diff's sides, and
+//! header's switches, `u`, `w`, `W`, `(`/`)` and the line between a split diff's sides, and
 //! remembering the person's choices for the next review.
 //!
 //! Three layers: the defaults, `[review]` in the config file (the person's, never written),
@@ -16,10 +16,13 @@
 mod auto;
 mod menu;
 pub(crate) mod state;
+mod whitespace;
 
 use std::path::PathBuf;
 
-use crate::config::review::{Background, DiffTheme, Layout, ReviewConfig, SplitShare};
+use crate::config::review::{
+    Background, DiffTheme, InlineChanges, Layout, ReviewConfig, SplitShare, TabWidth, Whitespace,
+};
 use crate::theme::{Theme, theme};
 
 use super::{Mode, Screen};
@@ -45,6 +48,12 @@ pub(crate) struct Settings {
     /// What `auto` is for the terminal drawn last (`auto`): split or not; `None` before
     /// the first frame.
     auto_split: Option<bool>,
+    /// The whitespace the viewers draw with: `now`'s once the change is taken
+    /// (`whitespace`), which waits for a frame or another key.
+    shown_whitespace: Whitespace,
+    /// How `W` hides whitespace: as it was hidden last in this review, else as the remembered
+    /// choice or `[review]` hides it, else as `git diff -w`.
+    hide_as: Whitespace,
 }
 
 impl Default for Settings {
@@ -57,7 +66,21 @@ impl Settings {
     /// `config` (the config file's `[review]`) with the choices remembered at `path` over it.
     pub(crate) fn load(config: ReviewConfig, path: Option<PathBuf>) -> Self {
         let (now, notice) = path.as_deref().map_or((config, None), |path| state::load(path, config));
-        Self { now, config, remembered: now, path, notice, failed: false, auto_split: None }
+        let hide_as = [now.whitespace, config.whitespace]
+            .into_iter()
+            .find(|w| *w != Whitespace::Show)
+            .unwrap_or(Whitespace::IgnoreAll);
+        Self {
+            now,
+            config,
+            remembered: now,
+            path,
+            notice,
+            failed: false,
+            auto_split: None,
+            shown_whitespace: now.whitespace,
+            hide_as,
+        }
     }
 
     /// Whether choices are remembered for the next review.
@@ -78,6 +101,9 @@ pub(super) enum Row {
     SplitRatio,
     Wrap,
     LineNumbers,
+    Whitespace,
+    TabWidth,
+    InlineChanges,
     Theme,
     Background,
     /// Forget the remembered choices: back to the config file's values and the defaults.
@@ -85,8 +111,21 @@ pub(super) enum Row {
 }
 
 /// The menu's rows, in display order.
-pub(super) const ROWS: [Row; 7] =
-    [Row::Layout, Row::SplitRatio, Row::Wrap, Row::LineNumbers, Row::Theme, Row::Background, Row::Reset];
+pub(super) const ROWS: [Row; 10] = [
+    Row::Layout,
+    Row::SplitRatio,
+    Row::Wrap,
+    Row::LineNumbers,
+    Row::Whitespace,
+    Row::TabWidth,
+    Row::InlineChanges,
+    Row::Theme,
+    Row::Background,
+    Row::Reset,
+];
+
+/// The tab widths the menu steps through; the config file can set any from 1 to 16.
+const TAB_WIDTHS: [u8; 3] = [2, 4, 8];
 
 impl Row {
     pub(super) fn label(self) -> &'static str {
@@ -95,6 +134,9 @@ impl Row {
             Self::SplitRatio => "Split ratio",
             Self::Wrap => "Wrap",
             Self::LineNumbers => "Line numbers",
+            Self::Whitespace => "Whitespace",
+            Self::TabWidth => "Tab width",
+            Self::InlineChanges => "Changed text",
             Self::Theme => "Colors",
             Self::Background => "Background",
             Self::Reset => "Reset to defaults",
@@ -125,8 +167,30 @@ fn clean_step(from: SplitShare, right: bool) -> SplitShare {
     SplitShare::from_permille(if right { rounded + SPLIT_STEP } else { rounded - SPLIT_STEP })
 }
 
+/// The menu's tab width after `now`: the next of 2, 4 and 8 up or down, so a width the config
+/// file set between them steps to its neighbours.
+fn tab_step(now: TabWidth, back: bool) -> TabWidth {
+    let now = now.get();
+    let next = if back {
+        TAB_WIDTHS.iter().rev().find(|&&w| w < now).or(TAB_WIDTHS.last())
+    } else {
+        TAB_WIDTHS.iter().find(|&&w| w > now).or(TAB_WIDTHS.first())
+    };
+    TabWidth::new(next.copied().unwrap_or(now))
+}
+
 fn on_off(on: bool) -> &'static str {
     if on { "on" } else { "off" }
+}
+
+/// The whitespace setting as the menu, the footer and the help name it: plain words, then the
+/// `git diff` option it matches.
+fn whitespace_label(whitespace: Whitespace) -> &'static str {
+    match whitespace {
+        Whitespace::Show => "show",
+        Whitespace::IgnoreAll => "hide (like git -w)",
+        Whitespace::IgnoreChange => "hide amount changes (git -b)",
+    }
 }
 
 /// Whether the app's own palette is the light one, which `auto` colours follow.
@@ -198,6 +262,15 @@ impl Screen {
             Row::SplitRatio => format!("{} \u{b7} when split", now.split_ratio),
             Row::Wrap => on_off(now.wrap).to_owned(),
             Row::LineNumbers => on_off(now.line_numbers).to_owned(),
+            Row::Whitespace => whitespace_label(now.whitespace).to_owned(),
+            Row::TabWidth => format!("{} columns", now.tab_width.get()),
+            Row::InlineChanges => match now.inline_changes {
+                InlineChanges::Word => "words",
+                InlineChanges::WordAlt => "words, joined",
+                InlineChanges::Char => "characters",
+                InlineChanges::None => "off",
+            }
+            .to_owned(),
             Row::Theme => match now.theme {
                 DiffTheme::Auto => format!("auto \u{b7} {}", if light() { "light" } else { "dark" }),
                 DiffTheme::Dark => "dark".to_owned(),
@@ -232,6 +305,16 @@ impl Screen {
             }
             Row::Wrap => now.wrap = !now.wrap,
             Row::LineNumbers => now.line_numbers = !now.line_numbers,
+            Row::Whitespace => {
+                let order = [Whitespace::Show, Whitespace::IgnoreAll, Whitespace::IgnoreChange];
+                now.whitespace = cycle(&order, now.whitespace, back);
+            }
+            Row::TabWidth => now.tab_width = tab_step(now.tab_width, back),
+            Row::InlineChanges => {
+                let order =
+                    [InlineChanges::Word, InlineChanges::WordAlt, InlineChanges::Char, InlineChanges::None];
+                now.inline_changes = cycle(&order, now.inline_changes, back);
+            }
             Row::Theme => {
                 now.theme = cycle(&[DiffTheme::Auto, DiffTheme::Dark, DiffTheme::Light], now.theme, back);
             }
@@ -241,7 +324,10 @@ impl Screen {
             Row::Reset => {}
         }
         self.settings_changed();
-        self.status = Some(format!("{} {}", row.label().to_lowercase(), self.setting_value(row)));
+        self.status = Some(match row {
+            Row::Whitespace => self.whitespace_status(),
+            _ => format!("{} {}", row.label().to_lowercase(), self.setting_value(row)),
+        });
     }
 
     /// The split ratio one step further, in clean steps: from the ratio drawn (which a narrow
@@ -306,7 +392,7 @@ impl Screen {
 
 #[cfg(test)]
 mod tests {
-    use super::{SplitShare, clean_step, cycle};
+    use super::{SplitShare, TabWidth, clean_step, cycle, tab_step};
 
     #[test]
     fn the_split_keys_step_by_clean_twentieths() {
@@ -316,6 +402,15 @@ mod tests {
         assert_eq!((step(208, true), step(208, false)), (250, 150));
         assert_eq!((step(575, true), step(574, true)), (650, 600), "half way rounds up");
         assert_eq!((step(900, true), step(100, false)), (900, 100), "within the limits");
+    }
+
+    #[test]
+    fn the_tab_width_steps_through_2_4_and_8_and_a_width_between_steps_to_its_neighbours() {
+        let step = |from, back| tab_step(TabWidth::new(from), back).get();
+        assert_eq!((step(2, false), step(4, false), step(8, false)), (4, 8, 2));
+        assert_eq!((step(2, true), step(4, true), step(8, true)), (8, 2, 4));
+        assert_eq!((step(3, false), step(3, true)), (4, 2));
+        assert_eq!((step(16, false), step(16, true), step(1, true)), (2, 8, 8));
     }
 
     #[test]

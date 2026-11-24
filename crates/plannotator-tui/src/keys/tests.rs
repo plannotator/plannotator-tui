@@ -317,3 +317,29 @@ fn the_settings_and_split_keys_yield_to_an_older_config_that_gave_them_away() {
     let keymap = parse("toggle-layout = [\"(\"]\n").expect("loads");
     assert_eq!(keymap.action(&open, DIFF), Some(ToggleLayout), "the user's meaning stays");
 }
+
+#[test]
+fn the_whitespace_key_is_shift_w_and_yields_to_an_older_config_that_gave_it_away() {
+    let shift_w = press(KeyCode::Char('W'), KeyModifiers::SHIFT);
+    let keymap = Keymap::default();
+    assert_eq!(keymap.action(&shift_w, DIFF), Some(ToggleWhitespace));
+    assert_eq!(keymap.action(&shift_w, FILES), None, "the diff's key, as wrap is");
+    // (config, `toggle-whitespace`)
+    let table = [
+        ("", "W"),
+        ("toggle-files = [\"W\"]\n", ""),
+        ("next-hunk = [\"W\"]\n", ""),
+        ("send = [\"W\"]\n", ""),
+        // `W` in the document screen only: the code review keeps it.
+        ("word-forward = [\"W\"]\n", "W"),
+        ("toggle-whitespace = [\"ctrl+w\"]\n", "ctrl+w"),
+        ("toggle-whitespace = []\n", ""),
+    ];
+    for (config, key) in table {
+        let keymap = parse(config).unwrap_or_else(|err| panic!("{config:?} loads: {err}"));
+        assert_eq!(keymap.check(), Ok(()), "{config:?}");
+        assert_eq!(keymap.hint(ToggleWhitespace), key, "toggle-whitespace in {config:?}");
+    }
+    let keymap = parse("toggle-files = [\"W\"]\n").expect("loads");
+    assert_eq!(keymap.action(&shift_w, DIFF), Some(ToggleFiles), "the user's meaning stays");
+}

@@ -69,6 +69,11 @@ impl Screen {
         if event == Event::FocusLost {
             self.dividers.unlight();
         }
+        // A waiting whitespace change is taken before anything that reads the diff; a burst
+        // of whitespace changes waits for the frame (`settings::whitespace`).
+        if !self.changes_whitespace_only(&event) {
+            self.take_whitespace()?;
+        }
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => self.key(key)?,
             Event::Paste(text) if matches!(self.mode, Mode::Compose(_)) => self.compose.insert_text(&text),
@@ -251,6 +256,10 @@ impl Screen {
             }
             _ => {}
         }
+        if self.focus != Focus::Diff && self.whitespace_key(&key) {
+            self.toggle_whitespace();
+            return Ok(());
+        }
         match self.focus {
             Focus::Diff => self.diff_key(key),
             Focus::Notes => self.notes_key(key),
@@ -330,6 +339,10 @@ impl Screen {
                 self.toggle_wrap();
                 return Ok(());
             }
+            Action::ToggleWhitespace => {
+                self.toggle_whitespace();
+                return Ok(());
+            }
             Action::SplitLeft | Action::SplitRight => {
                 self.step_split(action == Action::SplitRight);
                 return Ok(());
@@ -399,6 +412,30 @@ impl Screen {
             MenuRow::Undo => return self.undo_finish(),
         }
         Ok(())
+    }
+
+    /// A click on the header's Send button, menus, switches or chip does what it says. False
+    /// when it is on none of them.
+    fn header_click(&mut self, at: Position) -> bool {
+        let inside = |rect: Option<Rect>| rect.is_some_and(|r| r.contains(at));
+        if inside(self.geometry.send_button) {
+            self.send(false);
+        } else if inside(self.geometry.review_button) {
+            self.mode = Mode::Menu(0);
+        } else if inside(self.geometry.settings_button) {
+            self.open_settings();
+        } else if inside(self.geometry.wrap_switch) {
+            self.toggle_wrap();
+        } else if inside(self.geometry.whitespace_chip) {
+            self.toggle_whitespace();
+        } else if let Some(&(_, split)) =
+            self.geometry.layout_switch.iter().find(|(rect, _)| rect.contains(at))
+        {
+            self.pick_layout(split);
+        } else {
+            return false;
+        }
+        true
     }
 
     fn mouse(&mut self, mouse: MouseEvent) -> Result<()> {
@@ -478,26 +515,7 @@ impl Screen {
         if click || matches!(mouse.kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown) {
             self.toolbar = None;
         }
-        if click && inside(self.geometry.send_button) {
-            self.send(false);
-            return Ok(());
-        }
-        if click && inside(self.geometry.review_button) {
-            self.mode = Mode::Menu(0);
-            return Ok(());
-        }
-        if click && inside(self.geometry.settings_button) {
-            self.open_settings();
-            return Ok(());
-        }
-        if click && inside(self.geometry.wrap_switch) {
-            self.toggle_wrap();
-            return Ok(());
-        }
-        if let Some(&(_, split)) =
-            self.geometry.layout_switch.iter().find(|(rect, _)| click && rect.contains(at))
-        {
-            self.pick_layout(split);
+        if click && self.header_click(at) {
             return Ok(());
         }
         if self.geometry.rail.contains(at) {

@@ -84,6 +84,8 @@ pub(crate) enum Action {
     /// Split or unified diff.
     ToggleLayout,
     ToggleWrap,
+    /// Hide the code review's changes that only touch whitespace, or show them again.
+    ToggleWhitespace,
     /// Show the diff's file list and move to it, or close it from there.
     ToggleFiles,
     /// Filter the code review's file list by name.
@@ -143,7 +145,7 @@ use Action::{
     PreviousHunk, PreviousMatch, PreviousUnviewed, Search, Suggest, ToggleFiles, ToggleLayout, ToggleViewed,
     ToggleWrap, WholeBase, WholeFile,
 };
-use Action::{DiffSettings, SplitLeft, SplitRight};
+use Action::{DiffSettings, SplitLeft, SplitRight, ToggleWhitespace};
 use Action::{FilterFiles, FilterKinds, GoToDefinition, HideViewed, JumpBack, JumpForward};
 use Action::{NarrowColumn, NarrowFiles, NarrowNotes, ToggleNotes, WidenColumn, WidenFiles, WidenNotes};
 
@@ -259,6 +261,7 @@ pub(crate) const DIFF: &[Action] = &[
     Right,
     ToggleLayout,
     ToggleWrap,
+    ToggleWhitespace,
     ToggleFiles,
     FilterFiles,
     FilterKinds,
@@ -500,6 +503,7 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (PreviousFile, &[ch('N')]),
     (ToggleLayout, &[ch('u')]),
     (ToggleWrap, &[ch('w')]),
+    (ToggleWhitespace, &[ch('W')]),
     (ToggleFiles, &[ch('f')]),
     (FilterFiles, &[ch('/')]),
     (FilterKinds, &[ch('t')]),
@@ -533,9 +537,11 @@ const DEFAULTS: &[(Action, &[Key])] = &[
 
 /// Actions added after configs were written: `approve` (live only in a gated review), `copy`
 /// (on a waiting selection), `word-end`, `visual-line`, the code review's own, the reading
-/// column's, `toggle-notes` and search. The newest come first (`diff-settings`, `split-left`
-/// and `split-right`, then `copy-lines`), so they yield a key before an older action does.
+/// column's, `toggle-notes` and search. The newest come first (`toggle-whitespace`, then
+/// `diff-settings`, `split-left` and `split-right`, then `copy-lines`), so they yield a key
+/// before an older action does.
 const LATE: &[Action] = &[
+    ToggleWhitespace,
     DiffSettings,
     SplitLeft,
     SplitRight,
@@ -745,6 +751,7 @@ impl Action {
             Self::PreviousFile => "previous-file",
             Self::ToggleLayout => "toggle-layout",
             Self::ToggleWrap => "toggle-wrap",
+            Self::ToggleWhitespace => "toggle-whitespace",
             Self::ToggleFiles => "toggle-files",
             Self::FilterFiles => "filter-files",
             Self::FilterKinds => "filter-kinds",
