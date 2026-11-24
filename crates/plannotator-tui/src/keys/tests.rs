@@ -343,3 +343,28 @@ fn the_whitespace_key_is_shift_w_and_yields_to_an_older_config_that_gave_it_away
     let keymap = parse("toggle-files = [\"W\"]\n").expect("loads");
     assert_eq!(keymap.action(&shift_w, DIFF), Some(ToggleFiles), "the user's meaning stays");
 }
+
+#[test]
+fn pick_changes_is_p_in_the_code_review_and_yields_to_an_older_config_that_gave_it_away() {
+    let p = press(KeyCode::Char('p'), KeyModifiers::NONE);
+    let keymap = Keymap::default();
+    assert_eq!(keymap.action(&p, REVIEW_GLOBAL), Some(PickChanges));
+    assert_eq!(keymap.action(&p, PICK_CHANGES), Some(PickChanges), "again closes the picker");
+    assert_eq!(keymap.action(&p, GLOBAL), Some(PickMessage), "the document review keeps its p");
+    // (config, `pick-changes`)
+    let table = [
+        ("", "p"),
+        ("next-file = [\"p\"]\n", ""),
+        ("toggle-files = [\"p\"]\n", ""),
+        ("help = [\"p\"]\n", ""),
+        // `p` in the document screen only: the code review keeps it.
+        ("pick-message = [\"p\", \"ctrl+m\"]\n", "p"),
+        ("pick-changes = [\"ctrl+r\"]\n", "ctrl+r"),
+        ("pick-changes = []\n", ""),
+    ];
+    for (config, key) in table {
+        let keymap = parse(config).unwrap_or_else(|err| panic!("{config:?} loads: {err}"));
+        assert_eq!(keymap.check(), Ok(()), "{config:?}");
+        assert_eq!(keymap.hint(PickChanges), key, "pick-changes in {config:?}");
+    }
+}

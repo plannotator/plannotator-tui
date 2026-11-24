@@ -43,6 +43,9 @@ terminal-colorsaurus = "1.0.3"
 # Already in the tree through crossterm; polls the terminal for a hang-up (src/hangup.rs) and
 # names it for `last --stdin` (src/last/mod.rs).
 rustix = { version = "1", features = ["event", "fs", "stdio", "termios"] }
+# Already in the tree through crossterm; ends a code review cleanly on SIGHUP and SIGTERM,
+# its git commands and index copies with it (src/review/exit.rs).
+signal-hook = "0.3"
 # The diff viewer behind `plannotator-tui review` (src/review/). Unix only: its patch reader is.
 # Default features off: `dev-tty` would switch crossterm, for this whole build, to reading
 # /dev/tty, and `clipboard` is its own macOS clipboard; this app owns its input and copies.

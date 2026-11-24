@@ -38,7 +38,6 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead as _, BufReader, Read as _};
 use std::path::Path;
-use std::process::Stdio;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -382,12 +381,12 @@ enum Outcome {
 /// Run `cmd`, handing each stdout line (newline removed) to `on_line` until it returns false,
 /// git finishes, or `timeout` passes. git is stopped as soon as it is not needed.
 fn stream_lines(
-    mut cmd: std::process::Command,
+    cmd: std::process::Command,
     timeout: Duration,
     mut on_line: impl FnMut(&[u8]) -> bool,
 ) -> Result<Outcome> {
     let deadline = Instant::now() + timeout;
-    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(Error::GitMissing)?;
+    let mut child = crate::children::spawn(cmd, "grep", false)?;
     let stderr = child.stderr.take().map(|mut pipe| {
         std::thread::spawn(move || {
             let mut text = Vec::new();
@@ -428,10 +427,10 @@ fn stream_lines(
         }
     }
     if outcome == Outcome::Stopped {
-        let _ = child.kill();
+        child.kill();
     }
     drop(rx);
-    let status = child.wait().map_err(Error::GitMissing)?;
+    let status = child.wait()?;
     if let Some(reader) = reader {
         let _ = reader.join();
     }

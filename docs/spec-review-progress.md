@@ -61,6 +61,7 @@ How this app's scopes map to the browser's diff types (`Scope::diff_type`):
 |---|---|---|
 | uncommitted | `uncommitted` | `null` |
 | `--staged` | `staged` | `null` |
+| `--unstaged` | `unstaged` | `null` |
 | `--base REF` (and the default branch review) | `since-base` | the ref as the header names it, e.g. `origin/main` |
 | `--commit SHA` | `commit:<full sha>` | `null` |
 
@@ -84,6 +85,7 @@ diff type:
 |---|---|
 | `uncommitted` | `git diff HEAD`, plus each untracked file |
 | `staged` | `git diff --staged` |
+| `unstaged` | `git diff`, plus each untracked file |
 | `since-base` | `git diff <merge-base(base, HEAD)>`, plus each untracked file |
 | `commit:<sha>` | `git diff <sha>^..<sha>` (the empty tree for a root commit) |
 

@@ -4,6 +4,7 @@
 //! |---|---|---|
 //! | Uncommitted | HEAD vs working tree, untracked included | `git diff <HEAD>` on a temp index |
 //! | Staged | HEAD vs index | `git diff --cached <HEAD>` |
+//! | Unstaged | index vs working tree, untracked included | `git diff` on a temp index |
 //! | Branch | merge-base(base, HEAD) vs working tree, untracked included | `git diff <merge-base>` on a temp index |
 //! | Commit | first parent vs commit | `git diff <sha>^ <sha>` |
 //! | Pull request | merge-base(base, head) vs head | `gh pr view`, `git fetch`, `git diff <merge-base> <head>` |
@@ -108,6 +109,7 @@ pub enum Request {
         base: Option<String>,
     },
     Staged,
+    Unstaged,
     /// Against `base`, else [`DEFAULT_BASE`].
     Branch {
         base: Option<String>,
@@ -240,7 +242,7 @@ impl Repo {
             Error::NoBase { base: format!("{} ({}) of PR #{n}", view.base_ref, short(&view.base_sha)) }
         })?;
         let merge_base = self.merge_base_of(&base, &head)?;
-        let patch = Self::diff(git::command(&self.root), &[], &[&merge_base, &head])?;
+        let patch = Self::diff(git::command(&self.root), &[], &[&merge_base, &head], MAX_PATCH_BYTES)?;
         let files = patch::parse(&String::from_utf8_lossy(&patch));
         let scope = Scope::PullRequest { url: view.url.clone(), number: n };
         let clone = (!source.cache).then(|| self.root.clone());
@@ -304,6 +306,7 @@ impl Repo {
                 }
             }
             Request::Staged => self.capture(&Scope::Staged),
+            Request::Unstaged => self.capture(&Scope::Unstaged),
             Request::Branch { base } => self.capture(&self.branch_scope(base.as_deref())?),
             Request::Commit { rev } => {
                 let sha = self.commit(rev).map_err(|_| Error::Git {
@@ -323,39 +326,13 @@ impl Repo {
     /// Capture exactly `scope` (no fallback): what a reload runs. A pull request is looked up
     /// and fetched again, so new pushes show.
     pub fn capture(&self, scope: &Scope) -> Result<Capture> {
-        let (old, new, patch) = match scope {
-            Scope::Uncommitted => {
-                let head = self.head_or_empty_tree()?;
-                let index = TempIndex::with_untracked(&self.root)?;
-                let patch = Self::diff(index.command(&self.root), &[], &[&head])?;
-                (SideSource::Rev(head), SideSource::Worktree, patch)
-            }
-            Scope::Staged => {
-                let head = self.head_or_empty_tree()?;
-                let patch = Self::diff(git::command(&self.root), &["--cached"], &[&head])?;
-                (SideSource::Rev(head), SideSource::Index, patch)
-            }
-            Scope::Branch { base } => {
-                let merge_base = self.merge_base(base)?;
-                let index = TempIndex::with_untracked(&self.root)?;
-                let patch = Self::diff(index.command(&self.root), &[], &[&merge_base])?;
-                (SideSource::Rev(merge_base), SideSource::Worktree, patch)
-            }
-            Scope::Commit { sha } => {
-                let parent = match self.commit(&format!("{sha}^")) {
-                    Ok(parent) => parent,
-                    Err(_) => self.empty_tree()?,
-                };
-                let patch = Self::diff(git::command(&self.root), &[], &[&parent, sha])?;
-                (SideSource::Rev(parent), SideSource::Rev(sha.clone()), patch)
-            }
-            Scope::PullRequest { url, number } => {
-                let source = self.pull.as_ref().ok_or_else(|| Error::NotAPull { text: url.clone() })?;
-                let spec = PrSpec::parse(url).unwrap_or(PrSpec::Number(*number));
-                let view = source.gh.view(&spec, &source.workdir)?;
-                return self.capture_pull(view);
-            }
-        };
+        if let Scope::PullRequest { url, number } = scope {
+            let source = self.pull.as_ref().ok_or_else(|| Error::NotAPull { text: url.clone() })?;
+            let spec = PrSpec::parse(url).unwrap_or(PrSpec::Number(*number));
+            let view = source.gh.view(&spec, &source.workdir)?;
+            return self.capture_pull(view);
+        }
+        let (old, new, patch) = self.scope_diff(scope, &[], MAX_PATCH_BYTES)?;
         let commit_subject = match scope {
             Scope::Commit { sha } => Some(self.subject(sha)?),
             _ => None,
@@ -374,6 +351,52 @@ impl Repo {
         })
     }
 
+    /// `git diff` for a local `scope` with `extra` flags, as [`Self::capture`] runs it: the two
+    /// sides it compares and git's output, refused past `limit` bytes. A pull request is not
+    /// local: [`Self::capture`] fetches it.
+    pub(crate) fn scope_diff(
+        &self,
+        scope: &Scope,
+        extra: &[&str],
+        limit: usize,
+    ) -> Result<(SideSource, SideSource, Vec<u8>)> {
+        Ok(match scope {
+            Scope::Uncommitted => {
+                let head = self.head_or_empty_tree()?;
+                let index = TempIndex::with_untracked(&self.root)?;
+                let patch = Self::diff(index.command(&self.root), extra, &[&head], limit)?;
+                (SideSource::Rev(head), SideSource::Worktree, patch)
+            }
+            Scope::Staged => {
+                let head = self.head_or_empty_tree()?;
+                let flags = [&["--cached"], extra].concat();
+                let patch = Self::diff(git::command(&self.root), &flags, &[&head], limit)?;
+                (SideSource::Rev(head), SideSource::Index, patch)
+            }
+            Scope::Unstaged => {
+                // The real index is the old side; the copy only adds the untracked files to it.
+                let index = TempIndex::with_untracked(&self.root)?;
+                let patch = Self::diff(index.command(&self.root), extra, &[], limit)?;
+                (SideSource::Index, SideSource::Worktree, patch)
+            }
+            Scope::Branch { base } => {
+                let merge_base = self.merge_base(base)?;
+                let index = TempIndex::with_untracked(&self.root)?;
+                let patch = Self::diff(index.command(&self.root), extra, &[&merge_base], limit)?;
+                (SideSource::Rev(merge_base), SideSource::Worktree, patch)
+            }
+            Scope::Commit { sha } => {
+                let parent = match self.commit(&format!("{sha}^")) {
+                    Ok(parent) => parent,
+                    Err(_) => self.empty_tree()?,
+                };
+                let patch = Self::diff(git::command(&self.root), extra, &[&parent, sha], limit)?;
+                (SideSource::Rev(parent), SideSource::Rev(sha.clone()), patch)
+            }
+            Scope::PullRequest { url, .. } => return Err(Error::NotAPull { text: url.clone() }),
+        })
+    }
+
     /// The branch scope for `base` (else [`DEFAULT_BASE`]), with a symbolic ref such as
     /// `origin/HEAD` named by what it points at (`origin/main`), so both spellings share a
     /// record.
@@ -387,14 +410,14 @@ impl Repo {
         Ok(Scope::Branch { base: name.unwrap_or_else(|| base.to_owned()) })
     }
 
-    fn diff(mut cmd: Command, extra: &[&str], revs: &[&str]) -> Result<Vec<u8>> {
+    fn diff(mut cmd: Command, extra: &[&str], revs: &[&str], limit: usize) -> Result<Vec<u8>> {
         cmd.arg("diff").args(DIFF_FLAGS).args(extra).arg("--end-of-options").args(revs).arg("--");
-        git::run_bounded(cmd, "diff", MAX_PATCH_BYTES)
+        git::run_bounded(cmd, "diff", limit)
     }
 
     /// The full id of the commit `rev` names. A leading `-` is refused rather than handed to
     /// git, where it would read as an option (`rev-parse` has no portable `--end-of-options`).
-    fn commit(&self, rev: &str) -> Result<String> {
+    pub(crate) fn commit(&self, rev: &str) -> Result<String> {
         if rev.starts_with('-') {
             return Err(Error::Git {
                 command: "rev-parse".into(),
@@ -420,7 +443,7 @@ impl Repo {
         git::run_text(cmd, "hash-object -t tree")
     }
 
-    fn merge_base(&self, base: &str) -> Result<String> {
+    pub(crate) fn merge_base(&self, base: &str) -> Result<String> {
         let mut cmd = git::command(&self.root);
         cmd.args(["merge-base", "--end-of-options", base, "HEAD"]);
         git::run_text(cmd, &format!("merge-base {base} HEAD"))

@@ -31,6 +31,8 @@ pub(crate) fn watch() {
         let _ = ratatui::try_restore();
         // `exit` skips `Drop`, so the Pi link's registry entry goes here.
         crate::pi::link::remove_entry();
+        // A code review's git commands and index copies go too.
+        plannotator_tui_review::shutdown();
         std::process::exit(HANGUP_STATUS);
     });
 }

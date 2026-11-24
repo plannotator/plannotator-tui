@@ -126,6 +126,31 @@ fn staged_compares_head_with_the_index_only() {
 }
 
 #[test]
+fn unstaged_compares_the_index_with_the_working_tree_untracked_files_included() {
+    let Some(t) = TestRepo::new("unstaged") else { return };
+    t.write("a.txt", "one\n");
+    t.write("b.txt", "bee\n");
+    t.commit_all("init");
+    t.write("a.txt", "one staged\n");
+    t.git(&["add", "a.txt"]);
+    t.write("b.txt", "bee unstaged\n");
+    t.write("new.txt", "fresh\n");
+    let index_before = t.index_bytes();
+
+    let capture = t.repo().open(&Request::Unstaged).expect("captures");
+    assert_eq!(capture.scope, Scope::Unstaged);
+    assert_eq!(paths(&capture), ["b.txt", "new.txt"], "{}", text(&capture));
+    assert_eq!((capture.old.clone(), capture.new.clone()), (SideSource::Index, SideSource::Worktree));
+    assert_eq!(capture.read_side(Side::Old, "b.txt").expect("reads").as_deref(), Some("bee\n"));
+    assert_eq!(capture.read_side(Side::Old, "new.txt").expect("reads"), None, "not in the index");
+    assert_eq!(t.index_bytes(), index_before, "the real index is untouched");
+
+    // Staging everything leaves nothing unstaged, with no fallback to another scope.
+    t.git(&["add", "-A"]);
+    assert!(t.repo().open(&Request::Unstaged).expect("captures").is_empty());
+}
+
+#[test]
 fn a_branch_review_diffs_the_merge_base_against_the_working_tree() {
     let Some(t) = TestRepo::new("branch") else { return };
     t.write("a.txt", "base\n");

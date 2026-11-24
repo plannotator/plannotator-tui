@@ -1631,6 +1631,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "signal-hook",
  "similar",
  "terminal-colorsaurus",
  "time",
@@ -1653,6 +1654,7 @@ version = "0.11.6"
 dependencies = [
  "plannotator-tui-schema",
  "regex",
+ "rustix",
  "serde",
  "serde_json",
  "sha2 0.11.0",

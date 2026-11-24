@@ -87,9 +87,10 @@ fn target_terminal(terminal: Option<String>) -> Result<String> {
         .context("no hc terminal: pass --terminal or run inside hc (HC_TERMINAL_ID is not set)")
 }
 
-/// `plannotator-tui hc review [--staged | --base REF | --commit SHA | PR]`: a code review of the
-/// terminal's repository. A folder outside a repository, or with nothing to review, fails
-/// before any terminal starts.
+/// `plannotator-tui hc review [--staged | --unstaged | --base REF | --commit SHA | PR |
+/// --pick]`: a code review of the terminal's repository. A folder outside a repository, or a
+/// scope named with nothing to review, fails before any terminal starts; a bare review with
+/// nothing to show, and `--pick`, open the change picker, which captures nothing first.
 fn code_review(args: &[String]) -> Result<()> {
     #[cfg(unix)]
     {
@@ -177,6 +178,15 @@ mod tests {
 
     fn refusal(list: &[&str]) -> String {
         run(&args(list)).map(drop).err().map(|e| e.to_string()).unwrap_or_default()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hc_review_pick_takes_no_other_scope_and_no_folder() {
+        let conflict = refusal(&["review", "--pick", "--staged"]);
+        assert!(conflict.starts_with("--pick chooses what to review in the picker"), "{conflict}");
+        let folder = refusal(&["review", "--pick", "../elsewhere"]);
+        assert_eq!(folder, "hc review takes no folder: it reviews the terminal's repository");
     }
 
     #[test]

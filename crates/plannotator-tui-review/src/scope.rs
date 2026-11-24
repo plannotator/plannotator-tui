@@ -11,6 +11,9 @@ pub enum Scope {
     Uncommitted,
     /// HEAD against the index.
     Staged,
+    /// The index against the working tree, untracked files included: what `git add` would
+    /// stage next.
+    Unstaged,
     /// merge-base(base, HEAD) against the working tree, untracked files included.
     Branch { base: String },
     /// A commit against its first parent.
@@ -22,12 +25,13 @@ pub enum Scope {
 }
 
 impl Scope {
-    /// The record key: `uncommitted`, `staged`, `branch-<base>`, `commit-<sha12>` or
+    /// The record key: `uncommitted`, `staged`, `unstaged`, `branch-<base>`, `commit-<sha12>` or
     /// `pr-<number>` (beside the PR's repository, which keys the record too).
     pub fn id(&self) -> String {
         match self {
             Self::Uncommitted => "uncommitted".to_owned(),
             Self::Staged => "staged".to_owned(),
+            Self::Unstaged => "unstaged".to_owned(),
             Self::Branch { base } => format!("branch-{base}"),
             Self::Commit { sha } => format!("commit-{}", sha.get(..12).unwrap_or(sha)),
             Self::PullRequest { number, .. } => format!("pr-{number}"),
@@ -44,6 +48,7 @@ impl Scope {
         match self {
             Self::Uncommitted => "uncommitted".to_owned(),
             Self::Staged => "staged".to_owned(),
+            Self::Unstaged => "unstaged".to_owned(),
             Self::Branch { .. } => "since-base".to_owned(),
             Self::Commit { sha } => format!("commit:{sha}"),
             Self::PullRequest { .. } => "merge-base".to_owned(),
@@ -62,6 +67,7 @@ impl Scope {
         match self {
             Self::Uncommitted => "Uncommitted changes".to_owned(),
             Self::Staged => "Staged changes".to_owned(),
+            Self::Unstaged => "Unstaged changes".to_owned(),
             Self::Branch { base } => {
                 format!("All changes since `{base}` (committed + uncommitted + untracked)")
             }
@@ -73,12 +79,13 @@ impl Scope {
         }
     }
 
-    /// A short name for a header: `Uncommitted`, `Staged`, `Branch vs origin/main`,
+    /// A short name for a header: `Uncommitted`, `Staged`, `Unstaged`, `Branch vs origin/main`,
     /// `Commit 1a2b3c4`, `PR #12`.
     pub fn title(&self) -> String {
         match self {
             Self::Uncommitted => "Uncommitted".to_owned(),
             Self::Staged => "Staged".to_owned(),
+            Self::Unstaged => "Unstaged".to_owned(),
             Self::Branch { base } => format!("Branch vs {base}"),
             Self::Commit { sha } => format!("Commit {}", short(sha)),
             Self::PullRequest { number, .. } => format!("PR #{number}"),
@@ -100,6 +107,10 @@ mod tests {
     fn ids_name_the_record_directory() {
         assert_eq!(Scope::Uncommitted.id(), "uncommitted");
         assert_eq!(Scope::Staged.id(), "staged");
+        assert_eq!(
+            (Scope::Unstaged.id(), Scope::Unstaged.title(), Scope::Unstaged.diff_type()),
+            ("unstaged".into(), "Unstaged".into(), "unstaged".into())
+        );
         assert_eq!(Scope::Branch { base: "origin/main".into() }.id(), "branch-origin/main");
         assert_eq!(Scope::Commit { sha: SHA.into() }.id(), "commit-1a2b3c4d5e6f");
         let pr = Scope::PullRequest { url: "https://github.com/o/r/pull/12".into(), number: 12 };
@@ -114,6 +125,7 @@ mod tests {
         // packages/review-editor/utils/exportFeedback.ts `describeDiff`.
         assert_eq!(Scope::Uncommitted.describe(None), "Uncommitted changes");
         assert_eq!(Scope::Staged.describe(None), "Staged changes");
+        assert_eq!(Scope::Unstaged.describe(None), "Unstaged changes");
         assert_eq!(
             Scope::Branch { base: "origin/main".into() }.describe(None),
             "All changes since `origin/main` (committed + uncommitted + untracked)"
