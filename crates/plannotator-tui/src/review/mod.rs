@@ -224,7 +224,7 @@ impl std::fmt::Debug for Screen {
 }
 
 impl Screen {
-    /// Open the review of `capture` with the default settings, writing none.
+    /// Open the review of `capture` with the default settings, remembering none.
     #[cfg(test)]
     pub(crate) fn open(
         repo: Repo,
@@ -302,7 +302,11 @@ impl Screen {
         };
         screen.files_for_capture();
         let placed = screen.place_notes()?;
-        screen.status = placed;
+        // What placing the notes found, and a remembered settings file that could not be read.
+        screen.status = match (placed, screen.settings.take_notice()) {
+            (Some(placed), Some(notice)) => Some(format!("{placed} \u{b7} {notice}")),
+            (placed, notice) => placed.or(notice),
+        };
         screen.derive_send_state();
         Ok(screen)
     }

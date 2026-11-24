@@ -6,7 +6,7 @@
 //!
 //! The line between a split diff's sides works the same way: a drag shares the diff's width
 //! between the old and the new side, as `(`/`)` do, and a double click makes them even
-//! again. That ratio is a setting (`settings`), written to the config file when the drag
+//! again. That ratio is a setting (`settings`), remembered for the next review when the drag
 //! ends. The viewer draws the line on rows of code only, so only those cells take a press.
 
 use std::time::{Duration, Instant};

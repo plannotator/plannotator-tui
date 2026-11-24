@@ -2,10 +2,11 @@
 //! (`Split │ Unified`, the one in force lit), the wrap switch, the Settings and Review menus,
 //! and the Send button on the edge. Each is clickable.
 //!
-//! A narrow header gives way in steps, the richest arrangement that fits winning: first the
-//! key hints in the menu buttons, then the wrap switch, the Review button, the viewed count
-//! in the title, the title's tail (cut with `…`), the Settings label (`≡`) and last the
-//! switch's words (`S │ U`). Send always shows.
+//! A narrow header gives way in steps, the richest arrangement that fits winning. What stays
+//! longest: Send, then the layout switch, the Review menu, the Settings menu, the wrap switch
+//! and last the key hints in the menus. On the way the Settings label shrinks to `≡`, the
+//! title loses its viewed count and then its tail (cut with `…`), and the switch can shrink
+//! to `S │ U`.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -85,20 +86,28 @@ pub(super) fn arrange(
     let [settings, settings_short, settings_tiny] = &labels.settings;
     let [review, review_short] = &labels.review;
     let switch = |compact| layout.then_some(Chip::Layout { compact });
+    let wrap = Some(Chip::Wrap);
     let set = |label: &String| Some(Chip::Settings(label.clone()));
-    let rev = |label: &String| Some(Chip::Review(label.clone()));
-    // (title, chips); a title of None is cut to whatever room the chips leave.
-    let candidates: [(Option<&str>, [Option<Chip>; 4]); 11] = [
-        (Some(full), [switch(false), Some(Chip::Wrap), set(settings), rev(review)]),
-        (Some(full), [switch(false), Some(Chip::Wrap), set(settings_short), rev(review_short)]),
-        (Some(full), [switch(false), None, set(settings_short), rev(review_short)]),
-        (Some(full), [switch(false), None, set(settings_short), None]),
-        (Some(short), [switch(false), None, set(settings_short), None]),
-        (Some(short), [switch(false), None, set(settings_tiny), None]),
-        (None, [switch(false), None, set(settings_short), None]),
-        (None, [switch(false), None, set(settings_tiny), None]),
-        (None, [switch(true), None, set(settings_tiny), None]),
-        (None, [switch(true), None, None, None]),
+    let rev = Some(Chip::Review(review_short.clone()));
+    let (full_switch, compact) = (switch(false), switch(true));
+    // (title, chips); a title of None is cut to whatever room the chips leave. Each step
+    // gives up the least wanted thing first: every chip shown outranks the ones gone.
+    let candidates: [(Option<&str>, [Option<Chip>; 4]); 16] = [
+        (Some(full), [full_switch.clone(), wrap.clone(), set(settings), Some(Chip::Review(review.clone()))]),
+        (Some(full), [full_switch.clone(), wrap, set(settings_short), rev.clone()]),
+        (Some(full), [full_switch.clone(), None, set(settings_short), rev.clone()]),
+        (Some(full), [full_switch.clone(), None, set(settings_tiny), rev.clone()]),
+        (Some(short), [full_switch.clone(), None, set(settings_short), rev.clone()]),
+        (Some(short), [full_switch.clone(), None, set(settings_tiny), rev.clone()]),
+        (Some(full), [full_switch.clone(), None, None, rev.clone()]),
+        (Some(short), [full_switch.clone(), None, None, rev.clone()]),
+        (Some(short), [compact.clone(), None, set(settings_tiny), rev.clone()]),
+        (Some(short), [compact.clone(), None, None, rev.clone()]),
+        (None, [full_switch.clone(), None, set(settings_tiny), rev.clone()]),
+        (None, [full_switch.clone(), None, None, rev.clone()]),
+        (None, [compact.clone(), None, None, rev]),
+        (None, [full_switch, None, None, None]),
+        (None, [compact, None, None, None]),
         (None, [None, None, None, None]),
     ];
     for (title, chips) in candidates {
@@ -214,16 +223,28 @@ mod tests {
         }
     }
 
-    const FULL: &str = " Uncommitted · 4 files +120 −30 · 2/4 viewed ";
-    const SHORT: &str = " Uncommitted · 4 files +120 −30 ";
+    const FULL: &str = " Uncommitted · 2 files +14 −5 · 0/2 viewed ";
+    const SHORT: &str = " Uncommitted · 2 files +14 −5 ";
+    /// ` Copy 0 new (E) ` and ` Send 1 new ▸ test agent (E) `, each with its gap.
+    const SENDS: [usize; 2] = [17, 30];
 
     fn shown(width: usize, send: usize) -> (String, Vec<Chip>) {
         arrange(width, send, (FULL, SHORT), &labels(), true)
     }
 
+    /// Each chip's rank: what stays longest first.
+    fn rank(chip: &Chip) -> usize {
+        match chip {
+            Chip::Layout { .. } => 0,
+            Chip::Review(_) => 1,
+            Chip::Settings(_) => 2,
+            Chip::Wrap => 3,
+        }
+    }
+
     #[test]
-    fn a_wide_header_shows_everything_and_a_narrow_one_gives_way_in_order() {
-        let (title, chips) = shown(200, 24);
+    fn a_wide_header_shows_everything_and_a_narrow_one_gives_way_by_rank() {
+        let (title, chips) = shown(200, 17);
         assert_eq!(title, FULL);
         assert_eq!(
             chips,
@@ -234,34 +255,45 @@ mod tests {
                 Chip::Review(" Review ▾ (m) ".into())
             ]
         );
-        let mut seen = Vec::new();
-        for width in (40..=200).rev() {
-            let (title, chips) = shown(width, 24);
-            let used = title.width() + chips.iter().map(|c| c.width() + 1).sum::<usize>() + 24;
-            assert!(used <= width, "{width}: {title:?} {chips:?}");
-            if !seen.contains(&chips) {
-                seen.push(chips.clone());
-            }
-            // The switch outlasts every other chip.
-            if !chips.is_empty() {
-                assert!(matches!(chips.first(), Some(Chip::Layout { .. })), "{width}: {chips:?}");
+        for send in SENDS {
+            for width in 30..=200 {
+                let (title, chips) = shown(width, send);
+                let used = title.width() + chips.iter().map(|c| c.width() + 1).sum::<usize>() + send;
+                assert!(used <= width, "{width}: {title:?} {chips:?}");
+                // Whatever shows, everything that outranks it shows too.
+                let ranks: Vec<usize> = chips.iter().map(rank).collect();
+                let mut sorted = ranks.clone();
+                sorted.sort_unstable();
+                assert_eq!(sorted, (0..ranks.len()).collect::<Vec<_>>(), "{width}/{send}: {chips:?}");
+                // A key hint only while everything else is there.
+                let hinted =
+                    chips.iter().any(|c| matches!(c, Chip::Settings(l) | Chip::Review(l) if l.contains('(')));
+                assert!(!hinted || chips.len() == 4, "{width}/{send}: {chips:?}");
             }
         }
-        assert!(seen.len() >= 6, "{seen:?}");
     }
 
     #[test]
-    fn at_80_columns_the_title_keeps_its_counts_and_at_60_the_switch_still_shows() {
-        // A long Send label: `Send 1 new ▸ test agent (E)`.
+    fn at_60_80_100_and_120_columns_the_switch_and_review_stay() {
+        let review = |chips: &[Chip]| chips.iter().any(|c| matches!(c, Chip::Review(_)));
+        let switch = |chips: &[Chip]| chips.iter().any(|c| matches!(c, Chip::Layout { .. }));
+        for send in SENDS {
+            for width in [60, 80, 100, 120] {
+                let (title, chips) = shown(width, send);
+                assert!(switch(&chips), "{width}/{send}: {chips:?}");
+                assert!(title.width() >= TITLE_MIN, "{width}/{send}: {title:?}");
+                if width >= 80 || send == 17 {
+                    assert!(review(&chips), "{width}/{send}: {title:?} {chips:?}");
+                }
+            }
+        }
+        // At 80 with a long Send label the title keeps its counts: the switch shrinks first.
         let (full, short) = (" Uncommitted · 1 file +7 −3 · 0/1 viewed ", " Uncommitted · 1 file +7 −3 ");
         let (title, chips) = arrange(80, 30, (full, short), &labels(), true);
         assert_eq!(title, short);
-        assert_eq!(chips.first(), Some(&Chip::Layout { compact: false }));
-        let (title, chips) = shown(60, 30);
-        assert!(title.ends_with('…') && title.width() > TITLE_MIN, "{title:?}");
-        assert!(matches!(chips.first(), Some(Chip::Layout { .. })), "{chips:?}");
-        let (_, chips) = shown(60, 17);
-        assert_eq!(chips, [Chip::Layout { compact: false }, Chip::Settings(" Settings ▾ ".into())]);
+        assert_eq!(chips, [Chip::Layout { compact: true }, Chip::Review(" Review ▾ ".into())]);
+        let (_, chips) = shown(120, 17);
+        assert_eq!(chips.len(), 4, "everything at 120: {chips:?}");
     }
 
     #[test]

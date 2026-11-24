@@ -126,7 +126,7 @@ impl Screen {
                     (key(&[Action::ToggleWrap]), "wrap long lines"),
                     (key(&[Action::SplitLeft, Action::SplitRight]), "move the line between the sides"),
                     ("drag the middle".to_owned(), "resize the sides; double-click to even them"),
-                    (key(&[Action::DiffSettings]), "diff settings (saved to the config)"),
+                    (key(&[Action::DiffSettings]), "diff settings (remembered for next time)"),
                     (key(&[Action::ToggleFiles]), "the file list: open it and move there; there, close it"),
                     (key(&[Action::FilterFiles]), "filter the files by name"),
                     (

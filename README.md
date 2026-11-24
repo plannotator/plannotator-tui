@@ -283,10 +283,12 @@ and `)`; a double click on the line makes the sides even again. Each side keeps 
 columns. `,` (or the header's `Settings` button) opens the diff settings: layout, split
 ratio, wrap, line numbers, colours and background, each with its value. `↑`/`↓` pick one,
 `←`/`→` change it, `enter` or `space` moves it on (and evens the split ratio), a click on a row
-does the same, and `esc` closes the menu. Every change applies at once and is written to the
-config file's [`[review]`](#how-diffs-open) table, so the next review opens the same way. A
-narrow header drops the key hints, the `Wrap` switch and the `Review` button first, and shows
-the switch as `S  U` last.
+does the same, and `esc` closes the menu. Every change applies at once and is remembered for
+the next review, however you made it (the menu, the switches, a key or a drag); the menu's
+last row, **Reset to defaults**, forgets those choices and goes back to
+[`[review]`](#how-diffs-open) in the config file, else the defaults. A narrow header gives up
+the key hints first, then the `Wrap` switch, the `Settings` button and the `Review` button,
+and keeps the layout switch longest (as `S  U` when it must).
 
 The changed files are listed left of the diff as a folder tree. A chain of folders with
 one folder each is one row (`crates/app/src/`), and the list is as wide as its names
@@ -503,8 +505,8 @@ copy_on_select = false
 
 ### How diffs open
 
-`[review]` is how the code review draws its diff. Every key is optional, and a file without
-the table opens diffs as before:
+`[review]` sets how the code review draws its diff by default. Every key is optional, and a
+file without the table opens diffs as before:
 
 ```toml
 [review]
@@ -516,14 +518,20 @@ theme = "auto"          # the diff's colours: auto (follow [ui] theme, default) 
 background = "terminal" # terminal (the terminal's own background, default) | theme (the diff theme's)
 ```
 
-The header's switches, `u`, `w`, `(`/`)`, dragging the line between the sides and the
-settings menu (`,`) all change these, and the review writes each change back to this table
-when you make it (a drag, when you let go). It writes only the keys that changed and keeps
-the rest of the file as it was, comments too. A file that does not parse is left alone and
-the footer says why; the change still applies for the session. Each side of a split row
-keeps at least 20 columns, so on a narrow screen the line may sit nearer the middle than the
-ratio says. The whole-file view is always unified. `theme` changes the diff only; the rest of
-the app keeps `[ui] theme`.
+The app never writes this file. What you choose in the review (the settings menu, the
+header's switches, `u`, `w`, `(`/`)`, dragging the line between the sides) is remembered in
+`clients/plannotator-tui/review-settings.toml` under the data folder, and wins over
+`[review]` the next time; a key you never changed there keeps coming from `[review]`, then
+the defaults. **Reset to defaults**, the menu's last row, forgets the remembered choices.
+Each review writes only the keys it changed, so two reviews open at once keep each other's
+choices; a drag is remembered when you let go, to two decimals. If the remembered file
+cannot be read or written, the footer says so once and the review carries on with the
+settings it has.
+
+Each side of a split row keeps at least 20 columns, so on a narrow screen the line may sit
+nearer the middle than the ratio says. `(` and `)` move it in steps of 0.05 from the nearest
+step. The whole-file view is always unified. `theme` changes the diff only; the rest of the
+app keeps `[ui] theme`.
 
 ### Keys
 
@@ -581,7 +589,7 @@ added in a later release leaves its default key to whatever your file already bo
 | `change-comment` | `M` | code review: a note on the whole change |
 | `next-hunk` `previous-hunk` `next-file` `previous-file` | `]` `[` `n` `N` | code review: move by hunk or file |
 | `toggle-layout` `toggle-wrap` `toggle-files` | `u` `w` `f` | code review: split or unified view; wrap; open the file list and move to it, or close it from there |
-| `diff-settings` | `,` | code review: the diff settings menu, saved to [`[review]`](#how-diffs-open) |
+| `diff-settings` | `,` | code review: the diff settings menu, remembered for the next review (see [`[review]`](#how-diffs-open)) |
 | `split-left` `split-right` | `(` `)` | code review: move the line between a split diff's sides by a twentieth of the width |
 | `filter-files` `filter-kinds` `hide-viewed` | `/` `t` `H` | code review: filter the file list and the diff by name; by kind; hide viewed files |
 | `toggle-viewed` `next-unviewed` `previous-unviewed` | `x` `ctrl+n`, none | code review: mark the file viewed; the next or previous file not viewed |

@@ -1,8 +1,8 @@
 //! The settings menu (`,`, or the header's Settings button): one row per setting with its
 //! value, under its button. `↑`/`↓` pick a row, `←`/`→` change its value back or on, `Enter`
 //! and `Space` move it on (and make the split ratio even), a click on a row does what `Enter`
-//! does. Each change applies at once and is written to the config file. `Esc`, `,` or a
-//! click outside close it.
+//! does. Each change applies at once and is remembered for the next review; the last row,
+//! Reset, forgets those choices. `Esc`, `,` or a click outside close it.
 
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -72,7 +72,8 @@ impl Screen {
             .iter()
             .map(|row| format!(" {:<LABEL_WIDTH$}{} ", row.label(), self.setting_value(*row)))
             .collect();
-        let saved = self.settings.file_name().map(|name| format!(" saved to {name} [review] "));
+        let saved =
+            self.settings.remembers().then_some(" your choices are remembered for next time ".to_owned());
         let help = hints::picker(
             "row",
             [Some("\u{2190}\u{2192} change".to_owned()), self.keys.labelled(Action::Back, "close")],

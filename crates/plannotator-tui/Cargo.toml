@@ -25,7 +25,6 @@ serde_json.workspace = true
 similar.workspace = true
 toml.workspace = true
 # Writes the review settings back into the config file, keeping its comments and layout.
-toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
 unicode-width.workspace = true
 time = { version = "0.3", features = ["formatting", "parsing", "local-offset"] }
 pulldown-cmark = { version = "0.13.4", default-features = false }

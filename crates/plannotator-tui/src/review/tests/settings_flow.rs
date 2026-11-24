@@ -1,15 +1,18 @@
 //! The diff's settings on the screen: the header's layout and wrap switches by click and by
-//! key, the settings menu (`,` or its button) changing each setting live, the config file
-//! that remembers them for the next review, and a narrow screen.
+//! key, the settings menu (`,` or its button) changing each setting live, Reset, and the
+//! person's choices remembered in the data folder for the next review, over `[review]` in
+//! the config file, which the app never writes.
+
+use std::path::Path;
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
 use super::*;
-use crate::config::Config;
-use crate::config::review::{Background, DiffTheme, Layout, ReviewConfig};
+use crate::config::review::{Background, DiffTheme, Layout, ReviewConfig, SplitShare};
 use crate::review::Mode;
+use crate::review::settings::{Settings, state};
 use crate::ui::chips;
 
 const COLS: u16 = 160;
@@ -29,11 +32,14 @@ fn text(buffer: &Buffer, y: u16) -> String {
     (0..buffer.area.width).filter_map(|x| buffer.cell((x, y)).map(|c| c.symbol().to_owned())).collect()
 }
 
+fn mouse(screen: &mut Screen, kind: MouseEventKind, column: u16, row: u16) {
+    let event = MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE };
+    screen.handle_event(Event::Mouse(event)).expect("mouse");
+}
+
 fn click(screen: &mut Screen, rect: Rect) {
-    for kind in [MouseEventKind::Down(MouseButton::Left), MouseEventKind::Up(MouseButton::Left)] {
-        let event = MouseEvent { kind, column: rect.x, row: rect.y, modifiers: KeyModifiers::NONE };
-        screen.handle_event(Event::Mouse(event)).expect("mouse");
-    }
+    mouse(screen, MouseEventKind::Down(MouseButton::Left), rect.x, rect.y);
+    mouse(screen, MouseEventKind::Up(MouseButton::Left), rect.x, rect.y);
 }
 
 /// The layout switch's half for split (`true`) or unified, as last drawn.
@@ -48,8 +54,24 @@ fn lit(buffer: &Buffer, rect: Rect) -> bool {
         .is_some_and(|cell| cell.bg == chips::chips().switch_on.bg.expect("a background"))
 }
 
-fn written(fixture: &Fixture) -> ReviewConfig {
-    Config::load_from(&fixture.config()).expect("config").review
+/// The settings the next review would open with, from the remembered choices alone.
+fn remembered(fixture: &Fixture) -> ReviewConfig {
+    let (settings, notice) = state::load(&fixture.state(), ReviewConfig::DEFAULT);
+    assert_eq!(notice, None);
+    settings
+}
+
+/// The review screen remembering its choices at `path`.
+fn open_remembering(fixture: &Fixture, path: &Path) -> Screen {
+    let (repo, capture) =
+        crate::review::capture(&fixture.repo(), &Request::Uncommitted { base: None }).expect("capture");
+    let (wake, _ready) = std::sync::mpsc::sync_channel(1);
+    let settings = Settings::load(ReviewConfig::DEFAULT, Some(path.to_owned()));
+    let mut screen =
+        Screen::open_with(repo, capture, &fixture.data(), Box::new(fixture.agent.clone()), wake, settings)
+            .expect("screen");
+    settle(&mut screen);
+    screen
 }
 
 #[test]
@@ -61,27 +83,25 @@ fn the_header_switch_shows_the_layout_and_a_click_or_u_switches_it() {
     assert!(screen.diff.split(), "auto at 160 columns is split");
     assert!(lit(&drawn, half(&screen, true)) && !lit(&drawn, half(&screen, false)));
 
+    // Clicking the layout in force changes nothing and remembers nothing.
+    let rect = half(&screen, true);
+    click(&mut screen, rect);
+    assert!(screen.diff.split());
+    assert!(!fixture.state().exists(), "nothing changed, nothing written");
+
     let rect = half(&screen, false);
     click(&mut screen, rect);
     let drawn = buffer(&mut screen, COLS, ROWS);
     assert!(!screen.diff.split());
     assert!(lit(&drawn, half(&screen, false)) && !lit(&drawn, half(&screen, true)));
-    assert_eq!(written(&fixture).layout, Layout::Unified, "remembered");
+    assert_eq!(remembered(&fixture).layout, Layout::Unified, "remembered");
     assert!(screen.diff.selection().is_none() && screen.drag.is_none());
-
-    // Clicking the layout in force changes nothing, not even the file.
-    let before = read(&fixture.config());
-    let rect = half(&screen, false);
-    click(&mut screen, rect);
-    buffer(&mut screen, COLS, ROWS);
-    assert!(!screen.diff.split());
-    assert_eq!(read(&fixture.config()), before);
 
     keys(&mut screen, "u");
     let drawn = buffer(&mut screen, COLS, ROWS);
     assert!(screen.diff.split());
     assert!(lit(&drawn, half(&screen, true)));
-    assert_eq!(written(&fixture).layout, Layout::Split);
+    assert_eq!(remembered(&fixture).layout, Layout::Split);
 }
 
 #[test]
@@ -94,29 +114,34 @@ fn the_wrap_switch_and_w_wrap_long_lines_and_are_remembered() {
     let drawn = buffer(&mut screen, COLS, ROWS);
     assert!(screen.diff.options().wrap);
     assert!(lit(&drawn, screen.geometry.wrap_switch.expect("switch")));
-    assert!(written(&fixture).wrap);
+    assert!(remembered(&fixture).wrap);
     keys(&mut screen, "w");
     let drawn = buffer(&mut screen, COLS, ROWS);
     assert!(!screen.diff.options().wrap);
     assert!(!lit(&drawn, screen.geometry.wrap_switch.expect("switch")));
-    assert!(!written(&fixture).wrap);
+    assert!(!remembered(&fixture).wrap);
 }
 
 #[test]
-fn the_settings_menu_changes_every_setting_live_and_writes_each_change() {
+fn the_settings_menu_changes_every_setting_live_and_remembers_each_change() {
     let fixture = Fixture::new("settings-menu");
-    fixture.write_config("# mine\n[ui]\ncopy_on_select = false\n");
     let mut screen = fixture.open_configured();
     buffer(&mut screen, COLS, ROWS);
     keys(&mut screen, ",");
     assert_eq!(screen.mode, Mode::Settings(0));
     let drawn = buffer(&mut screen, COLS, ROWS);
     let shown: String = (0..ROWS).map(|y| text(&drawn, y)).collect::<Vec<_>>().join("\n");
-    for row in ["Layout", "Split ratio", "Wrap", "Line numbers", "Colors", "Background"] {
+    for row in ["Layout", "Split ratio", "Wrap", "Line numbers", "Colors", "Background", "Reset to defaults"]
+    {
         assert!(shown.contains(row), "{row}:\n{shown}");
     }
     assert!(shown.contains("auto \u{b7} split now") && shown.contains("50 : 50"), "{shown}");
-    assert!(shown.contains("saved to config.toml [review]"), "{shown}");
+    assert!(shown.contains("remembered for next time"), "{shown}");
+    assert!(!shown.contains(".toml"), "no file path: {shown}");
+    // Moving through the menu changes nothing.
+    keys(&mut screen, "jjk");
+    assert!(!fixture.state().exists());
+    keys(&mut screen, "k");
 
     // Layout: auto → split → unified, live.
     press(&mut screen, KeyCode::Right);
@@ -124,7 +149,7 @@ fn the_settings_menu_changes_every_setting_live_and_writes_each_change() {
     press(&mut screen, KeyCode::Right);
     buffer(&mut screen, COLS, ROWS);
     assert!(!screen.diff.split());
-    assert_eq!(written(&fixture).layout, Layout::Unified);
+    assert_eq!(remembered(&fixture).layout, Layout::Unified);
     press(&mut screen, KeyCode::Left);
     press(&mut screen, KeyCode::Left);
     assert_eq!(screen.settings.now.layout, Layout::Auto);
@@ -137,7 +162,7 @@ fn the_settings_menu_changes_every_setting_live_and_writes_each_change() {
     assert_eq!(screen.settings.now.split_ratio.permille(), 500);
     press(&mut screen, KeyCode::Left);
     buffer(&mut screen, COLS, ROWS);
-    assert_eq!(written(&fixture).split_ratio.permille(), 450);
+    assert_eq!(remembered(&fixture).split_ratio.permille(), 450);
     // Wrap with Space, line numbers with Enter, then colours and the background.
     keys(&mut screen, "j ");
     assert!(screen.diff.options().wrap);
@@ -155,29 +180,71 @@ fn the_settings_menu_changes_every_setting_live_and_writes_each_change() {
     press(&mut screen, KeyCode::Enter);
     buffer(&mut screen, COLS, ROWS);
     assert_eq!(screen.settings.now.background, Background::Theme);
-    // The last row stays the last.
-    keys(&mut screen, "jj");
-    assert_eq!(screen.mode, Mode::Settings(5));
-
-    let review = written(&fixture);
     assert_eq!(
-        review,
+        remembered(&fixture),
         ReviewConfig {
             layout: Layout::Auto,
             wrap: true,
             line_numbers: false,
             theme: DiffTheme::Light,
             background: Background::Theme,
-            split_ratio: crate::config::review::SplitShare::from_permille(450),
+            split_ratio: SplitShare::from_permille(450),
         }
     );
-    let file = read(&fixture.config());
-    assert!(file.starts_with("# mine\n[ui]\ncopy_on_select = false\n"), "the rest is kept: {file}");
+    // The last row, Reset, stays the last.
+    keys(&mut screen, "jjj");
+    assert_eq!(screen.mode, Mode::Settings(6));
 
     press(&mut screen, KeyCode::Esc);
     assert_eq!(screen.mode, Mode::Browse);
     keys(&mut screen, ",,");
     assert_eq!(screen.mode, Mode::Browse, "the key closes it too");
+}
+
+#[test]
+fn reset_forgets_the_choices_and_goes_back_to_the_config_file_or_the_defaults() {
+    let fixture = Fixture::new("settings-reset");
+    fixture.write_config("[review]\nlayout = \"split\"\nwrap = true\n");
+    let mut screen = fixture.open_configured();
+    buffer(&mut screen, 100, ROWS);
+    assert!(screen.diff.split() && screen.diff.options().wrap, "the config file's values");
+    keys(&mut screen, "uw)");
+    buffer(&mut screen, 100, ROWS);
+    assert!(!screen.diff.split() && !screen.diff.options().wrap);
+    assert!(fixture.state().exists());
+
+    // The choices win over the config file in the next review.
+    let mut next = fixture.open_configured();
+    buffer(&mut next, 100, ROWS);
+    assert!(!next.diff.split() && !next.diff.options().wrap);
+    // Reset, by Enter on the last row.
+    keys(&mut next, ",");
+    for _ in 0..6 {
+        keys(&mut next, "j");
+    }
+    press(&mut next, KeyCode::Enter);
+    buffer(&mut next, 100, ROWS);
+    assert!(next.diff.split() && next.diff.options().wrap, "back to the config file's values");
+    assert_eq!(next.settings.now.layout, Layout::Split);
+    assert_eq!(next.status.as_deref(), Some("settings back to [review] in the config file"));
+    assert!(!fixture.state().exists(), "nothing left to remember");
+    // And so the next review opens as the config file says.
+    let mut third = fixture.open_configured();
+    buffer(&mut third, 100, ROWS);
+    assert!(third.diff.split() && third.diff.options().wrap);
+
+    // Without a [review] table, Reset goes back to the defaults, `auto` among them.
+    let fixture = Fixture::new("settings-reset-defaults");
+    let mut screen = fixture.open_configured();
+    buffer(&mut screen, COLS, ROWS);
+    keys(&mut screen, "u");
+    assert_eq!(screen.settings.now.layout, Layout::Unified);
+    keys(&mut screen, ",");
+    buffer(&mut screen, COLS, ROWS);
+    let reset = screen.geometry.settings_rows.last().map(|(rect, _)| *rect).expect("the Reset row");
+    click(&mut screen, reset);
+    assert_eq!(screen.settings.now, ReviewConfig::DEFAULT);
+    assert_eq!(screen.status.as_deref(), Some("settings back to the defaults"));
 }
 
 #[test]
@@ -195,7 +262,7 @@ fn the_settings_button_opens_the_menu_and_a_click_changes_a_row_or_closes_it() {
     let (wrap, _) = rows.iter().copied().find(|(_, index)| *index == 2).expect("the wrap row");
     click(&mut screen, wrap);
     assert_eq!(screen.mode, Mode::Settings(2));
-    assert!(screen.settings.now.wrap && written(&fixture).wrap);
+    assert!(screen.settings.now.wrap && remembered(&fixture).wrap);
     // A click on the box's border does nothing; one outside closes it, moving nothing.
     click(&mut screen, Rect { x: boxed.x, y: boxed.y, width: 1, height: 1 });
     assert_eq!(screen.mode, Mode::Settings(2));
@@ -206,8 +273,9 @@ fn the_settings_button_opens_the_menu_and_a_click_changes_a_row_or_closes_it() {
 }
 
 #[test]
-fn the_next_review_opens_as_the_last_one_left_it_and_the_file_can_say_so_too() {
+fn the_next_review_opens_as_the_last_one_left_it_and_the_config_file_sets_the_rest() {
     let fixture = Fixture::new("settings-next");
+    fixture.write_config("[review]\nline_numbers = false\n");
     let mut screen = fixture.open_configured();
     buffer(&mut screen, COLS, ROWS);
     keys(&mut screen, ")))uw");
@@ -223,17 +291,18 @@ fn the_next_review_opens_as_the_last_one_left_it_and_the_file_can_say_so_too() {
     let mut first = screen;
     let line = line_after(&mut first);
     first.close().expect("close");
-    let review = written(&fixture);
-    assert_eq!((review.layout, review.wrap), (Layout::Unified, true));
+    let review = remembered(&fixture);
+    assert_eq!((review.layout, review.wrap, review.split_ratio.permille()), (Layout::Unified, true, 650));
 
-    // Unified, wrapped, the ratio set, from the first frame.
+    // Unified, wrapped, the ratio set, from the first frame; line numbers as the config says.
     let mut next = fixture.open_configured();
     let drawn = buffer(&mut next, COLS, ROWS);
     assert!(!next.diff.split() && next.diff.options().wrap);
+    assert!(!next.diff.options().line_numbers);
     assert!(lit(&drawn, half(&next, false)));
     assert_eq!(line_after(&mut next), line, "the same split ratio");
 
-    // Set by hand in the file.
+    // Set by hand in the config file alone.
     let fixture = Fixture::new("settings-by-hand");
     fixture.write_config("[review]\nlayout = \"split\"\nline_numbers = false\nsplit_ratio = 0.3\n");
     let mut screen = fixture.open_configured();
@@ -241,6 +310,137 @@ fn the_next_review_opens_as_the_last_one_left_it_and_the_file_can_say_so_too() {
     assert!(screen.diff.split(), "split below 120 columns as asked");
     assert!(!screen.diff.options().line_numbers);
     assert_eq!(screen.diff.split_line(), Some(35));
+}
+
+#[test]
+fn the_config_file_is_never_written_whatever_the_review_does() {
+    let fixture = Fixture::new("settings-config-untouched");
+    let config = "# mine\r\n[ui]\r\ncopy_on_select = false  # keep it\r\n\r\n[review]\r\nwrap = true\r\n";
+    fixture.write_config(config);
+    let bytes = std::fs::read(fixture.config()).expect("config");
+    let mut screen = fixture.open_configured();
+    let check = |screen: &mut Screen, what: &str| {
+        buffer(screen, COLS, ROWS);
+        assert_eq!(std::fs::read(fixture.config()).expect("config"), bytes, "after {what}");
+    };
+    check(&mut screen, "opening");
+    for key in ["u", "w", "u", ")", "(", "(", "w"] {
+        keys(&mut screen, key);
+        check(&mut screen, key);
+    }
+    // The header's switches.
+    for split in [false, true] {
+        let rect = half(&screen, split);
+        click(&mut screen, rect);
+        check(&mut screen, "the layout switch");
+    }
+    let wrap = screen.geometry.wrap_switch.expect("wrap");
+    click(&mut screen, wrap);
+    check(&mut screen, "the wrap switch");
+    // A drag of the line between the sides, and a double click on it.
+    let column = screen.diff.split_line().expect("split");
+    let row = (2..ROWS - 2).find(|&y| screen.diff.code_row(y)).expect("a code row");
+    mouse(&mut screen, MouseEventKind::Down(MouseButton::Left), column, row);
+    mouse(&mut screen, MouseEventKind::Drag(MouseButton::Left), column - 20, row);
+    mouse(&mut screen, MouseEventKind::Up(MouseButton::Left), column - 20, row);
+    check(&mut screen, "a drag");
+    let column = screen.diff.split_line().expect("split");
+    for _ in 0..2 {
+        click(&mut screen, Rect { x: column, y: row, width: 1, height: 1 });
+    }
+    check(&mut screen, "a double click");
+    // Every row of the menu, every way, then Reset.
+    keys(&mut screen, ",");
+    for _ in 0..crate::review::settings::ROWS.len() - 1 {
+        for code in [KeyCode::Right, KeyCode::Left, KeyCode::Enter, KeyCode::Char(' ')] {
+            press(&mut screen, code);
+            check(&mut screen, &format!("{code:?} in the menu"));
+        }
+        keys(&mut screen, "j");
+    }
+    press(&mut screen, KeyCode::Enter);
+    check(&mut screen, "Reset");
+    screen.close().expect("close");
+    assert_eq!(std::fs::read(fixture.config()).expect("config"), bytes, "after closing");
+}
+
+#[test]
+fn two_reviews_and_a_hand_edit_keep_each_others_choices() {
+    let fixture = Fixture::new("settings-two");
+    let mut one = fixture.open_configured();
+    let mut two = fixture.open_configured();
+    buffer(&mut one, COLS, ROWS);
+    buffer(&mut two, COLS, ROWS);
+    keys(&mut one, "w");
+    keys(&mut two, "u");
+    let both = remembered(&fixture);
+    assert!(both.wrap, "the second review kept the first one's wrap");
+    assert_eq!(both.layout, Layout::Unified);
+    keys(&mut one, ")");
+    let all = remembered(&fixture);
+    assert_eq!((all.wrap, all.layout, all.split_ratio.permille()), (true, Layout::Unified, 550));
+    // A hand edit while a review is open stays, but for the keys the review changes next.
+    let text = read(&fixture.state());
+    std::fs::write(fixture.state(), format!("{text}line_numbers = false\n")).expect("edit");
+    // The second review never saw the first one's wrap: its `w` turns its own on.
+    keys(&mut two, "w");
+    let edited = remembered(&fixture);
+    assert!(!edited.line_numbers, "the hand edit stays");
+    assert!(edited.wrap, "the second review's wrap");
+    assert_eq!(edited.layout, Layout::Unified);
+    assert_eq!(edited.split_ratio.permille(), 550, "the first review's ratio stays");
+}
+
+#[test]
+fn a_bad_state_file_is_named_once_and_its_good_keys_still_count() {
+    let fixture = Fixture::new("settings-bad-state");
+    let path = fixture.state();
+    std::fs::create_dir_all(path.parent().expect("dir")).expect("dir");
+    std::fs::write(&path, "wrap = true\nlayout = \"sideways\"\nsplit_ratio = 3\nzoom = 2\n").expect("write");
+    let mut screen = fixture.open_configured();
+    buffer(&mut screen, COLS, ROWS);
+    assert!(screen.diff.options().wrap && screen.diff.split(), "wrap taken, layout left at auto");
+    let notice = screen.status.clone().unwrap_or_default();
+    for key in ["layout", "split_ratio", "zoom"] {
+        assert!(notice.contains(key), "{notice}");
+    }
+    screen.status = None;
+    keys(&mut screen, "u");
+    buffer(&mut screen, COLS, ROWS);
+    assert_eq!(screen.status, None, "said once, not again on a change");
+    // Writing keeps the keys it did not change, even ones it skipped.
+    let text = read(&path);
+    assert!(text.contains("layout = \"unified\"") && text.contains("zoom = 2"), "{text}");
+
+    std::fs::write(&path, "wrap = [\n").expect("write");
+    let mut screen = fixture.open_configured();
+    buffer(&mut screen, COLS, ROWS);
+    assert!(screen.status.as_deref().is_some_and(|s| s.contains("does not parse")), "{:?}", screen.status);
+    assert_eq!(screen.settings.now, ReviewConfig::DEFAULT);
+}
+
+#[test]
+fn a_state_file_that_cannot_be_written_is_said_once_and_the_setting_still_applies() {
+    let fixture = Fixture::new("settings-unwritable");
+    // Its folder is created; a folder where the file goes cannot be replaced.
+    let fresh = fixture.dir.join("fresh").join("deeper").join("review-settings.toml");
+    let mut screen = open_remembering(&fixture, &fresh);
+    keys(&mut screen, "w");
+    assert!(fresh.is_file(), "the folders are created");
+    let blocked = fixture.dir.join("blocked").join("review-settings.toml");
+    std::fs::create_dir_all(&blocked).expect("a folder in the way");
+    let mut screen = open_remembering(&fixture, &blocked);
+    buffer(&mut screen, COLS, ROWS);
+    keys(&mut screen, "w");
+    buffer(&mut screen, COLS, ROWS);
+    assert!(screen.diff.options().wrap);
+    let said = screen.status.clone().unwrap_or_default();
+    assert!(said.contains("review-settings.toml") && said.contains("hold for this review"), "{said}");
+    screen.status = None;
+    keys(&mut screen, "u");
+    buffer(&mut screen, COLS, ROWS);
+    assert!(!screen.diff.split(), "still applies");
+    assert!(screen.status.as_deref().is_none_or(|s| !s.contains("review-settings")), "{:?}", screen.status);
 }
 
 #[test]
@@ -252,9 +452,6 @@ fn at_60_columns_the_switch_and_the_menu_fit_and_the_file_list_hides() {
     assert_eq!(screen.files.drawn_width, 0, "no room for the file list");
     let header = text(&drawn, 0);
     assert!(!screen.geometry.layout_switch.is_empty(), "{header:?}");
-    for (rect, _) in &screen.geometry.layout_switch {
-        assert!(rect.right() <= 60);
-    }
     let send = screen.geometry.send_button.expect("send");
     assert!(screen.geometry.layout_switch.iter().all(|(r, _)| r.right() < send.x), "{header:?}");
     let rect = half(&screen, true);
@@ -274,20 +471,24 @@ fn at_60_columns_the_switch_and_the_menu_fit_and_the_file_list_hides() {
 }
 
 #[test]
-fn a_config_file_that_cannot_be_written_says_so_and_the_setting_still_applies() {
-    let fixture = Fixture::new("settings-unwritable");
-    fixture.write_config("[review\n");
-    let (repo, capture) =
-        crate::review::capture(&fixture.repo(), &Request::Uncommitted { base: None }).expect("capture");
-    let (wake, _ready) = std::sync::mpsc::sync_channel(1);
-    let settings = crate::review::settings::Settings::new(ReviewConfig::DEFAULT, Some(fixture.config()));
-    let mut screen =
-        Screen::open_with(repo, capture, &fixture.data(), Box::new(fixture.agent.clone()), wake, settings)
-            .expect("screen");
-    settle(&mut screen);
-    keys(&mut screen, "w");
-    buffer(&mut screen, COLS, ROWS);
-    assert!(screen.diff.options().wrap);
-    assert!(screen.status.as_deref().is_some_and(|s| s.contains("does not parse")), "{:?}", screen.status);
-    assert_eq!(read(&fixture.config()), "[review\n", "left alone");
+fn the_header_keeps_the_switch_and_review_at_60_80_100_and_120_columns() {
+    let fixture = Fixture::new("settings-widths");
+    let mut screen = fixture.open_configured();
+    for cols in [60, 80, 100, 120] {
+        let drawn = buffer(&mut screen, cols, ROWS);
+        let header = text(&drawn, 0);
+        assert!(!screen.geometry.layout_switch.is_empty(), "{cols}: {header:?}");
+        // The fixture's Send label is long (`Send 0 new ▸ test agent (E)`): at 60 the
+        // switch alone joins it.
+        if cols >= 80 {
+            assert!(screen.geometry.review_button.is_some(), "{cols}: {header:?}");
+        }
+        if screen.geometry.settings_button.is_some() {
+            assert!(screen.geometry.review_button.is_some(), "{cols}: {header:?}");
+        }
+        if screen.geometry.wrap_switch.is_some() {
+            assert!(screen.geometry.settings_button.is_some(), "{cols}: {header:?}");
+        }
+        assert!(header.trim_end().ends_with("(E)"), "{cols}: {header:?}");
+    }
 }

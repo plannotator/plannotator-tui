@@ -143,14 +143,20 @@ impl Fixture {
         self.dir.join("config").join("config.toml")
     }
 
+    /// Where the review remembers the person's choices for the diff.
+    pub(super) fn state(&self) -> PathBuf {
+        super::settings::state::path(&self.data())
+    }
+
     /// The review screen as [`Self::open`] does, its diff drawn as `[review]` in the
-    /// fixture's config file says (the defaults when it has none), and writing changes there.
+    /// fixture's config file says (the defaults when it has none) with the remembered choices
+    /// over it, and remembering changes as the app does.
     pub(super) fn open_configured(&self) -> Screen {
         let (repo, capture) =
             super::capture(&self.repo(), &Request::Uncommitted { base: None }).expect("capture");
         let (wake, _ready) = std::sync::mpsc::sync_channel(1);
         let review = crate::config::Config::load_from(&self.config()).expect("config").review;
-        let settings = super::settings::Settings::new(review, Some(self.config()));
+        let settings = super::settings::Settings::load(review, Some(self.state()));
         let mut screen =
             Screen::open_with(repo, capture, &self.data(), Box::new(self.agent.clone()), wake, settings)
                 .expect("screen");

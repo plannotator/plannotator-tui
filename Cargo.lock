@@ -1635,7 +1635,6 @@ dependencies = [
  "terminal-colorsaurus",
  "time",
  "toml",
- "toml_edit",
  "tui-markdown",
  "unicode-width",
 ]
@@ -2509,7 +2508,6 @@ dependencies = [
  "indexmap",
  "toml_datetime",
  "toml_parser",
- "toml_writer",
  "winnow",
 ]
 

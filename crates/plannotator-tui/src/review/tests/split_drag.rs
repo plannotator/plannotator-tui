@@ -9,7 +9,7 @@ use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::style::Color;
 
 use super::*;
-use crate::config::Config;
+use crate::config::review::ReviewConfig;
 
 const COLS: u16 = 160;
 const ROWS: u16 = 30;
@@ -51,8 +51,17 @@ fn line(screen: &mut Screen) -> (u16, u16) {
     (column, row)
 }
 
+/// The split ratio the next review opens with, in thousandths: the remembered one.
 fn ratio_written(fixture: &Fixture) -> u16 {
-    Config::load_from(&fixture.config()).expect("config").review.split_ratio.permille()
+    let (settings, notice) = crate::review::settings::state::load(&fixture.state(), ReviewConfig::DEFAULT);
+    assert_eq!(notice, None);
+    settings.split_ratio.permille()
+}
+
+/// The ratio a drag to `cells` of `room` remembers: to the cell, then to two decimals.
+fn remembered(cells: u32, room: u32) -> u16 {
+    let permille = u16::try_from((cells * 1000).div_ceil(room)).expect("small");
+    (permille + 5) / 10 * 10
 }
 
 /// The first columns of the diff on each row: the old side's line numbers and the start of its
@@ -78,7 +87,7 @@ fn dragging_the_line_shares_the_width_and_moves_nothing_else() {
         assert!(screen.dividers.dragging_split());
         mouse(&mut screen, DRAG, column - 30, row);
         mouse(&mut screen, DRAG, column - 40, row + 3);
-        assert!(!fixture.config().exists() || ratio_written(&fixture) == 500, "nothing written mid-drag");
+        assert!(!fixture.state().exists(), "nothing written mid-drag");
         mouse(&mut screen, UP, column - 40, row + 3);
         let (moved, _) = line(&mut screen);
         assert_eq!(moved, column - 40, "{wrap}");
@@ -88,7 +97,7 @@ fn dragging_the_line_shares_the_width_and_moves_nothing_else() {
         if !wrap {
             assert_eq!(rows_shown(&mut screen), before, "nothing scrolled");
         }
-        assert_eq!(ratio_written(&fixture), u16::try_from((39 * 1000u32).div_ceil(159)).expect("small"));
+        assert_eq!(ratio_written(&fixture), remembered(39, 159), "to two decimals");
     }
 }
 
@@ -138,7 +147,7 @@ fn the_line_stops_where_either_side_would_lose_its_least_width() {
     let narrow = screen.diff.split_line().expect("split");
     assert_eq!(narrow, 39);
     assert_eq!(drawn.cell((narrow, row)).map(|c| c.symbol().to_owned()), Some("\u{2502}".to_owned()));
-    assert_eq!(ratio_written(&fixture), 875, "139 of 159 cells, rounded up");
+    assert_eq!(ratio_written(&fixture), 880, "139 of 159 cells: 0.875, then 0.88");
 }
 
 #[test]
@@ -181,7 +190,7 @@ fn a_key_drops_the_drag_and_keeps_the_ratio_dragged_to_so_far() {
     assert_eq!(line(&mut screen).0, column - 10, "the later drag moves nothing");
     assert_eq!(screen.diff.cursor().expect("cursor"), cursor);
     assert!(screen.diff.selection().is_none() && screen.drag.is_none());
-    assert_eq!(ratio_written(&fixture), 434);
+    assert_eq!(ratio_written(&fixture), remembered(69, 159));
 }
 
 #[test]
@@ -269,5 +278,5 @@ fn the_line_dragged_past_the_diffs_edges_or_off_the_screen_never_scrolls() {
     // The line moved, so compare what stays left of both places it was drawn.
     let after = rows_shown(&mut screen);
     assert_eq!(after, before, "nothing scrolled");
-    assert_eq!(ratio_written(&fixture), u16::try_from((59 * 1000u32).div_ceil(159)).expect("small"));
+    assert_eq!(ratio_written(&fixture), remembered(59, 159));
 }

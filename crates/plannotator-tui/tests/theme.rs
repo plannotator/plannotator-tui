@@ -57,8 +57,19 @@ fn configured_colors_are_printed_with_the_theme() {
 
 #[test]
 fn an_unreadable_theme_in_the_environment_is_reported_rather_than_ignored() {
+    // A config file of its own, so neither the environment's nor the user's is read.
+    let dir = std::env::temp_dir().join(format!("plannotator-tui-theme-env-bad-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    let path = dir.join("config.toml");
+    std::fs::write(&path, "").expect("config");
     let mut command = Command::new(env!("CARGO_BIN_EXE_plannotator-tui"));
-    let out = command.env("PLANNOTATOR_TUI_THEME", "solarized").arg("config").output().expect("config runs");
+    let out = command
+        .env("PLANNOTATOR_TUI_CONFIG", &path)
+        .env("PLANNOTATOR_TUI_THEME", "solarized")
+        .arg("config")
+        .output()
+        .expect("config runs");
+    let _ = std::fs::remove_dir_all(&dir);
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("solarized"));
 }
