@@ -145,6 +145,7 @@ fn notes_on_hidden_files_are_counted_on_screen_and_still_sent() {
     at(&mut screen, 9);
     keys(&mut screen, "c");
     type_and_save(&mut screen, "name the total");
+    open_notes(&mut screen);
     keys(&mut screen, "/panel");
     press(&mut screen, KeyCode::Enter);
     assert_eq!(shown(&mut screen).len(), 2);
@@ -225,6 +226,7 @@ fn at_eighty_columns_the_list_hides_beside_the_notes_and_the_rail_makes_way_for_
     at(&mut screen, 9);
     keys(&mut screen, "c");
     type_and_save(&mut screen, "name the total");
+    open_notes(&mut screen);
     let rows = frame(&mut screen, 80, 30);
     assert_eq!(screen.files.drawn_width, 0, "{rows:#?}");
     assert!(rows.iter().any(|r| r.contains("files hidden: f shows them")), "{rows:#?}");

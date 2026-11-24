@@ -222,6 +222,7 @@ fn with_the_notes_rail_closed_the_lists_and_the_whole_file_use_the_room() {
     at(&mut screen, 11);
     keys(&mut screen, "c");
     type_and_save(&mut screen, "return it directly");
+    open_notes(&mut screen);
     let rows = frame(&mut screen, 120, 40);
     assert!(rows.iter().any(|r| r.contains("return it directly")), "the rail shows the note: {rows:#?}");
     keys(&mut screen, "z");

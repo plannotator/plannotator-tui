@@ -170,6 +170,7 @@ fn notes_in_the_whole_file_go_in_the_diff_or_outside_it_and_enter_finds_them_aga
         (Side::New, 5, Some("x5 = 5"))
     );
     assert_eq!(outside.status(), Some(Status::NotInDiff));
+    open_notes(&mut screen);
     let rows = frame(&mut screen, 120, 40);
     assert!(
         diff_side(&screen, row_with(&rows, "x5 = 5")).starts_with('\u{258c}'),

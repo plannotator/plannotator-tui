@@ -59,16 +59,58 @@ impl Diff {
         }
     }
 
+    /// The first column of the pane of `side` in the last frame, left of its code: in a split
+    /// diff the new side's starts right of the line between the sides.
+    fn side_start(&self, side: plannotator_tui_review::Side) -> u16 {
+        match self.split_line() {
+            Some(line) if side == plannotator_tui_review::Side::New => line + 1,
+            _ => self.area.x + 1,
+        }
+    }
+
+    /// After a click on screen row `row`: click that row again left of the code of the side
+    /// the cursor went to, so the viewer no longer holds on to the clicked column.
+    ///
+    /// The viewer remembers the column a click lands on, and when the pane next changes width
+    /// (the notes panel or the file list opens or closes, the terminal is resized, the line
+    /// between the sides moves, the layout changes) it scrolls sideways until that column is
+    /// in view, making it the first column shown. Nothing here scrolls sideways, so a column
+    /// far right in a wide pane left only the tails of long lines in a narrower one. A click
+    /// left of the code names the column already first, and the code stays where it is.
+    pub(in crate::review) fn forget_column(&mut self, row: u16) -> Result<()> {
+        if self.engine.options().wrap {
+            // Wrapped rows have no columns off screen: the viewer never scrolls them sideways.
+            return Ok(());
+        }
+        let (Some(cursor), Some(side)) = (self.cursor_row(), self.cursor_side()?) else { return Ok(()) };
+        let column = self.side_start(side);
+        let same = self.row_at(column, row).is_some_and(|at| {
+            at.kind == DiffRowKind::Code
+                && (at.file, at.part, at.old_line, at.new_line)
+                    == (cursor.file, cursor.part, cursor.old_line, cursor.new_line)
+        });
+        if same {
+            let kind = MouseEventKind::Down(MouseButton::Left);
+            let click = Event::Mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE });
+            self.engine.handle_event(click, true)?;
+        }
+        Ok(())
+    }
+
     /// Select `lines` as `v` on the line a drag `up` (or down) started from and the cursor to
     /// the other end would: a click on each where the last frame drew it, so nothing scrolls
     /// and the viewer knows the screen row the cursor is on (it keeps that row when the pane
     /// is resized). False when either line is not on screen, or the clicks did not end in
     /// `lines`; the caller then selects them its own way.
+    ///
+    /// The clicks land left of the code ([`Self::forget_column`]): ones at the pane's right
+    /// edge scrolled the code sideways to that column once the pane got narrower, as it does
+    /// when the notes panel opens.
     pub(in crate::review) fn select_in_place(&mut self, lines: &Lines, up: bool) -> Result<bool> {
         let row = |line: u32| self.rows_showing(&Lines { first: line, last: line, ..lines.clone() });
         let (start, end) = if up { (lines.last, lines.first) } else { (lines.first, lines.last) };
         let (Some((from, _)), Some((to, _))) = (row(start), row(end)) else { return Ok(false) };
-        let column = self.side_column(lines.side);
+        let column = self.side_start(lines.side);
         let click = |row: u16| {
             let kind = MouseEventKind::Down(MouseButton::Left);
             Event::Mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE })

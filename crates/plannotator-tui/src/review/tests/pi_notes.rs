@@ -23,6 +23,8 @@ fn a_pi_note_on_a_shown_new_line_is_a_credited_line_comment() {
     let note = &screen.store.annotations()[0];
     assert_eq!((note.author.as_deref(), note.author_name.as_deref()), (Some("pi"), Some("pi \u{b7} test")));
     assert_eq!(screen.status.as_deref(), Some("note from pi \u{b7} test"));
+    assert!(!screen.rail_shown(), "a note from Pi opens no rail either");
+    open_notes(&mut screen);
     let rows = frame(&mut screen, 120, 40);
     assert!(row_with(&rows, "14 new").contains("pi \u{b7} test"), "the rail credits Pi");
     let feedback = screen.feedback(&screen.store.annotations().iter().collect::<Vec<_>>());
@@ -76,6 +78,7 @@ fn a_credit_too_long_for_the_bubble_title_moves_into_the_note_instead_of_being_c
             true
         })
         .expect("edit");
+    open_notes(&mut screen);
     let rows = frame(&mut screen, 80, 30);
     // The credit may wrap, but none of it is cut.
     assert!(rows.iter().any(|row| row.contains("From: pi \u{b7}")), "{rows:#?}");

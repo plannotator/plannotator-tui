@@ -184,6 +184,7 @@ pub(crate) struct Screen {
     /// First rail row drawn.
     rail_scroll: usize,
     /// Whether the rail shows: `[ui] notes_rail`, the last session's choice, `toggle-notes`.
+    /// A note saved or removed never opens or closes it.
     notes_rail: NotesRail,
     /// The changed files on the left, and their filter.
     files: files::FileList,
@@ -309,6 +310,7 @@ impl Screen {
             help_room: std::cell::Cell::new(0),
             quit: false,
         };
+        screen.notes_rail.settle(!screen.store.annotations().is_empty());
         screen.files_for_capture();
         let placed = screen.place_notes()?;
         // What placing the notes found, and a remembered settings file that could not be read.
@@ -334,8 +336,11 @@ impl Screen {
     }
 
     /// Start the notes rail as the last session left it, else as `[ui] notes_rail` says.
+    /// `when-notes` is decided by the notes the review opens with: saving a note never
+    /// opens the rail (`NotesRail::settle`).
     pub(crate) fn start_notes_rail(&mut self, start: RailStart) {
         self.notes_rail = NotesRail::load(start, &self.data_dir);
+        self.notes_rail.settle(!self.store.annotations().is_empty());
     }
 
     /// Whether the rail is shown, width allowing. Hidden, notes keep their gutter marks.
