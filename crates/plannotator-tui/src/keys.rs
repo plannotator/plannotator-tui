@@ -648,6 +648,7 @@ impl Keymap {
 
     /// The action's first key that no action of `context` takes, as the hints spell it;
     /// empty when there is none.
+    #[cfg_attr(not(unix), allow(dead_code, reason = "only the code review, Unix-only, asks"))]
     pub(crate) fn hint_besides(&self, action: Action, context: &[Action]) -> String {
         let taken =
             |key: &Key| context.iter().any(|&other| other != action && self.keys(other).contains(key));
