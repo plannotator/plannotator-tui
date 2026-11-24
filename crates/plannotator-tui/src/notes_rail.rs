@@ -4,13 +4,13 @@
 //! is a note to show, `shown` always shows it, `hidden` starts with it closed. Closing it with
 //! `toggle-notes` (`z`) holds: no note, resize, file switch or reload opens it again, only the
 //! key or moving the focus to it. The last choice is remembered across sessions in
-//! `<data>/clients/plannotator-tui/ui-state.json` and beats the setting: a rail the person
-//! left open shows from the start, notes or not, and one they left closed stays closed.
+//! `<data>/clients/plannotator-tui/ui-state.json` and beats the setting.
 //!
 //! The code review settles `when-notes` as it opens ([`NotesRail::settle`]): shown when the
 //! review opens with notes, away otherwise, and a note saved or removed later neither opens
-//! nor closes the rail, which would change the diff's width under the reader. That holds for
-//! every start: saving a note never changes whether the rail shows.
+//! nor closes the rail, which would change the diff's width under the reader. There a rail
+//! the person left open shows from the start, notes or not, so a first note cannot narrow the
+//! diff either. A document keeps a rail left open away until it has a note to show.
 
 use std::path::{Path, PathBuf};
 
@@ -54,28 +54,31 @@ pub(crate) struct NotesRail {
     opened: bool,
     /// `when-notes` was decided once, as the code review opened ([`Self::settle`]).
     settled: bool,
+    /// What the last session left the rail as: open, the code review shows it from the start.
+    remembered: Option<Choice>,
 }
 
 impl NotesRail {
     /// A session that starts as `start` says, with nothing remembered.
     pub(crate) fn new(start: RailStart) -> Self {
-        Self { start, closed: start == RailStart::Hidden, opened: false, settled: false }
+        Self { start, closed: start == RailStart::Hidden, opened: false, settled: false, remembered: None }
     }
 
-    /// A session that starts as the last one left the rail, else as `start` says. A rail
-    /// left open is open from the start, as one opened this session is, so it shows with no
-    /// notes and a first note does not change the diff's width. An unreadable state file
-    /// counts as no memory: the rail is only a view.
+    /// A session that starts as the last one left the rail, else as `start` says. An
+    /// unreadable state file counts as no memory: the rail is only a view.
     pub(crate) fn load(start: RailStart, data_dir: &Path) -> Self {
         let remembered = std::fs::read(state_path(data_dir))
             .ok()
             .and_then(|bytes| serde_json::from_slice::<UiState>(&bytes).ok())
             .and_then(|state| state.notes_rail);
         match remembered {
-            Some(choice) => {
-                let closed = choice == Choice::Closed;
-                Self { start, closed, opened: !closed, settled: false }
-            }
+            Some(choice) => Self {
+                start,
+                closed: choice == Choice::Closed,
+                opened: false,
+                settled: false,
+                remembered: Some(choice),
+            },
             None => Self::new(start),
         }
     }
@@ -87,12 +90,15 @@ impl NotesRail {
 
     /// Decide `when-notes` now, for a session that opens with notes or without
     /// (`has_notes`): with notes the rail shows, and stays when they are all removed;
-    /// without, it stays away until the key or the focus opens it. Notes coming or going
-    /// afterwards change nothing. The code review settles as it opens: a rail that appears
+    /// without, it stays away until the key or the focus opens it, unless the last session
+    /// left it open: then it shows from the start. Notes coming or going afterwards change
+    /// nothing. The code review settles as it opens: a rail that appears
     /// with the first note narrows the diff the moment that note is saved.
     #[cfg_attr(not(unix), allow(dead_code, reason = "only the code review, Unix-only, settles"))]
     pub(crate) fn settle(&mut self, has_notes: bool) {
-        if self.start == RailStart::WhenNotes && !self.closed && has_notes {
+        if !self.closed
+            && (self.remembered == Some(Choice::Open) || (self.start == RailStart::WhenNotes && has_notes))
+        {
             self.opened = true;
         }
         self.settled = true;
@@ -221,9 +227,9 @@ mod tests {
         rail.toggle(true, &data).expect("toggle");
         assert!(NotesRail::load(RailStart::Hidden, &data).shown(true), "an open choice beats hidden");
         let mut reopened = NotesRail::load(RailStart::WhenNotes, &data);
-        assert!(reopened.shown(true) && reopened.shown(false), "left open, it shows with no notes");
+        assert!(reopened.shown(true) && !reopened.shown(false), "a document still waits for a note");
         reopened.settle(false);
-        assert!(reopened.shown(false) && reopened.shown(true), "and a code review without notes keeps it");
+        assert!(reopened.shown(false) && reopened.shown(true), "the code review shows it from the start");
 
         std::fs::write(state_path(&data), "not json").expect("garbage");
         assert_eq!(NotesRail::load(RailStart::Hidden, &data), NotesRail::new(RailStart::Hidden));

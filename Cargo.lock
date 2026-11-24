@@ -524,7 +524,7 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 [[package]]
 name = "diffs-fancy-regex"
 version = "0.1.0"
-source = "git+https://github.com/plannotator/diffs-rs?branch=fix%2Fkeep-horizontal#e8b6319eac404b03ced9f6db7a89f85dbce50d1d"
+source = "git+https://github.com/plannotator/diffs-rs?branch=fix%2Fkeep-horizontal#5de401167955d0d16e94fe46c4abd3992ad17c87"
 dependencies = [
  "bit-set 0.8.0",
  "regex-automata",
@@ -534,7 +534,7 @@ dependencies = [
 [[package]]
 name = "diffs-rs"
 version = "0.2.4"
-source = "git+https://github.com/plannotator/diffs-rs?branch=fix%2Fkeep-horizontal#e8b6319eac404b03ced9f6db7a89f85dbce50d1d"
+source = "git+https://github.com/plannotator/diffs-rs?branch=fix%2Fkeep-horizontal#5de401167955d0d16e94fe46c4abd3992ad17c87"
 dependencies = [
  "anyhow",
  "clap",
@@ -560,7 +560,7 @@ dependencies = [
 [[package]]
 name = "diffs-syntect"
 version = "0.1.0"
-source = "git+https://github.com/plannotator/diffs-rs?branch=fix%2Fkeep-horizontal#e8b6319eac404b03ced9f6db7a89f85dbce50d1d"
+source = "git+https://github.com/plannotator/diffs-rs?branch=fix%2Fkeep-horizontal#5de401167955d0d16e94fe46c4abd3992ad17c87"
 dependencies = [
  "bincode",
  "diffs-fancy-regex",
@@ -580,7 +580,7 @@ dependencies = [
 [[package]]
 name = "diffs-two-face"
 version = "0.1.0"
-source = "git+https://github.com/plannotator/diffs-rs?branch=fix%2Fkeep-horizontal#e8b6319eac404b03ced9f6db7a89f85dbce50d1d"
+source = "git+https://github.com/plannotator/diffs-rs?branch=fix%2Fkeep-horizontal#5de401167955d0d16e94fe46c4abd3992ad17c87"
 dependencies = [
  "diffs-syntect",
  "serde",

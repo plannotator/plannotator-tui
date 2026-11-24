@@ -511,9 +511,10 @@ notes_rail = "when-notes"   # default; or "shown" (always, notes or not) or "hid
 
 `z` (`toggle-notes`) closes or opens the rail in the document and the code review alike,
 and the last choice is remembered in `clients/plannotator-tui/ui-state.json` under the data
-folder. A remembered choice wins over `notes_rail`: a rail you left open shows from the
-start, notes or not, and one you left closed stays closed. Saving a note never opens or
-closes the rail.
+folder. A remembered choice wins over `notes_rail`, and one you left closed stays closed.
+A rail you left open shows from the start in the code review, notes or not, and saving a
+note there never opens or closes it. In a document, with `when-notes`, a rail remembered
+open still waits for the first note before it takes any columns.
 
 A mouse selection is copied to the clipboard when you release the button, in a document and
 in the code review (the selected lines' code). To leave the clipboard alone, as with Herdr's
