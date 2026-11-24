@@ -6,8 +6,9 @@
 //! The rule is the viewer's (`diffs_rs::engine::Whitespace`): in each run of removed and
 //! added lines, a removed line pairs with an added one equal once whitespace is set aside,
 //! in order on both sides; a hunk is hidden when every line pairs, so when the run's removed
-//! lines and its added lines read the same. Whitespace here is any Unicode whitespace, more
-//! than Git's six bytes, so a hunk the viewer hides is never taken for one it shows.
+//! lines and its added lines read the same. Whitespace is what Git's `-b` and `-w` and the
+//! viewer see as whitespace: space, tab, line feed and carriage return. A vertical tab or a
+//! form feed is text, so a change to or from one still shows.
 
 use plannotator_tui_review::{Capture, Side};
 
@@ -76,16 +77,21 @@ fn only_whitespace<'a>(body: impl Iterator<Item = &'a str>, whitespace: Whitespa
     changed && runs_match
 }
 
+/// Whitespace as Git and the viewer see it; not a vertical tab or form feed.
+fn space(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '\r')
+}
+
 /// `line` as `whitespace` compares it: without its whitespace (`-w`), or with each run of it
 /// one space and none at the end (`-b`).
 fn normalized(line: &str, whitespace: Whitespace) -> String {
     match whitespace {
-        Whitespace::IgnoreAll => line.chars().filter(|c| !c.is_whitespace()).collect(),
+        Whitespace::IgnoreAll => line.chars().filter(|&c| !space(c)).collect(),
         Whitespace::IgnoreChange => {
             let mut out = String::with_capacity(line.len());
             let mut run = false;
             for c in line.chars() {
-                if c.is_whitespace() {
+                if space(c) {
                     run = true;
                 } else {
                     if std::mem::take(&mut run) {
@@ -134,5 +140,19 @@ mod tests {
         // An added line with no partner is a change.
         let section = "@@ -1 +1,2 @@\n-a\n+ a\n+b\n";
         assert!(!hunk_hidden(section.as_bytes(), Side::New, 1, Whitespace::IgnoreAll));
+    }
+
+    #[test]
+    fn a_vertical_tab_or_form_feed_is_text_and_a_carriage_return_or_tab_is_whitespace() {
+        for whitespace in [Whitespace::IgnoreAll, Whitespace::IgnoreChange] {
+            for changed in ["p\u{c}q", "p\u{b}q", "p q\u{c}", "p\u{a0}q"] {
+                let section = format!("@@ -1 +1 @@\n-p q\n+{changed}\n");
+                assert!(!hunk_hidden(section.as_bytes(), Side::New, 1, whitespace), "{changed:?} shows");
+            }
+            for changed in ["p\tq", "p q\r", "p  q "] {
+                let section = format!("@@ -1 +1 @@\n-p q\n+{changed}\n");
+                assert!(hunk_hidden(section.as_bytes(), Side::New, 1, whitespace), "{changed:?} hides");
+            }
+        }
     }
 }

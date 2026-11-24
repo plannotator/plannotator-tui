@@ -541,3 +541,25 @@ fn go_to_definition_opens_a_line_of_a_hidden_hunk_in_the_whole_file() {
     assert_eq!(whole.path, "j.go");
     assert_eq!(whole.target().expect("target").map(|(first, _)| first), Some(3));
 }
+
+#[test]
+fn a_change_to_a_form_feed_is_not_whitespace_and_stays_shown_and_selectable_when_it_is_hidden() {
+    // Git's `-w` and `-b`, and the viewer, take only space, tab, CR and LF as whitespace.
+    let fixture = Fixture::new("ws-form-feed");
+    fixture.write("ff.txt", "keep\np q\nend\n");
+    fixture.git(&["add", "."]);
+    fixture.git(&["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "ff"]);
+    fixture.write("ff.txt", "keep\np\u{c}q\nend\n");
+    let mut screen = fixture.open_configured();
+    keys(&mut screen, "W");
+    buffer(&mut screen);
+    assert_eq!(whitespace(&screen), diffs_rs::engine::Whitespace::IgnoreAll);
+    let want = Lines { path: "ff.txt".into(), side: Side::New, first: 2, last: 2 };
+    assert!(!screen.diff.hides(&screen.capture, &want, Whitespace::IgnoreAll));
+    screen.diff.reveal("ff.txt", Side::New, 2).expect("the changed line is shown");
+    keys(&mut screen, "vv");
+    assert_eq!(screen.diff.selection(), Some(want.clone()));
+    let drawn = buffer(&mut screen);
+    assert!(screen.diff.rows_showing(&want).is_some(), "{}", all(&drawn));
+    assert!(all(&drawn).contains("2+"), "drawn as an added line, not as unchanged: {}", all(&drawn));
+}
