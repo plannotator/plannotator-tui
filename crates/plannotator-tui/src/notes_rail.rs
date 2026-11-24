@@ -4,11 +4,13 @@
 //! is a note to show, `shown` always shows it, `hidden` starts with it closed. Closing it with
 //! `toggle-notes` (`z`) holds: no note, resize, file switch or reload opens it again, only the
 //! key or moving the focus to it. The last choice is remembered across sessions in
-//! `<data>/clients/plannotator-tui/ui-state.json` and beats the setting.
+//! `<data>/clients/plannotator-tui/ui-state.json` and beats the setting: a rail the person
+//! left open shows from the start, notes or not, and one they left closed stays closed.
 //!
 //! The code review settles `when-notes` as it opens ([`NotesRail::settle`]): shown when the
 //! review opens with notes, away otherwise, and a note saved or removed later neither opens
-//! nor closes the rail, which would change the diff's width under the reader.
+//! nor closes the rail, which would change the diff's width under the reader. That holds for
+//! every start: saving a note never changes whether the rail shows.
 
 use std::path::{Path, PathBuf};
 
@@ -60,15 +62,20 @@ impl NotesRail {
         Self { start, closed: start == RailStart::Hidden, opened: false, settled: false }
     }
 
-    /// A session that starts as the last one left the rail, else as `start` says. An
-    /// unreadable state file counts as no memory: the rail is only a view.
+    /// A session that starts as the last one left the rail, else as `start` says. A rail
+    /// left open is open from the start, as one opened this session is, so it shows with no
+    /// notes and a first note does not change the diff's width. An unreadable state file
+    /// counts as no memory: the rail is only a view.
     pub(crate) fn load(start: RailStart, data_dir: &Path) -> Self {
         let remembered = std::fs::read(state_path(data_dir))
             .ok()
             .and_then(|bytes| serde_json::from_slice::<UiState>(&bytes).ok())
             .and_then(|state| state.notes_rail);
         match remembered {
-            Some(choice) => Self { start, closed: choice == Choice::Closed, opened: false, settled: false },
+            Some(choice) => {
+                let closed = choice == Choice::Closed;
+                Self { start, closed, opened: !closed, settled: false }
+            }
             None => Self::new(start),
         }
     }
@@ -213,8 +220,10 @@ mod tests {
 
         rail.toggle(true, &data).expect("toggle");
         assert!(NotesRail::load(RailStart::Hidden, &data).shown(true), "an open choice beats hidden");
-        let reopened = NotesRail::load(RailStart::WhenNotes, &data);
-        assert!(reopened.shown(true) && !reopened.shown(false), "and when-notes still waits for a note");
+        let mut reopened = NotesRail::load(RailStart::WhenNotes, &data);
+        assert!(reopened.shown(true) && reopened.shown(false), "left open, it shows with no notes");
+        reopened.settle(false);
+        assert!(reopened.shown(false) && reopened.shown(true), "and a code review without notes keeps it");
 
         std::fs::write(state_path(&data), "not json").expect("garbage");
         assert_eq!(NotesRail::load(RailStart::Hidden, &data), NotesRail::new(RailStart::Hidden));

@@ -194,3 +194,34 @@ fn the_whole_file_view_keeps_the_rail_as_the_person_left_it_and_z_works_there() 
     assert!(!rows.iter().any(|r| r.contains("name the total")), "and still closed there");
     assert_eq!(screen.geometry.diff.width, 120);
 }
+
+#[test]
+fn a_rail_left_open_shows_from_the_start_and_a_saved_note_changes_nothing() {
+    for (remembered, shown) in [("open", true), ("closed", false)] {
+        let fixture = Fixture::new(&format!("rail-left-{remembered}"));
+        let state = fixture.data().join("clients").join("plannotator-tui");
+        std::fs::create_dir_all(&state).expect("state dir");
+        std::fs::write(state.join("ui-state.json"), format!(r#"{{"notesRail":"{remembered}"}}"#))
+            .expect("state");
+        let mut screen = fixture.open();
+        screen.start_notes_rail(RailStart::WhenNotes);
+        assert_eq!(screen.rail_shown(), shown, "left {remembered}, a review without notes");
+        let width = |screen: &mut Screen| {
+            frame(screen, 120, 40);
+            screen.geometry.diff.width
+        };
+        let before = width(&mut screen);
+        assert_eq!(before == 120, !shown, "left {remembered}: the rail's columns");
+        at(&mut screen, 9);
+        keys(&mut screen, "c");
+        type_and_save(&mut screen, "name the total");
+        assert_eq!(screen.rail_shown(), shown, "left {remembered}: a saved note changes nothing");
+        assert_eq!(width(&mut screen), before, "left {remembered}: the diff keeps its width");
+        let rows = frame(&mut screen, 120, 40);
+        let footer = row_with(&rows, "1 note");
+        assert_eq!(footer.contains("notes hidden"), !shown, "left {remembered}: {footer}");
+        if shown {
+            assert!(rows.iter().any(|r| r.contains("name the total")), "the open rail shows the note");
+        }
+    }
+}
