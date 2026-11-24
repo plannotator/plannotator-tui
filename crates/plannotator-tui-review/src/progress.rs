@@ -24,9 +24,8 @@
 //! record could never match.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::io::{Read as _, Write as _};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde::Serialize;
@@ -282,6 +281,7 @@ fn browser_entries(root: &Path, capture: &Capture) -> (Vec<RawEntry>, Vec<String
             (tracked, untracked_files(root))
         }
         Scope::Staged => (raw(&["--staged"]), Vec::new()),
+        Scope::Unstaged => (raw(&[]), untracked_files(root)),
         Scope::Branch { base } => {
             if !has_head() {
                 return (Vec::new(), untracked_files(root));
@@ -443,28 +443,9 @@ fn hash_symlink(root: &Path, path: &str) -> Option<String> {
 
 /// Run with `input` on stdin, written from its own thread so a large list cannot deadlock
 /// against git's output. Returns whether it exited 0, and its stdout.
-fn run_with_input(mut cmd: std::process::Command, input: &[u8]) -> Result<(bool, Vec<u8>)> {
-    let mut child = cmd
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(Error::GitMissing)?;
-    let writer = child.stdin.take().map(|mut stdin| {
-        let input = input.to_vec();
-        std::thread::spawn(move || {
-            let _ = stdin.write_all(&input);
-        })
-    });
-    let mut out = Vec::new();
-    if let Some(mut stdout) = child.stdout.take() {
-        let _ = stdout.read_to_end(&mut out);
-    }
-    if let Some(writer) = writer {
-        let _ = writer.join();
-    }
-    let status = child.wait().map_err(Error::GitMissing)?;
-    Ok((status.success(), out))
+fn run_with_input(cmd: std::process::Command, input: &[u8]) -> Result<(bool, Vec<u8>)> {
+    let ran = crate::children::exec(cmd, "hash-object", Some(input.to_vec()), None)?;
+    Ok((ran.status.success(), ran.stdout))
 }
 
 /// The record: the browser's `ViewedRecord`, fields in its order.

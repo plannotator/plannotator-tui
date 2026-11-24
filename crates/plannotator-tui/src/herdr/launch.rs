@@ -317,8 +317,8 @@ pub(crate) fn review_folder(env: &HerdrEnv, cwd: &Path) -> PathBuf {
 }
 
 #[cfg_attr(not(unix), allow(dead_code, reason = "code review is unix only"))]
-/// Resolve a `review` launch of the repository at `root` (already checked to have changes)
-/// in `scope`. Delivery and placement resolve as for `open`.
+/// Resolve a `review` launch of the repository at `root` (already checked to have changes,
+/// or to be a repository for the picker) in `scope`. Delivery and placement resolve as for `open`.
 pub(crate) fn plan_review(
     env: &HerdrEnv,
     config: &Config,

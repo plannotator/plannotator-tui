@@ -6,11 +6,16 @@
  * - Adds the tool `plannotator_tui_note`, which leaves a note in a running
  *   plannotator-tui that has the file open.
  * - Adds the command `/plannotator-tui`, which lists the running plannotator-tui apps.
+ * - Adds the command `/plannotator-review`, which runs `plannotator-tui review --pick` in
+ *   this terminal (Pi's screen steps aside until it quits): pick the changes to review, and
+ *   Send comes back to this session. `PLANNOTATOR_TUI_BIN` names the binary, else
+ *   `plannotator-tui` on PATH.
  *
  * Install: `plannotator-tui pi install`, or copy this file to ~/.pi/agent/extensions/.
  * No dependencies beyond Node and Pi.
  */
 
+import { spawn } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
 import * as net from "node:net";
@@ -77,6 +82,110 @@ function removeQuietly(file: string | undefined): void {
 	try {
 		fs.unlinkSync(file);
 	} catch {}
+}
+
+/** The most of a review's error output kept for the notice after it exits. */
+const MAX_REVIEW_STDERR = 4096;
+
+/** How a terminal program run in Pi's place ended: its exit code, or the signal that ended it. */
+export type Ran = { code: number | null; signal?: string | null; error?: string; stderr: string };
+
+/** The part of Pi's TUI that steps aside for a program run in its place. */
+export type StepsAside = { stop(): void; start(): void; requestRender(force?: boolean): void };
+
+/** The signals that end Pi while a review runs in its place. */
+const ENDING_SIGNALS = ["SIGTERM", "SIGHUP"] as const;
+
+/**
+ * Run `bin args` on Pi's terminal in place of Pi's screen: `tui` stops first and comes back
+ * after, however the program ends. stdin and stdout are inherited, so a full-screen program
+ * draws there; stderr is kept for the notice. A Ctrl+C the program leaves to the terminal
+ * does not end Pi. If Pi itself is told to end (SIGTERM, SIGHUP) the program is ended too
+ * and Pi's screen restored first; with no other handler for that signal, Pi then ends as it
+ * would have. Resolves when the program exits; never rejects.
+ */
+export async function runInPlace(
+	tui: StepsAside,
+	bin: string,
+	args: string[],
+	cwd: string,
+	env: NodeJS.ProcessEnv,
+	proc: NodeJS.Process = process,
+): Promise<Ran> {
+	tui.stop();
+	let restored = false;
+	const restore = () => {
+		if (restored) return;
+		restored = true;
+		tui.start();
+		tui.requestRender(true);
+	};
+	let child: ReturnType<typeof spawn> | undefined;
+	const ignore = () => {};
+	const ending = ENDING_SIGNALS.map((signal) => {
+		// Counted before ours goes in: with none, the default was to end Pi.
+		const others = proc.listenerCount(signal);
+		const onSignal = () => {
+			if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+			if (others === 0) {
+				// Pi ends now, as it would have: its screen stays put away for the shell.
+				restored = true;
+				removeHandlers();
+				proc.kill(proc.pid, signal);
+				return;
+			}
+			// Pi's own handlers run next, with its screen back as they expect it.
+			restore();
+		};
+		return { signal, onSignal };
+	});
+	const onExit = () => {
+		if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+	};
+	const removeHandlers = () => {
+		proc.removeListener("SIGINT", ignore);
+		proc.removeListener("exit", onExit);
+		for (const { signal, onSignal } of ending) proc.removeListener(signal, onSignal);
+	};
+	proc.on("SIGINT", ignore);
+	proc.on("exit", onExit);
+	// Ahead of Pi's own handlers, which may end the process before ours would run.
+	for (const { signal, onSignal } of ending) proc.prependListener(signal, onSignal);
+	try {
+		return await new Promise<Ran>((resolve) => {
+			let stderr = "";
+			let settled = false;
+			const finish = (ran: Ran) => {
+				if (settled) return;
+				settled = true;
+				resolve(ran);
+			};
+			try {
+				child = spawn(bin, args, { cwd, env, stdio: ["inherit", "inherit", "pipe"] });
+			} catch (err) {
+				finish({ code: null, error: err instanceof Error ? err.message : String(err), stderr });
+				return;
+			}
+			child.stderr?.on("data", (chunk: Buffer) => {
+				if (stderr.length < MAX_REVIEW_STDERR) stderr = (stderr + chunk.toString("utf8")).slice(0, MAX_REVIEW_STDERR);
+			});
+			child.once("error", (err) => finish({ code: null, error: err.message, stderr }));
+			child.once("close", (code, signal) => finish({ code, signal, stderr }));
+		});
+	} finally {
+		removeHandlers();
+		restore();
+	}
+}
+
+/** What a program run in Pi's place left to say, or `undefined` when it ended well. */
+export function ranNotice(bin: string, ran: Ran): string | undefined {
+	if (ran.error) return `Could not run ${bin}: ${ran.error}. Set PLANNOTATOR_TUI_BIN or put plannotator-tui on PATH.`;
+	if (ran.code === 0) return undefined;
+	const said = ran.stderr.trim();
+	if (said) return said;
+	if (ran.signal) return `plannotator-tui was stopped by signal ${ran.signal}`;
+	return `plannotator-tui exited with status ${ran.code}`;
 }
 
 /** Signal 0 checks a pid without touching it. EPERM means it exists but is not ours. */
@@ -489,6 +598,26 @@ export default function plannotatorTui(pi: ExtensionAPI) {
 			}
 			if (last === "not_running") last = `no_plannotator_tui: the plannotator-tui that had ${file} open is gone`;
 			throw new Error(last);
+		},
+	});
+
+	pi.registerCommand("plannotator-review", {
+		description: "Pick changes in this folder's git repository to review in plannotator-tui; Send comes back here",
+		handler: async (_args, cmdCtx) => {
+			if (!cmdCtx.hasUI || cmdCtx.mode !== "tui") {
+				cmdCtx.ui.notify("/plannotator-review needs Pi's terminal UI", "error");
+				return;
+			}
+			const bin = process.env.PLANNOTATOR_TUI_BIN?.trim() || "plannotator-tui";
+			// Send finds this Pi's entry in the registry by pid (`PLANNOTATOR_TUI_PI_PID`).
+			const env = { ...process.env, PLANNOTATOR_TUI_PI_PID: String(process.pid) };
+			const ran = await cmdCtx.ui.custom<Ran>(async (tui, _theme, _keybindings, done) => {
+				// Pi's screen steps aside for the review's, as it does for the external editor.
+				done(await runInPlace(tui, bin, ["review", "--pick", cmdCtx.cwd], cmdCtx.cwd, env));
+				return { render: () => [], invalidate() {} };
+			});
+			const notice = ranNotice(bin, ran);
+			if (notice) cmdCtx.ui.notify(notice, "error");
 		},
 	});
 

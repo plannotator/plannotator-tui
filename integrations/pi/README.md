@@ -33,6 +33,11 @@ there yourself. Then restart your Pi sessions, or run `/reload` in each one.
   `quote_not_found: copy the quote exactly from the file's source text, or leave quote out`.
   Then the model can try again.
 - Command `/plannotator-tui` lists the running plannotator-tui apps and their files.
+- Command `/plannotator-review` runs `plannotator-tui review --pick` in Pi's terminal: Pi's
+  screen steps aside, you pick the changes to review (uncommitted, unstaged, staged, the
+  branch or a recent commit) in the session's folder, and Send goes back to this session.
+  Pi's screen returns when the review quits. `PLANNOTATOR_TUI_BIN` names the binary, else
+  `plannotator-tui` on `PATH`.
 
 ## Test
 

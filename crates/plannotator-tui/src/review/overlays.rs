@@ -89,6 +89,10 @@ impl Screen {
                     ),
                     (key(&[Action::PickTarget]), "choose the agent Send goes to"),
                     (
+                        key(&[Action::PickChanges]),
+                        "pick what to review: uncommitted, unstaged, staged, a commit",
+                    ),
+                    (
                         key(&[Action::Reload]),
                         "reload the diff (the footer says when it changed); notes follow",
                     ),

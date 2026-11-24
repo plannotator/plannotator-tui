@@ -139,12 +139,16 @@ impl Screen {
             }
             Mode::ConfirmQuit => {
                 match self.keys.action(&key, keys::CONFIRM_QUIT) {
-                    Some(Action::Yes | Action::Confirm) => {
+                    // Only this review's notes can be sent from here.
+                    Some(Action::Yes | Action::Confirm) if self.has_unsent() => {
                         self.mode = Mode::Browse;
                         self.send_and_quit();
                     }
                     Some(Action::No) => self.quit = true,
-                    Some(Action::Back) => self.mode = Mode::Browse,
+                    Some(Action::Back) => {
+                        self.mode = Mode::Browse;
+                        self.go_to_unsent_elsewhere();
+                    }
                     _ => {}
                 }
                 Ok(())
@@ -252,6 +256,10 @@ impl Screen {
             }
             Some(Action::DiffSettings) => {
                 self.open_settings();
+                return Ok(());
+            }
+            Some(Action::PickChanges) => {
+                self.pick_request = true;
                 return Ok(());
             }
             _ => {}

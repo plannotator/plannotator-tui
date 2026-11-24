@@ -15,16 +15,21 @@
 //! - [`progress`]: viewed marks, in the browser's review-progress format.
 //! - [`export`]: the feedback text, in the browser's `exportReviewFeedback` format.
 //! - [`stamp`]: a cheap fingerprint of what a scope's diff depends on, to notice changes.
+//! - [`listing`]: what a change picker lists: recent commits, the branch, each scope's size.
+//! - [`children`]: the git processes running, so a job's can be stopped ([`Stop`]) and all
+//!   of them at exit ([`shutdown`]), with the folder the index copies live in.
 //!
 //! No terminal, no diff viewer: the app draws, this crate owns the records.
 
 pub mod annotation;
 pub mod capture;
+pub mod children;
 pub mod codenav;
 pub mod error;
 pub mod export;
 mod git;
 pub mod github;
+pub mod listing;
 pub mod patch;
 pub mod progress;
 pub mod resolve;
@@ -39,12 +44,14 @@ pub use capture::{
     Capture, DEFAULT_BASE, MAX_PATCH_BYTES, MAX_WHOLE_FILE_BYTES, PullRequest, Repo, Request, SideSource,
     WholeFile, patch_key,
 };
+pub use children::{Stop, shutdown};
 pub use error::{Error, Result};
 pub use export::{
     OUTDATED_ANNOTATION_LABEL, OUTSIDE_DIFF_ANNOTATION_LABEL, REVIEW_SUFFIX, agent_feedback,
     pull_agent_feedback, pull_feedback, review_feedback,
 };
 pub use github::{Gh, PrRepo, PrSpec, PrView};
+pub use listing::{Commit, DiffStat};
 pub use patch::{FilePatch, FileStatus};
 pub use progress::Progress;
 pub use resolve::{Current, Resolution, apply, resolve};

@@ -35,12 +35,28 @@ pub enum Error {
     Gh { detail: String },
     /// The text is no PR link or number.
     NotAPull { text: String },
+    /// The git command was stopped before it finished ([`crate::Stop`]), or the app is exiting.
+    Stopped,
+    /// A git command run in the background waited for input from the terminal (a clean
+    /// filter, hook or credential helper asking), which it cannot get there; it was killed.
+    NeedsTerminal { command: String },
+    /// A git command run in the background took longer than `after`; it was killed.
+    TimedOut { command: String, after: std::time::Duration },
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::GitMissing(source) => write!(f, "could not run git: {source}"),
+            Self::Stopped => write!(f, "stopped"),
+            Self::NeedsTerminal { command } => write!(
+                f,
+                "git {command} waited for input from the terminal (a filter, hook or credential helper \
+                 asking), which it cannot get while the review is open; run it in a shell first"
+            ),
+            Self::TimedOut { command, after } => {
+                write!(f, "git {command} took longer than {} s and was stopped", after.as_secs())
+            }
             Self::NotARepo { dir, detail } => {
                 write!(f, "{} is not inside a git repository ({detail})", dir.display())
             }

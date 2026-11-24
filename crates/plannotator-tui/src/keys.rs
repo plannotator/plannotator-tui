@@ -131,6 +131,9 @@ pub(crate) enum Action {
     /// Move the line between a split diff's sides left or right: less or more of the old side.
     SplitLeft,
     SplitRight,
+    /// Pick what the code review shows: uncommitted, unstaged or staged changes, the branch,
+    /// or one of the recent commits.
+    PickChanges,
 }
 
 use Action::{
@@ -145,7 +148,7 @@ use Action::{
     PreviousHunk, PreviousMatch, PreviousUnviewed, Search, Suggest, ToggleFiles, ToggleLayout, ToggleViewed,
     ToggleWrap, WholeBase, WholeFile,
 };
-use Action::{DiffSettings, SplitLeft, SplitRight, ToggleWhitespace};
+use Action::{DiffSettings, PickChanges, SplitLeft, SplitRight, ToggleWhitespace};
 use Action::{FilterFiles, FilterKinds, GoToDefinition, HideViewed, JumpBack, JumpForward};
 use Action::{NarrowColumn, NarrowFiles, NarrowNotes, ToggleNotes, WidenColumn, WidenFiles, WidenNotes};
 
@@ -238,6 +241,7 @@ pub(crate) const REVIEW_GLOBAL: &[Action] = &[
     NarrowNotes,
     WidenNotes,
     DiffSettings,
+    PickChanges,
 ];
 /// The diff. `left` and `right` pick the old and the new side.
 pub(crate) const DIFF: &[Action] = &[
@@ -310,6 +314,9 @@ pub(crate) const REVIEW_MENU: &[Action] =
 /// The code review's diff settings: up and down pick a setting, left and right change it,
 /// Enter (and Space) moves it on; the settings key again closes the menu.
 pub(crate) const SETTINGS: &[Action] = &[Down, Up, Left, Right, Confirm, Back, DiffSettings, Interrupt];
+/// The change picker (`pick-changes`, or `review --pick`): `pick-changes` again closes it.
+pub(crate) const PICK_CHANGES: &[Action] =
+    &[Down, Up, PageDown, PageUp, Top, Bottom, Confirm, Back, Reload, Help, PickChanges, Quit, Interrupt];
 /// The code review's key help: the motions scroll it when it does not fit; the rest close it.
 pub(crate) const HELP: &[Action] = &[Back, Help, Quit, Interrupt, Down, Up, PageDown, PageUp];
 
@@ -333,6 +340,7 @@ const SHARED: &[&[&[Action]]] = &[
     &[KINDS],
     &[REVIEW_MENU],
     &[SETTINGS],
+    &[PICK_CHANGES],
     &[HELP],
 ];
 
@@ -533,14 +541,16 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (DiffSettings, &[ch(',')]),
     (SplitLeft, &[ch('(')]),
     (SplitRight, &[ch(')')]),
+    (PickChanges, &[ch('p')]),
 ];
 
 /// Actions added after configs were written: `approve` (live only in a gated review), `copy`
 /// (on a waiting selection), `word-end`, `visual-line`, the code review's own, the reading
-/// column's, `toggle-notes` and search. The newest come first (`toggle-whitespace`, then
-/// `diff-settings`, `split-left` and `split-right`, then `copy-lines`), so they yield a key
-/// before an older action does.
+/// column's, `toggle-notes` and search. The newest come first (`pick-changes`, then
+/// `toggle-whitespace`, then `diff-settings`, `split-left` and `split-right`, then
+/// `copy-lines`), so they yield a key before an older action does.
 const LATE: &[Action] = &[
+    PickChanges,
     ToggleWhitespace,
     DiffSettings,
     SplitLeft,
@@ -778,6 +788,7 @@ impl Action {
             Self::DiffSettings => "diff-settings",
             Self::SplitLeft => "split-left",
             Self::SplitRight => "split-right",
+            Self::PickChanges => "pick-changes",
         }
     }
 }

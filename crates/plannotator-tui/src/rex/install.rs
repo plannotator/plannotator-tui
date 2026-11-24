@@ -231,6 +231,54 @@ mod tests {
     }
 
     // Unix paths: on Windows `/bin/pt` is not absolute. Rex runs on macOS.
+    /// `setup{}` run by a Lua on PATH against a fake `rex`, the keys it binds in order.
+    #[cfg(unix)]
+    #[allow(clippy::print_stderr, reason = "a skipped test says why")]
+    fn binds(lua: &str, setup: &str) -> String {
+        let dir = scratch(&format!("binds-{}", setup.len()));
+        std::fs::create_dir_all(&dir.0).expect("dir");
+        let path = dir.0.join("annotate.lua");
+        std::fs::write(&path, module(Path::new("/bin/pt")).expect("module")).expect("module");
+        let script = format!(
+            "rex = {{ action = function() end }}\nlocal bound = {{}}\n\
+             function rex.bind(key, name) bound[#bound + 1] = key .. '=' .. name end\n\
+             local M = dofile({:?})\nM.setup{setup}\nprint(table.concat(bound, ','))",
+            path.display().to_string()
+        );
+        let out = Command::new(lua).args(["-e", &script]).output().expect("lua runs");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[allow(clippy::print_stderr, reason = "a skipped test says why")]
+    fn a_key_the_setup_gives_another_action_takes_it_from_the_default_every_time() {
+        let lua = ["lua", "luajit", "lua5.4", "lua5.3", "lua5.1"]
+            .into_iter()
+            .find(|bin| Command::new(bin).arg("-v").output().is_ok_and(|out| out.status.success()));
+        let Some(lua) = lua else {
+            eprintln!("no Lua on PATH; skipping");
+            return;
+        };
+        let defaults = "shift+cmd+o=annotate_last,alt+shift+cmd+o=annotate_newest,ctrl+cmd+o=annotate_open";
+        assert_eq!(binds(lua, "{}"), format!("{defaults},ctrl+cmd+p=annotate_review_pick"));
+        // The same key spelled another way is still the same key.
+        assert_eq!(
+            binds(lua, "{ keys = { annotate_gate = \"Cmd + Ctrl+P\" } }"),
+            format!("{defaults},Cmd + Ctrl+P=annotate_gate")
+        );
+        assert_eq!(binds(lua, "{ keys = { annotate_review_pick = false } }"), defaults);
+        assert_eq!(
+            binds(
+                lua,
+                "{ keys = { annotate_review_pick = \"ctrl+cmd+k\", annotate_review = \"ctrl+cmd+r\" } }"
+            ),
+            format!("{defaults},ctrl+cmd+r=annotate_review,ctrl+cmd+k=annotate_review_pick")
+        );
+        assert_eq!(binds(lua, "{ keys = false }"), "");
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_code_review_action_runs_rex_review_and_has_no_key_until_you_give_it_one() {
@@ -240,7 +288,19 @@ mod tests {
         ));
         let keys =
             text.split("M.keys = {").nth(1).and_then(|rest| rest.split('}').next()).unwrap_or_default();
-        assert!(keys.contains("annotate_last") && !keys.contains("annotate_review"), "{keys}");
+        assert!(keys.contains("annotate_last") && !keys.contains("annotate_review ="), "{keys}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_pick_action_runs_rex_review_pick_on_ctrl_cmd_p() {
+        let text = module(Path::new("/bin/pt")).expect("module");
+        assert!(text.contains(
+            r#"name = "annotate_review_pick", title = "Annotate: Pick Changes to Review", args = { "review", "--pick" }"#
+        ));
+        let keys =
+            text.split("M.keys = {").nth(1).and_then(|rest| rest.split('}').next()).unwrap_or_default();
+        assert!(keys.contains(r#"annotate_review_pick = "ctrl+cmd+p""#), "{keys}");
     }
 
     #[test]

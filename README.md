@@ -194,6 +194,8 @@ In a folder review a search covers the open file only; opening another file drop
 ```sh
 plannotator-tui review                 # uncommitted changes in this repository
 plannotator-tui review --staged        # only what is staged
+plannotator-tui review --unstaged      # only what is not staged yet (untracked files too)
+plannotator-tui review --pick          # pick: uncommitted, unstaged, staged, the branch, a commit
 plannotator-tui review --base main     # everything since this branch left main
 plannotator-tui review --commit 1a2b3c # one commit
 plannotator-tui review ../other-repo   # another repository
@@ -201,7 +203,9 @@ plannotator-tui review 123             # pull request #123 of this repository (a
 plannotator-tui review https://github.com/owner/repo/pull/123
 ```
 
-`review` opens a git diff. Move with `j`/`k`, `]`/`[` for the next or previous hunk, and
+`review` opens a git diff. With nothing uncommitted (and nothing on the branch), it opens
+the [change picker](#pick-what-to-review) instead, so you can pick the commit the agent just
+made; when its output is not a terminal it fails as before. Move with `j`/`k`, `]`/`[` for the next or previous hunk, and
 `n`/`N` for the next or previous file. `h` and `l` go to the old and new side of a line.
 `v` starts a selection and a second `v` ends it. Then:
 
@@ -343,6 +347,56 @@ review started in the browser continues here and the other way round. A mark sto
 counting once its file changes. Set `PLANNOTATOR_REVIEW_PROGRESS=0` to keep marks for the
 session only. See [docs/spec-review-progress.md](docs/spec-review-progress.md).
 
+### Pick what to review
+
+`plannotator-tui review --pick`, or `p` (`pick-changes`) in a review, opens the change
+picker. Its rows never move:
+
+```
+  Uncommitted                       (no changes)
+  Unstaged                          (no changes)
+  Staged                            (no changes)
+  Branch vs origin/main         +120 −30 · 9 files   2h
+▸ a1b2c3d feat: login redirect   +12 −3 · 4 files   5m  Ada   2 unsent
+  9f8e7d6 fix: session timeout    +4 −1 · 1 file    1d  Ada
+  …the last 20 commits, newest first
+  more…
+```
+
+The branch row is there when its base (`origin/HEAD`) is known and the branch has moved
+past it. A row with nothing in it is dimmed and says `(no changes)`; `2 unsent` counts notes
+saved on that row's review and not sent yet, and `open` marks the review you came from. The
+cursor starts on the first row with changes, so when the agent has committed and the tree is
+clean, it is on that commit and the footer says `No uncommitted changes · pick a commit
+below`. Over a review, the cursor starts on that review's row. The commits show at once; the
+sizes fill in from the background, the rows on screen first, with `…` until then. At most two
+git commands run for them at a time; `r`, a choice or closing the picker stops the ones
+running, and quitting leaves no git command or index copy behind. They run off the
+terminal: one that asks for input there (a clean filter or credential helper) is stopped and
+its row says `(needs the terminal)`. Before any screen opens, git runs as before, so such a
+prompt shows and can be answered.
+
+`j`/`k`, `g`/`G` and `PageUp`/`PageDown` move, `enter` (or a click) reviews the row and
+`more…` lists 20 older commits; the wheel scrolls. `r` lists the commits and counts the
+changes again. `?` shows these keys and `q` quits. Over a review, `esc` or `p` goes back to
+it. A review you pick takes the delivery target, the agent `P` chose, the diff settings and
+the keys of the one before; notes you had not sent stay saved on their own review, and the
+footer says so (`2 unsent notes kept on Uncommitted`). Quitting asks first while notes are
+unsent on any review you opened this session, and names them apart from the review's own
+(`y send these to … · 1 more unsent on Commit 2efc81b (esc go to it) · n quit`); `esc` there
+opens the picker on that review. A review gone from the branch since (a commit amended away)
+is named once: its notes are kept, and quitting does not ask about them again. Choosing the row of the review you
+are in goes back to it as it was. Each row reviews exactly that diff: an empty one only says
+so, and one that cannot open (a patch over 8 MiB, say) says why and the picker stays; a
+commit gone since the list was read says to press `r`.
+
+A commit row is the diff `--commit` shows: a merge commit against its first parent. A commit
+that changes no lines (binary files, renames) shows its file count only. Unstaged and
+Uncommitted are two reviews with notes of their own, as `--unstaged` and a bare `review` are.
+A bare `review` in a repository with no commits yet still fails with `No uncommitted changes`;
+`--pick` opens the picker there anyway. `--pick` takes a folder, so a number after it is
+refused rather than read as a pull request: give a folder named only by digits as `./123`.
+
 ### Pull requests
 
 `review` with a pull request link, a number or `#123` (also `--pr PR`) reviews what GitHub
@@ -398,11 +452,14 @@ code block. Send goes to the agent in that pane, as it does for a reply; a pane 
 copies instead. `--print` writes the document to stdout instead of opening a pane. Herdr
 Annotate ships it as the `annotate.terminal` action with no default key.
 
-`plannotator-tui herdr review [--staged | --base REF | --commit SHA | PR]` opens a [code
-review](#code-review) of the focused pane's git repository (else the workspace's folder) in a
-pane. Send goes to the agent in that pane. A folder that is not in a repository, or has no
-changes to review, fails before any pane opens. The development manifest has it as the
-`review` action with no default key, on macOS and Linux.
+`plannotator-tui herdr review [--staged | --unstaged | --base REF | --commit SHA | PR | --pick]`
+opens a [code review](#code-review) of the focused pane's git repository (else the
+workspace's folder) in a pane. Send goes to the agent in that pane. A folder that is not in a
+repository, or a scope you named with no changes to review, fails before any pane opens; with
+no scope and nothing to review, the pane opens the [change picker](#pick-what-to-review).
+`--pick` opens the picker straight away: the launcher only checks the folder is in a
+repository. The development manifest has them as the `review` and `review-pick` actions with
+no default key, on macOS and Linux (Herdr manifests cannot declare keys; bind one in Herdr).
 
 A Claude Code session is looked up in `CLAUDE_CONFIG_DIR`, else `~/.claude`. An agent's own
 `CLAUDE_CONFIG_DIR` doesn't reach a pane Herdr opens, so if you run several profiles, list
@@ -636,6 +693,7 @@ added in a later release leaves its default key to whatever your file already bo
 | `quick-open` | `ctrl+p` | find a file by name in a folder review |
 | `review-menu` | `m` | the Review menu |
 | `pick-target` | `P` | choose the agent Send goes to (see [Choosing the agent](#choosing-the-agent)) |
+| `pick-changes` | `p` | code review: [pick what to review](#pick-what-to-review); in the picker, back to the review |
 | `resend-all` `finish-review` `undo-finish` `archive` | `R` `F` `U` `H` | file and folder review actions |
 | `toggle-hidden` | `.` | show/hide dot-prefixed entries in the tree |
 | `edit` `remove` | `e` `x`, `Delete` | the selected note |
@@ -704,6 +762,7 @@ Run it again after upgrading plannotator-tui. `--dry-run` says what it would wri
 | `Shift+Cmd+O` | `annotate_last` | the agent's recent replies |
 | `Alt+Shift+Cmd+O` | `annotate_newest` | the agent's newest reply, with no picker |
 | `Ctrl+Cmd+O` | `annotate_open` | the pane's folder, with a file tree |
+| `Ctrl+Cmd+P` | `annotate_review_pick` | the [change picker](#pick-what-to-review) for the pane's repository |
 | | `annotate_gate` | the pane's folder, with **Approve** (`A`) |
 | | `annotate_terminal` | the pane's recent output |
 | | `annotate_find` | the newest `.md` file the pane's output names |
@@ -715,9 +774,14 @@ Rex for Mac binds none of these keys by default. Change or add keys, or bind non
 require("plannotator.annotate").setup{
   placement = "split",                       -- tab | split | popup; default: [rex] placement, else tab
   keys = { annotate_gate = "ctrl+cmd+a", annotate_last = false },
+  -- annotate_review_pick = false leaves Ctrl+Cmd+P alone;
   -- keys = false binds none; the actions stay in the palette
 }
 ```
+
+A key you give any action in `keys` takes it from the default that had it: with
+`annotate_gate = "ctrl+cmd+p"`, Ctrl+Cmd+P opens the gate and the picker gets no key. A key
+you bind yourself with `rex.bind` wins when that line comes after `setup{}`.
 
 A review opens full size in a tab of its own, as Herdr's overlay does. It can open instead in
 a split to the right of the pane, so the agent stays in view, or in a floating popup over the
@@ -746,7 +810,7 @@ plannotator-tui rex last [--newest]         # the agent's replies
 plannotator-tui rex open [file.md | folder] # a document, or the pane's folder
 plannotator-tui rex terminal [--lines N]    # the pane's recent output; --print writes it out
 plannotator-tui rex find [--lines N]        # the newest .md file the pane's output names
-plannotator-tui rex review [--staged | --base REF | --commit SHA | PR] # a code review of the pane's repository
+plannotator-tui rex review [--staged | --unstaged | --base REF | --commit SHA | PR | --pick] # a code review of the pane's repository
 ```
 
 The pane is `--block <id>`, else `REX_BLOCK`, so an agent that runs a launcher in its own
@@ -755,7 +819,8 @@ config. `--paste` puts the feedback in the agent's prompt without pressing Enter
 agent's pane, so you can edit it first; the header says `claude prompt in a1d6db`.
 `rex open --gate [--result-file <path>]` adds Approve for a sign-off, as `herdr open --gate` does.
 `rex review` reviews the git repository of the pane's folder, as `herdr review` does: a folder
-that is not in a repository, or has no changes to review, fails before any split opens. Code
+that is not in a repository, or a scope you named with no changes to review, fails before any
+split opens, and `--pick` (or no scope with nothing to review) opens the change picker. Code
 review is not available on Windows yet.
 
 Send goes to the agent in the pane the review was opened from, with no question asked. `P`
@@ -784,7 +849,7 @@ plannotator-tui is started by a command rather than a manifest. Run it in an hc 
 plannotator-tui hc last [--newest] [--session <transcript>]   # the agent's replies
 plannotator-tui hc open [file.md | folder]                    # a document, or the terminal's folder
 plannotator-tui hc open plan.md --gate [--result-file <path>] # adds Approve, as `herdr open --gate`
-plannotator-tui hc review [--staged | --base REF | --commit SHA | PR] # a code review of the terminal's repository
+plannotator-tui hc review [--staged | --unstaged | --base REF | --commit SHA | PR | --pick] # a code review of the terminal's repository
 ```
 
 Each starts plannotator-tui in a terminal of its own, `annotate-<terminal>`, and shows it in
@@ -798,7 +863,8 @@ review starts anyway and cannot know your colours: the launcher prints herdr-app
 `hc attach` command. Set `[ui] theme` for that case. The terminal is removed when the review
 ends, and hc does not type a note about it into the agent's prompt. One review per terminal at a
 time. `hc review` reviews the git repository of the terminal's folder, as `herdr review` does: a
-folder that is not in a repository, or has no changes to review, fails before any terminal starts.
+folder that is not in a repository, or a scope you named with no changes to review, fails before
+any terminal starts, and `--pick` (or no scope with nothing to review) opens the change picker.
 
 The terminal is `--terminal <t>` (an address or a name), else `HC_TERMINAL_ID`, so an agent that
 runs a launcher in its own terminal reviews itself; that is how it hands you a plan. The header
@@ -877,6 +943,13 @@ Then:
 - **Notes from Pi:** Pi gets a `plannotator_tui_note` tool. It quotes text from a file you
   have open, optionally with a line number, and its note shows up beside that text marked
   `pi · <session name>`. The note is sent with the rest of your review.
+- **Review from Pi:** `/plannotator-review` runs `plannotator-tui review --pick` in Pi's own
+  terminal. Pi's screen steps aside, you [pick what to review](#pick-what-to-review) in the
+  session's folder, and Send goes back to that session; Pi's screen returns when the review
+  quits, also when Pi is told to end while the review runs (the review ends with it). If the
+  review cannot find that Pi session when you Send, it says so and copies the feedback
+  instead of sending it to any other pane.
+  `PLANNOTATOR_TUI_BIN` names the binary, else `plannotator-tui` on `PATH`.
 - `plannotator-tui pi list` lists the sessions; `plannotator-tui pi send --session <id or name>`
   sends stdin to one.
 
