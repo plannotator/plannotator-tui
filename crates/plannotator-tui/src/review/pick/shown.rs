@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::mpsc::SyncSender;
 
 use anyhow::Result;
-use plannotator_tui_review::{Capture, Repo};
+use plannotator_tui_review::{Capture, Repo, ReviewStore, Scope};
 use ratatui::Frame;
 use ratatui::crossterm::event::{Event, KeyEventKind};
 
@@ -191,10 +191,7 @@ impl Shown {
         if let Some(picker) = &mut self.picker {
             let outcome = match &event {
                 Event::Key(key) if key.kind != KeyEventKind::Release => picker.key(key),
-                Event::Mouse(mouse) => {
-                    picker.mouse(*mouse);
-                    Outcome::Stay
-                }
+                Event::Mouse(mouse) => picker.mouse(*mouse),
                 // The review under the box still follows the terminal's size.
                 Event::Resize(..) => {
                     if let Some(screen) = &mut self.screen {
@@ -223,7 +220,11 @@ impl Shown {
                 Ok(source) => {
                     let over = Some(screen.capture.scope.clone());
                     let keys = screen.keys.clone();
-                    self.picker = Some(Picker::open(source, None, over, keys, self.opener.wake.clone()));
+                    let mut picker = Picker::open(source, None, over, keys, self.opener.wake.clone());
+                    if let Some(at) = screen.switched.pick_at.take() {
+                        picker.keep_at(at);
+                    }
+                    self.picker = Some(picker);
                 }
                 Err(why) => screen.status = Some(why),
             }
@@ -237,7 +238,82 @@ impl Shown {
     }
 }
 
+/// A review this session showed and then left, by the record its notes are saved in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Left {
+    scope: Scope,
+    /// `Commit 2efc81b`, `Staged`, `PR #12`.
+    title: String,
+    project: String,
+    owner: String,
+}
+
+/// What a review knows of the others this session showed: quitting counts the notes left
+/// unsent on them too, not only its own.
+#[derive(Debug, Default)]
+pub(crate) struct Switched {
+    left: Vec<Left>,
+    /// Counted when quit was asked: the reviews left with notes still unsent, and how many.
+    pub(crate) unsent: Vec<(Scope, String, usize)>,
+    /// Where the next picker puts its cursor: the quit prompt's "go to it".
+    pick_at: Option<Scope>,
+}
+
 impl Screen {
+    /// This review, as one left behind.
+    fn left(&self) -> Left {
+        let (project, owner) = self.capture.record_owner();
+        let title = match &self.capture.pull {
+            Some(pull) => format!("PR #{}", pull.view.number),
+            None => self.capture.scope.title(),
+        };
+        Left { scope: self.capture.scope.clone(), title, project, owner }
+    }
+
+    /// Count the notes unsent on the reviews this session left, for the quit prompt. As for
+    /// this review's own, only when Send goes to an agent.
+    pub(in crate::review) fn count_unsent_elsewhere(&mut self) {
+        self.switched.unsent = if self.delivery.is_agent() {
+            self.switched
+                .left
+                .iter()
+                .filter_map(|left| {
+                    let store =
+                        ReviewStore::load(&self.data_dir, &left.project, &left.owner, &left.scope).ok()?;
+                    let unsent = store.pending().len();
+                    (unsent > 0).then(|| (left.scope.clone(), left.title.clone(), unsent))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+    }
+
+    /// `1 unsent note on Commit 2efc81b`, `3 unsent notes on Staged, 1 on Commit 2efc81b`.
+    pub(in crate::review) fn unsent_elsewhere_text(&self) -> Option<String> {
+        let parts: Vec<String> = self
+            .switched
+            .unsent
+            .iter()
+            .enumerate()
+            .map(|(index, (_, title, count))| match (index, count) {
+                (0, 1) => format!("1 unsent note on {title}"),
+                (0, n) => format!("{n} unsent notes on {title}"),
+                (_, n) => format!("{n} on {title}"),
+            })
+            .collect();
+        (!parts.is_empty()).then(|| parts.join(", "))
+    }
+
+    /// The quit prompt's way back: the picker over this review, its cursor on the first
+    /// review left with unsent notes.
+    pub(in crate::review) fn go_to_unsent_elsewhere(&mut self) {
+        if let Some((scope, ..)) = self.switched.unsent.first() {
+            self.switched.pick_at = Some(scope.clone());
+            self.pick_request = true;
+        }
+    }
+
     /// What the picker over this review lists: its repository. A pull request fetched into
     /// the cache repository has no working tree of its own to pick from.
     fn pick_source(&self, data_dir: &std::path::Path) -> Result<Arc<dyn Source>, String> {
@@ -269,6 +345,15 @@ impl Screen {
         next.notes_rail.settle(!next.store.annotations().is_empty());
         next.reach = std::mem::take(&mut self.reach);
         next.pi_link = self.pi_link.take();
+        // The reviews left so far and this one, less the one opening.
+        let here = self.left();
+        let opening = next.left();
+        next.switched.left = std::mem::take(&mut self.switched.left);
+        next.switched.left.retain(|left| *left != here);
+        next.switched.left.push(here);
+        next.switched.left.retain(|left| {
+            (&left.scope, &left.project, &left.owner) != (&opening.scope, &opening.project, &opening.owner)
+        });
         let unsent = self.store.pending().len();
         if unsent > 0 && self.capture.scope != next.capture.scope {
             let notes =

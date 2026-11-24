@@ -63,7 +63,7 @@ impl Row {
     pub(super) fn title(&self) -> (Option<String>, String) {
         match &self.kind {
             Kind::Commit(commit) => {
-                (Some(commit.sha.get(..7).unwrap_or(&commit.sha).to_owned()), commit.subject.clone())
+                (Some(commit.sha.get(..7).unwrap_or(&commit.sha).to_owned()), clean(&commit.subject))
             }
             Kind::More => (None, "more\u{2026}".to_owned()),
             _ => (None, self.name()),
@@ -79,6 +79,10 @@ impl Row {
             Sized::Waiting | Sized::Asking => Stat::Pending,
             Sized::Failed(_) => Stat::Failed,
             Sized::Known(size) if size.stat.is_empty() => Stat::Empty,
+            // Binary files and pure renames change no lines: `+0 −0` would read as nothing.
+            Sized::Known(size) if size.stat.additions == 0 && size.stat.deletions == 0 => {
+                Stat::Files { files: size.stat.files }
+            }
             Sized::Known(size) => Stat::Lines {
                 added: size.stat.additions,
                 removed: size.stat.deletions,
@@ -99,9 +103,9 @@ impl Row {
         }
     }
 
-    pub(super) fn author(&self) -> Option<&str> {
+    pub(super) fn author(&self) -> Option<String> {
         match &self.kind {
-            Kind::Commit(commit) => Some(&commit.author),
+            Kind::Commit(commit) => Some(clean(&commit.author)),
             _ => None,
         }
     }
@@ -120,7 +124,15 @@ pub(super) enum Stat {
     Pending,
     Failed,
     Empty,
-    Lines { added: u64, removed: u64, files: usize },
+    Lines {
+        added: u64,
+        removed: u64,
+        files: usize,
+    },
+    /// Files changed with no line added or removed: binary files, renames, mode changes.
+    Files {
+        files: usize,
+    },
 }
 
 impl Stat {
@@ -135,8 +147,27 @@ impl Stat {
                 format!("+{added} \u{2212}{removed} \u{b7} {count} {noun}")
             }
             Self::Lines { added, removed, .. } => format!("+{added} \u{2212}{removed}"),
+            Self::Files { files } => file_count(files),
         }
     }
+}
+
+/// `1 file`, `4 files`.
+pub(super) fn file_count(files: usize) -> String {
+    if files == 1 { "1 file".to_owned() } else { format!("{files} files") }
+}
+
+/// `text` as one line that draws as wide as it measures: tabs and line breaks become spaces,
+/// other control characters (and the bidirectional overrides that reorder what follows) go.
+pub(super) fn clean(text: &str) -> String {
+    text.chars()
+        .filter_map(|c| match c {
+            '\t' | '\n' | '\r' => Some(' '),
+            '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' => None,
+            c if c.is_control() => None,
+            c => Some(c),
+        })
+        .collect()
 }
 
 /// How long ago `then` was, `now` being the present, both in seconds since the epoch: `now`,
@@ -187,5 +218,30 @@ mod tests {
         assert_eq!(Stat::Lines { added: 1, removed: 0, files: 1 }.text(true), "+1 \u{2212}0 \u{b7} 1 file");
         assert_eq!(Stat::Empty.text(true), "(no changes)");
         assert_eq!(Stat::Pending.text(true), "\u{2026}");
+        assert_eq!(Stat::Files { files: 1 }.text(true), "1 file");
+        assert_eq!(Stat::Files { files: 2 }.text(false), "2 files");
+    }
+
+    #[test]
+    fn subjects_and_authors_lose_what_would_draw_narrower_than_it_measures() {
+        assert_eq!(clean("fix:\tsplit\r\nlines"), "fix: split  lines");
+        assert_eq!(clean("a\u{1b}[31mred\u{7}"), "a[31mred");
+        assert_eq!(clean("x\u{202e}cba"), "xcba");
+        assert_eq!(clean("Ada Lovelace \u{1f600}"), "Ada Lovelace \u{1f600}");
+    }
+
+    #[test]
+    fn a_commit_that_changes_no_lines_reads_as_its_files() {
+        use plannotator_tui_review::DiffStat;
+        let commit =
+            Commit { sha: "a".repeat(40), subject: "\tbinary\u{0}".into(), author: "A\nB".into(), time: 0 };
+        let mut row = Row::new(Kind::Commit(commit));
+        row.size = Sized::Known(Size {
+            stat: DiffStat { files: 1, additions: 0, deletions: 0, newest: None },
+            unsent: 0,
+        });
+        assert_eq!(row.stat(), Some(Stat::Files { files: 1 }));
+        assert_eq!(row.title().1, " binary");
+        assert_eq!(row.author().as_deref(), Some("A B"));
     }
 }

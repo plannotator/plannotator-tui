@@ -116,10 +116,13 @@ fn gate_delivery() -> Box<dyn Delivery> {
 /// The Pi that started the review, or the Rex block, hc terminal or Herdr agent pane the
 /// environment names, if any.
 fn agent_pane() -> Option<Box<dyn Delivery>> {
-    // Set only by Pi's `/plannotator-review`, for the review it runs in its own terminal.
-    if let Some(pi) = crate::pi::target::PiSession::from_lookup(|k| std::env::var(k).ok(), &crate::pi::root())
-    {
-        return Some(Box::new(pi));
+    // Set only by Pi's `/plannotator-review`, for the review it runs in its own terminal. A
+    // Pi that cannot be found refuses Send: the Rex block, hc terminal or Herdr pane in Pi's
+    // environment is the one the review now runs in.
+    match crate::pi::target::PiSession::from_lookup(|k| std::env::var(k).ok(), &crate::pi::root()) {
+        Some(Ok(pi)) => return Some(Box::new(pi)),
+        Some(Err(gone)) => return Some(Box::new(gone)),
+        None => {}
     }
     if let Some(agent) = RexAgent::from_lookup(|k| std::env::var(k).ok()) {
         return Some(Box::new(agent));
@@ -672,7 +675,7 @@ fn claim_input(shift_enter: bool) {
 }
 
 /// Undo `claim_input` and mouse capture, in reverse order.
-fn release_input(shift_enter: bool) {
+pub(crate) fn release_input(shift_enter: bool) {
     if shift_enter {
         let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
     }

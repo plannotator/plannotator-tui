@@ -12,7 +12,9 @@
 --                                   beside the pane, or a popup over it; default: [rex]
 --                                   placement in plannotator-tui's config, else a tab
 --   keys = { annotate_gate = "ctrl+cmd+a", annotate_last = false }
---                                   change, add or drop keys; keys = false binds none
+--                                   change, add or drop keys; keys = false binds none. A key
+--                                   given here to any action takes it from a default. A key
+--                                   you rex.bind yourself wins when it comes after setup{}.
 --   bin = "/path/to/plannotator-tui"
 
 local M = {}
@@ -93,13 +95,38 @@ function M.setup(opts)
   end
 
   if opts.keys == false then return end
-  local keys = {}
-  for name, key in pairs(M.keys) do keys[name] = key end
-  for name, key in pairs(opts.keys or {}) do keys[name] = key end
-  -- `rex keymap` reports a key bound to an action that doesn't exist.
-  for name, key in pairs(keys) do
+  local mine = opts.keys or {}
+  -- A key the setup gives any action is theirs: a default on the same key steps aside.
+  local taken = {}
+  for _, key in pairs(mine) do
+    if key then taken[M.key_id(key)] = true end
+  end
+  local function sorted(t)
+    local names = {}
+    for name in pairs(t) do names[#names + 1] = name end
+    table.sort(names)
+    return names
+  end
+  -- Defaults first, then the setup's own, each in name order, so the same setup binds the
+  -- same way every time. `rex keymap` reports a key bound to an action that doesn't exist.
+  for _, name in ipairs(sorted(M.keys)) do
+    local key = M.keys[name]
+    if mine[name] == nil and not taken[M.key_id(key)] then rex.bind(key, name) end
+  end
+  for _, name in ipairs(sorted(mine)) do
+    local key = mine[name]
     if key then rex.bind(key, name) end
   end
+end
+
+-- A key as one string whatever its spelling: `Cmd+Ctrl+P` and `ctrl+cmd+p` are one key.
+function M.key_id(key)
+  local parts = {}
+  for part in key:lower():gsub("%s+", ""):gmatch("[^+]+") do parts[#parts + 1] = part end
+  local last = table.remove(parts)
+  table.sort(parts)
+  parts[#parts + 1] = last
+  return table.concat(parts, "+")
 end
 
 return M

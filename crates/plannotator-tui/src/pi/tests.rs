@@ -232,11 +232,62 @@ fn the_pi_that_started_a_review_is_its_send_target_by_pid() {
     let root = temp_root("by-pid");
     let (port, pi) = fake_pi(vec![json!({"ok": true, "busy": false, "name": "api", "id": "s1"})]);
     entry(&root, port, "t");
+    // Another Pi's entry, which refuses connections: it is neither pinged nor deleted.
+    let other = root.join("pi").join("s2-7.json");
+    let value = json!({
+        "v": 1, "host": "pi", "id": "s2", "pid": 7, "cwd": "/w/web", "name": "web",
+        "transcript": null, "port": CLOSED_PORT, "token": "u", "busy": false, "updated": 9,
+    });
+    write_entry(&other, &value).expect("entry");
     let lookup = |pid: &'static str| move |k: &str| (k == target::PID_VAR).then(|| pid.to_owned());
-    let session = target::PiSession::from_lookup(lookup("42"), &root).expect("pid 42 is listed");
+    let session = target::PiSession::from_lookup(lookup("42"), &root)
+        .expect("the variable is set")
+        .map_err(|_| "gone")
+        .expect("pid 42 is listed");
     assert_eq!(crate::delivery::Delivery::describe(&session), "pi · api");
     assert_eq!(pi.join().expect("fake pi")[0]["op"], "ping");
-    assert!(target::PiSession::from_lookup(lookup("7"), &root).is_none(), "no Pi has pid 7");
+    assert!(other.exists(), "the other Pi's entry was left alone");
     assert!(target::PiSession::from_lookup(|_: &str| None, &root).is_none(), "unset");
+    // Set, and no live session: Send refuses instead of falling back to Pi's own pane.
+    for pid in ["9", "x"] {
+        let Some(Err(gone)) = target::PiSession::from_lookup(lookup(pid), &root) else {
+            panic!("pid {pid} refuses");
+        };
+        let err = crate::delivery::Delivery::deliver(&gone, "notes").expect_err("refused").to_string();
+        assert!(err.contains(pid), "{err}");
+        assert!(crate::delivery::Delivery::is_agent(&gone), "quitting still asks about unsent notes");
+    }
     std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// `/plannotator-review`'s runner against a fake Pi screen and process
+/// (`integrations/pi/run-in-place.test.mjs`), when a Node that can load the extension is here.
+#[cfg(unix)]
+#[test]
+#[allow(clippy::print_stderr, reason = "a skipped test says why")]
+fn the_review_command_puts_pis_screen_back_and_ends_the_review_with_pi() {
+    let version =
+        std::process::Command::new("node").arg("--version").output().ok().filter(|out| out.status.success());
+    let numbers: Vec<u32> = version
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().trim_start_matches('v').to_owned())
+        .unwrap_or_default()
+        .split('.')
+        .filter_map(|part| part.parse().ok())
+        .collect();
+    if numbers.len() < 2 || (numbers[0], numbers[1]) < (22, 7) {
+        eprintln!("no Node 22.7 or later; skipping");
+        return;
+    }
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../integrations/pi/run-in-place.test.mjs");
+    let out = std::process::Command::new("node")
+        .args(["--experimental-transform-types", "--no-warnings"])
+        .arg(&script)
+        .output()
+        .expect("node runs");
+    assert!(
+        out.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
 }

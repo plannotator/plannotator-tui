@@ -35,6 +35,7 @@ mod diff;
 mod divider;
 mod drafts;
 mod draw;
+mod exit;
 mod files;
 mod footer;
 mod header;
@@ -229,6 +230,8 @@ pub(crate) struct Screen {
     help_room: std::cell::Cell<usize>,
     /// `pick-changes` was pressed: the event loop opens the change picker over the review.
     pick_request: bool,
+    /// The other reviews this session showed, for the notes left unsent on them.
+    switched: pick::shown::Switched,
     quit: bool,
 }
 
@@ -318,6 +321,7 @@ impl Screen {
             help_scroll: 0,
             help_room: std::cell::Cell::new(0),
             pick_request: false,
+            switched: pick::shown::Switched::default(),
             quit: false,
         };
         screen.notes_rail.settle(!screen.store.annotations().is_empty());
@@ -583,6 +587,12 @@ pub(crate) fn capture_any(dir: &Path, request: &plannotator_tui_review::Request)
     let repo = Repo::discover(dir)?;
     let capture = repo.open(request).with_context(|| format!("reviewing {}", repo.root().display()))?;
     Ok((repo, capture))
+}
+
+/// A bare review with nothing to show opens the picker instead, once there is a commit to
+/// pick: in a repository with none, the picker could only say there is nothing.
+pub(crate) fn picks_instead(repo: &Repo) -> bool {
+    repo.commits(0, 1).is_ok_and(|commits| !commits.is_empty())
 }
 
 /// What to say when `capture` has nothing to show: `No uncommitted changes in app`.

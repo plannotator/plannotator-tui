@@ -51,6 +51,11 @@ impl ReviewArgs {
         let set = |next: Target, request: &mut Option<Target>| {
             match (&*request, &next) {
                 (None, _) => {}
+                (Some(Target::Pick), Target::Review(Request::PullRequest { pr }))
+                | (Some(Target::Review(Request::PullRequest { pr })), Target::Pick) => anyhow::bail!(
+                    "--pick takes a folder, and {pr} reads as a pull request: to review the pull request \
+                     drop --pick; for a folder named {pr}, give it as ./{pr}"
+                ),
                 (Some(Target::Pick), _) | (_, Target::Pick) => anyhow::bail!(
                     "--pick chooses what to review in the picker: drop --staged, --unstaged, --base, \
                      --commit or the pull request"
@@ -121,6 +126,7 @@ pub(super) fn open(args: ReviewArgs) -> Result<()> {
         "the code review is drawn on the terminal, and stdout is not one"
     );
     let data_dir = crate::workspace_paths::data_dir();
+    let _exit = super::exit::guard();
     crate::cli::with_terminal(|terminal, session| {
         let (wake, ready) = mpsc::sync_channel(1);
         // The diff draws as `[review]` says, with the choices remembered from the last review
@@ -150,7 +156,7 @@ pub(super) fn open(args: ReviewArgs) -> Result<()> {
 
 /// What the screen opens on: the review `target` names, or the picker. A folder outside a
 /// repository fails here, as a review with nothing to show does, unless it is a bare
-/// `review` on a `terminal`, which picks instead.
+/// `review` on a `terminal` in a repository with commits, which picks instead.
 fn starting(dir: &std::path::Path, target: &Target, terminal: bool) -> Result<Start> {
     let request = match target {
         Target::Pick => return Ok(Start::Pick(Repo::discover(dir)?)),
@@ -160,7 +166,9 @@ fn starting(dir: &std::path::Path, target: &Target, terminal: bool) -> Result<St
     match super::nothing_to_review(&repo, &capture) {
         None => Ok(Start::Review(repo, Box::new(capture))),
         // The picker says `Nothing to review in app` itself once it has looked.
-        Some(_) if terminal && target.picks_when_empty() => Ok(Start::Pick(repo)),
+        Some(_) if terminal && target.picks_when_empty() && super::picks_instead(&repo) => {
+            Ok(Start::Pick(repo))
+        }
         Some(nothing) => anyhow::bail!(nothing),
     }
 }
@@ -276,12 +284,19 @@ mod tests {
             &["--unstaged", "--pick"],
             &["--pick", "--base", "main"],
             &["--commit", "HEAD", "--pick"],
-            &["--pick", "12"],
             &["--pick", "--pick"],
         ] {
             let err = parse(args).expect_err("refused").to_string();
             assert!(err.starts_with("--pick chooses what to review in the picker"), "{args:?}: {err}");
         }
+        // A number after --pick is a pull request, not the folder it might have meant.
+        for args in [&["--pick", "3"][..], &["#3", "--pick"], &["--pick", "--pr", "3"]] {
+            let err = parse(args).expect_err("refused").to_string();
+            assert!(err.starts_with("--pick takes a folder, and "), "{args:?}: {err}");
+            assert!(err.contains("./"), "{err}");
+        }
+        let folder = parse(&["--pick", "./3"]).expect("a folder named 3");
+        assert_eq!((folder.target, folder.dir), (Target::Pick, Some(PathBuf::from("./3"))));
     }
 
     /// A repository with one commit and a clean tree, in a folder of its own.
@@ -322,5 +337,25 @@ mod tests {
         assert!(starting(&outside, &Target::Pick, true).is_err(), "not a repository fails before any screen");
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn a_bare_review_in_a_repository_with_no_commits_fails_as_before_and_pick_still_picks() {
+        let dir = std::env::temp_dir().join(format!("pt-review-start-fresh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let ok =
+            std::process::Command::new("git").arg("-C").arg(&dir).args(["init", "-q"]).status().expect("git");
+        assert!(ok.success());
+        let bare = Target::Review(Request::Uncommitted { base: None });
+        let err = starting(&dir, &bare, true).map(|_| ()).expect_err("nothing to pick from").to_string();
+        assert!(err.starts_with("No uncommitted changes in "), "{err}");
+        assert!(matches!(starting(&dir, &Target::Pick, true), Ok(Start::Pick(_))), "--pick opens it anyway");
+        // The launchers open no pane for it either, and do for --pick.
+        let err = crate::review::scope::changes(&dir, &bare).expect_err("no pane").to_string();
+        assert!(err.starts_with("No uncommitted changes in "), "{err}");
+        let (_, value) = crate::review::scope::changes(&dir, &Target::Pick).expect("pick");
+        assert_eq!(value, "pick");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

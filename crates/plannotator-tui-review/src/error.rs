@@ -35,12 +35,15 @@ pub enum Error {
     Gh { detail: String },
     /// The text is no PR link or number.
     NotAPull { text: String },
+    /// The git command was stopped before it finished ([`crate::Stop`]), or the app is exiting.
+    Stopped,
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::GitMissing(source) => write!(f, "could not run git: {source}"),
+            Self::Stopped => write!(f, "stopped"),
             Self::NotARepo { dir, detail } => {
                 write!(f, "{} is not inside a git repository ({detail})", dir.display())
             }

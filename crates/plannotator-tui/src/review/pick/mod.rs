@@ -11,7 +11,8 @@
 //!
 //! Enter captures the row's scope exactly ([`plannotator_tui_review::Repo::capture`]: no
 //! fallback to another scope), also in the background; what fails says so in the footer and
-//! the picker stays. [`shown`] turns a capture into a review, carrying the open review's
+//! the picker stays. At most two jobs run at once ([`source::AT_ONCE`]), so at most two git
+//! commands; a reload, a choice or closing the picker kills what runs. [`shown`] turns a capture into a review, carrying the open review's
 //! delivery, settings, keys and chosen agent over.
 
 mod draw;
@@ -34,9 +35,6 @@ use source::{Done, Job, Listing, PAGE, Source, Work};
 
 /// What the footer says while the list is read again.
 const RELOADING: &str = "reloading\u{2026}";
-
-/// Sizes worked out at once.
-const SIZES_AT_ONCE: usize = 2;
 
 /// What a key or click asks of whoever shows the picker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,7 +80,6 @@ pub(crate) struct Picker {
     help: bool,
     /// Moves on with every reload, so answers to an older round are dropped.
     generation: u64,
-    asking: usize,
     /// The row being captured.
     opening: Option<usize>,
     opened: Option<(Repo, Capture)>,
@@ -112,7 +109,7 @@ impl Picker {
         keys: Keymap,
         wake: SyncSender<()>,
     ) -> Self {
-        let name = source.name();
+        let name = rows::clean(&source.name());
         let mut picker = Self {
             work: Work::new(source, wake),
             name,
@@ -123,19 +120,21 @@ impl Picker {
             pinned: false,
             scroll: 0,
             status: None,
+            // Over a review, the cursor starts on the row it shows.
+            keep: over.clone(),
             over,
             help: false,
             generation: 0,
-            asking: 0,
             opening: None,
             opened: None,
-            keep: None,
             keys,
             geometry: Geometry::default(),
         };
-        match listing {
-            Some(listing) => picker.take_listing(0, Ok(listing)),
-            None => picker.ask(Job::List { skip: 0, count: PAGE }),
+        if let Some(listing) = listing {
+            picker.take_listing(0, Ok(listing));
+        } else {
+            picker.keep_cursor(false);
+            picker.ask(Job::List { skip: 0, count: PAGE });
         }
         picker.ask_sizes();
         picker
@@ -152,6 +151,9 @@ impl Picker {
         let changed = !answers.is_empty();
         for done in answers {
             self.take(done);
+        }
+        if !self.work.pump() {
+            self.status = Some("could not start a thread to ask git".into());
         }
         self.ask_sizes();
         self.settle_cursor();
@@ -175,7 +177,6 @@ impl Picker {
                 self.take_listing(skip, listing);
             }
             Done::Size { generation, row, size } if generation == self.generation => {
-                self.asking = self.asking.saturating_sub(1);
                 if let Some(row) = self.rows.get_mut(row) {
                     row.size = match size {
                         Ok(size) => Sized::Known(size),
@@ -197,7 +198,20 @@ impl Picker {
                         self.status = None;
                         self.opened = Some(opened);
                     }
-                    Err(error) => self.status = Some(format!("{name}: {error}")),
+                    Err(error) => {
+                        // A commit pruned or rewritten since the list was read.
+                        let stale = self
+                            .rows
+                            .get(row)
+                            .is_some_and(|row| matches!(row.kind, Kind::Commit(_) | Kind::Branch(_)))
+                            && !error.contains("too large");
+                        let key = self.keys.hint(Action::Reload);
+                        self.status = Some(if stale && !key.is_empty() {
+                            format!("{name}: {error} \u{b7} press {key} to reload")
+                        } else {
+                            format!("{name}: {error}")
+                        });
+                    }
                 }
             }
             // An answer to the round before a reload.
@@ -234,18 +248,34 @@ impl Picker {
             self.rows.push(Row::new(Kind::More));
         }
         self.listed = true;
-        if let Some(keep) = self.keep.take()
-            && let Some(at) = self.rows.iter().position(|row| row.scope().as_ref() == Some(&keep))
-        {
-            self.cursor = at;
-        }
+        self.keep_cursor(true);
         self.cursor = self.cursor.min(self.rows.len().saturating_sub(1));
     }
 
-    /// Ask for the sizes not known yet, the rows on screen first, a few at a time.
+    /// Put the cursor on the row of `scope` once it is listed, instead of the review's own.
+    pub(crate) fn keep_at(&mut self, scope: Scope) {
+        self.keep = Some(scope);
+        self.keep_cursor(self.listed);
+    }
+
+    /// Put the cursor on the row it was asked to stay on ([`Self::keep`]), once that row is
+    /// listed; after the first page (`listed`), give up on one that is not.
+    fn keep_cursor(&mut self, listed: bool) {
+        let Some(keep) = &self.keep else { return };
+        if let Some(at) = self.rows.iter().position(|row| row.scope().as_ref() == Some(keep)) {
+            self.cursor = at;
+            self.pinned = true;
+            self.keep = None;
+        } else if listed {
+            self.keep = None;
+        }
+    }
+
+    /// Ask for the sizes not known yet, the rows on screen first, while the work has room and
+    /// no capture waits for it.
     fn ask_sizes(&mut self) {
         let shown = self.scroll..self.scroll + self.geometry.visible.max(1);
-        while self.asking < SIZES_AT_ONCE {
+        while self.work.has_room() && self.opening.is_none() {
             let waiting = |row: &Row| row.size == Sized::Waiting && row.kind != Kind::More;
             let next = shown
                 .clone()
@@ -255,7 +285,6 @@ impl Picker {
             let Some(row) = self.rows.get_mut(index) else { return };
             let Some(scope) = row.scope() else { return };
             row.size = Sized::Asking;
-            self.asking += 1;
             self.ask(Job::Size { row: index, scope });
         }
     }
@@ -277,6 +306,11 @@ impl Picker {
                 .iter()
                 .filter(|row| !matches!(row.kind, Kind::Commit(_) | Kind::More))
                 .all(Row::is_empty)
+    }
+
+    /// Commits are listed.
+    fn has_commits(&self) -> bool {
+        self.rows.iter().any(|row| matches!(row.kind, Kind::Commit(_)))
     }
 
     fn move_to(&mut self, index: usize) {
@@ -303,7 +337,7 @@ impl Picker {
             Some(Action::PageUp) => self.move_to(self.cursor.saturating_sub(page)),
             Some(Action::Top) => self.move_to(0),
             Some(Action::Bottom) => self.move_to(last),
-            Some(Action::Confirm) => self.choose(self.cursor),
+            Some(Action::Confirm) => return self.choose(self.cursor),
             Some(Action::Reload) => self.reload(),
             Some(Action::Help) => self.help = true,
             Some(Action::Back | Action::PickChanges) => {
@@ -318,7 +352,15 @@ impl Picker {
         Outcome::Stay
     }
 
-    pub(crate) fn mouse(&mut self, mouse: MouseEvent) {
+    pub(crate) fn mouse(&mut self, mouse: MouseEvent) -> Outcome {
+        // The keys box takes the mouse: a click closes it, as the review's own help does, and
+        // nothing under it is opened or scrolled.
+        if self.help {
+            if matches!(mouse.kind, MouseEventKind::Down(_)) {
+                self.help = false;
+            }
+            return Outcome::Stay;
+        }
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 let hit = self.geometry.rows.iter().find(|(rect, _)| {
@@ -326,7 +368,7 @@ impl Picker {
                 });
                 if let Some(&(_, index)) = hit {
                     self.move_to(index);
-                    self.choose(index);
+                    return self.choose(index);
                 }
             }
             MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
@@ -340,42 +382,58 @@ impl Picker {
                 self.pinned = true;
                 self.cursor = self
                     .cursor
-                    .clamp(self.scroll, self.scroll + visible - 1)
+                    .clamp(self.scroll, (self.scroll + visible).saturating_sub(1))
                     .min(self.rows.len().saturating_sub(1));
             }
             _ => {}
         }
+        Outcome::Stay
     }
 
-    /// Enter on a row: review it, list older commits, or say it has nothing to review.
-    fn choose(&mut self, index: usize) {
-        let Some(row) = self.rows.get(index) else { return };
+    /// Enter on a row: review it, list older commits, or say it has nothing to review. The
+    /// row of the review it was opened over just goes back to that review, untouched.
+    fn choose(&mut self, index: usize) -> Outcome {
+        let Some(row) = self.rows.get(index) else { return Outcome::Stay };
         if row.kind == Kind::More {
             if self.more == More::Ready {
                 self.more = More::Loading;
                 let skip = self.rows.iter().filter(|row| matches!(row.kind, Kind::Commit(_))).count();
                 self.ask(Job::List { skip, count: PAGE });
             }
-            return;
+            return Outcome::Stay;
+        }
+        if self.over.is_some() && row.scope() == self.over {
+            return Outcome::Close;
         }
         let name = row.name();
         if row.is_empty() {
             self.status = Some(format!("{name} has no changes"));
-            return;
+            return Outcome::Stay;
         }
-        let Some(scope) = row.scope() else { return };
+        let Some(scope) = row.scope() else { return Outcome::Stay };
         if self.opening == Some(index) {
-            return;
+            return Outcome::Stay;
+        }
+        // The capture takes the room the sizes had; they are asked again if it fails.
+        self.work.stop_captures();
+        self.work.stop_sizes();
+        for row in &mut self.rows {
+            if row.size == Sized::Asking {
+                row.size = Sized::Waiting;
+            }
         }
         self.opening = Some(index);
         self.status = Some(format!("opening {name}\u{2026}"));
         self.ask(Job::Capture { row: index, scope });
+        Outcome::Stay
     }
 
     /// `r`: list the commits again and work every size out afresh, keeping the cursor's row.
+    /// What still runs from before is stopped; until it has ended it counts against the room
+    /// the new round has.
     fn reload(&mut self) {
         self.generation += 1;
-        self.asking = 0;
+        self.work.stop_all();
         self.opening = None;
         self.keep = self.rows.get(self.cursor).and_then(Row::scope).filter(|_| self.pinned);
         let count = self.rows.iter().filter(|row| matches!(row.kind, Kind::Commit(_))).count().max(PAGE);

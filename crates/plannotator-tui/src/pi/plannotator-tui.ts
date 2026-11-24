@@ -87,35 +87,105 @@ function removeQuietly(file: string | undefined): void {
 /** The most of a review's error output kept for the notice after it exits. */
 const MAX_REVIEW_STDERR = 4096;
 
-/** How a terminal program run in Pi's place ended. */
-type Ran = { code: number | null; error?: string; stderr: string };
+/** How a terminal program run in Pi's place ended: its exit code, or the signal that ended it. */
+export type Ran = { code: number | null; signal?: string | null; error?: string; stderr: string };
+
+/** The part of Pi's TUI that steps aside for a program run in its place. */
+export type StepsAside = { stop(): void; start(): void; requestRender(force?: boolean): void };
+
+/** The signals that end Pi while a review runs in its place. */
+const ENDING_SIGNALS = ["SIGTERM", "SIGHUP"] as const;
 
 /**
- * Run `bin args` on Pi's terminal: stdin and stdout inherited, so a full-screen program draws
- * there, stderr kept for the notice. Resolves when it exits; never rejects.
+ * Run `bin args` on Pi's terminal in place of Pi's screen: `tui` stops first and comes back
+ * after, however the program ends. stdin and stdout are inherited, so a full-screen program
+ * draws there; stderr is kept for the notice. A Ctrl+C the program leaves to the terminal
+ * does not end Pi. If Pi itself is told to end (SIGTERM, SIGHUP) the program is ended too
+ * and Pi's screen restored first; with no other handler for that signal, Pi then ends as it
+ * would have. Resolves when the program exits; never rejects.
  */
-function runInTerminal(bin: string, args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<Ran> {
-	return new Promise((resolve) => {
-		let stderr = "";
-		let settled = false;
-		const finish = (ran: Ran) => {
-			if (settled) return;
-			settled = true;
-			resolve(ran);
+export async function runInPlace(
+	tui: StepsAside,
+	bin: string,
+	args: string[],
+	cwd: string,
+	env: NodeJS.ProcessEnv,
+	proc: NodeJS.Process = process,
+): Promise<Ran> {
+	tui.stop();
+	let restored = false;
+	const restore = () => {
+		if (restored) return;
+		restored = true;
+		tui.start();
+		tui.requestRender(true);
+	};
+	let child: ReturnType<typeof spawn> | undefined;
+	const ignore = () => {};
+	const ending = ENDING_SIGNALS.map((signal) => {
+		// Counted before ours goes in: with none, the default was to end Pi.
+		const others = proc.listenerCount(signal);
+		const onSignal = () => {
+			if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+			if (others === 0) {
+				// Pi ends now, as it would have: its screen stays put away for the shell.
+				restored = true;
+				removeHandlers();
+				proc.kill(proc.pid, signal);
+				return;
+			}
+			// Pi's own handlers run next, with its screen back as they expect it.
+			restore();
 		};
-		let child;
-		try {
-			child = spawn(bin, args, { cwd, env, stdio: ["inherit", "inherit", "pipe"] });
-		} catch (err) {
-			finish({ code: null, error: err instanceof Error ? err.message : String(err), stderr });
-			return;
-		}
-		child.stderr?.on("data", (chunk: Buffer) => {
-			if (stderr.length < MAX_REVIEW_STDERR) stderr = (stderr + chunk.toString("utf8")).slice(0, MAX_REVIEW_STDERR);
-		});
-		child.once("error", (err) => finish({ code: null, error: err.message, stderr }));
-		child.once("close", (code) => finish({ code, stderr }));
+		return { signal, onSignal };
 	});
+	const onExit = () => {
+		if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+	};
+	const removeHandlers = () => {
+		proc.removeListener("SIGINT", ignore);
+		proc.removeListener("exit", onExit);
+		for (const { signal, onSignal } of ending) proc.removeListener(signal, onSignal);
+	};
+	proc.on("SIGINT", ignore);
+	proc.on("exit", onExit);
+	// Ahead of Pi's own handlers, which may end the process before ours would run.
+	for (const { signal, onSignal } of ending) proc.prependListener(signal, onSignal);
+	try {
+		return await new Promise<Ran>((resolve) => {
+			let stderr = "";
+			let settled = false;
+			const finish = (ran: Ran) => {
+				if (settled) return;
+				settled = true;
+				resolve(ran);
+			};
+			try {
+				child = spawn(bin, args, { cwd, env, stdio: ["inherit", "inherit", "pipe"] });
+			} catch (err) {
+				finish({ code: null, error: err instanceof Error ? err.message : String(err), stderr });
+				return;
+			}
+			child.stderr?.on("data", (chunk: Buffer) => {
+				if (stderr.length < MAX_REVIEW_STDERR) stderr = (stderr + chunk.toString("utf8")).slice(0, MAX_REVIEW_STDERR);
+			});
+			child.once("error", (err) => finish({ code: null, error: err.message, stderr }));
+			child.once("close", (code, signal) => finish({ code, signal, stderr }));
+		});
+	} finally {
+		removeHandlers();
+		restore();
+	}
+}
+
+/** What a program run in Pi's place left to say, or `undefined` when it ended well. */
+export function ranNotice(bin: string, ran: Ran): string | undefined {
+	if (ran.error) return `Could not run ${bin}: ${ran.error}. Set PLANNOTATOR_TUI_BIN or put plannotator-tui on PATH.`;
+	if (ran.code === 0) return undefined;
+	const said = ran.stderr.trim();
+	if (said) return said;
+	if (ran.signal) return `plannotator-tui was stopped by signal ${ran.signal}`;
+	return `plannotator-tui exited with status ${ran.code}`;
 }
 
 /** Signal 0 checks a pid without touching it. EPERM means it exists but is not ours. */
@@ -543,27 +613,11 @@ export default function plannotatorTui(pi: ExtensionAPI) {
 			const env = { ...process.env, PLANNOTATOR_TUI_PI_PID: String(process.pid) };
 			const ran = await cmdCtx.ui.custom<Ran>(async (tui, _theme, _keybindings, done) => {
 				// Pi's screen steps aside for the review's, as it does for the external editor.
-				tui.stop();
-				// A Ctrl+C the review leaves to the terminal must not end Pi.
-				const ignore = () => {};
-				process.on("SIGINT", ignore);
-				let result: Ran;
-				try {
-					result = await runInTerminal(bin, ["review", "--pick", cmdCtx.cwd], cmdCtx.cwd, env);
-				} finally {
-					process.removeListener("SIGINT", ignore);
-					tui.start();
-					tui.requestRender(true);
-				}
-				done(result);
+				done(await runInPlace(tui, bin, ["review", "--pick", cmdCtx.cwd], cmdCtx.cwd, env));
 				return { render: () => [], invalidate() {} };
 			});
-			if (ran.error) {
-				cmdCtx.ui.notify(`Could not run ${bin}: ${ran.error}. Set PLANNOTATOR_TUI_BIN or put plannotator-tui on PATH.`, "error");
-			} else if (ran.code !== 0) {
-				const why = ran.stderr.trim() || `plannotator-tui exited with status ${ran.code}`;
-				cmdCtx.ui.notify(why, "error");
-			}
+			const notice = ranNotice(bin, ran);
+			if (notice) cmdCtx.ui.notify(notice, "error");
 		},
 	});
 

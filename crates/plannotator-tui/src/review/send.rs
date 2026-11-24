@@ -158,8 +158,11 @@ impl Screen {
         self.delivery.is_agent() && !self.store.pending().is_empty()
     }
 
+    /// Quit, or ask first when notes are unsent here or on a review this session left
+    /// ([`super::pick::shown::Switched`]).
     pub(super) fn request_quit(&mut self) {
-        if self.has_unsent() {
+        self.count_unsent_elsewhere();
+        if self.has_unsent() || !self.switched.unsent.is_empty() {
             self.mode = Mode::ConfirmQuit;
         } else {
             self.quit = true;

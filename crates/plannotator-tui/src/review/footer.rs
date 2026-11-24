@@ -30,12 +30,25 @@ impl Screen {
 
     pub(super) fn draw_footer(&self, frame: &mut Frame, area: Rect) {
         if self.mode == Mode::ConfirmQuit {
-            let answers = [(Action::Yes, "send"), (Action::No, "quit"), (Action::Back, "cancel")]
+            let here = self.has_unsent();
+            let elsewhere = self.unsent_elsewhere_text();
+            let back = if elsewhere.is_some() { "go to it" } else { "cancel" };
+            let answers = [(Action::Yes, "send"), (Action::No, "quit"), (Action::Back, back)]
                 .into_iter()
+                .filter(|(action, _)| here || *action != Action::Yes)
                 .filter_map(|(action, label)| self.keys.labelled(action, label))
                 .collect::<Vec<_>>()
                 .join(" \u{b7} ");
-            let question = format!(" send notes to {} before quitting? {answers}", self.delivery.describe());
+            let question = match (here, elsewhere) {
+                (true, None) => {
+                    format!(" send notes to {} before quitting? {answers}", self.delivery.describe())
+                }
+                (true, Some(elsewhere)) => format!(
+                    " send notes to {} before quitting? ({elsewhere} too) {answers}",
+                    self.delivery.describe()
+                ),
+                (false, elsewhere) => format!(" {} \u{b7} {answers}", elsewhere.unwrap_or_default()),
+            };
             frame.render_widget(Paragraph::new(Line::from(Span::raw(question).bold())), area);
             return;
         }

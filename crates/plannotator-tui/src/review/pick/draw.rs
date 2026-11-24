@@ -10,7 +10,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::{UnicodeWidthChar as _, UnicodeWidthStr as _};
 
-use super::rows::{Kind, Row, Stat, age};
+use super::rows::{Kind, Row, Stat, age, file_count};
 use super::{More, Picker};
 use crate::keys::Action;
 use crate::theme::palette;
@@ -66,7 +66,8 @@ impl Picker {
             usize::from(area.width.saturating_sub(2)),
         );
         let footer = self.footer_text();
-        let footer_rows = u16::from(footer.is_some()) + hints.len() as u16;
+        let footer_rows =
+            u16::from(footer.is_some()).saturating_add(u16::try_from(hints.len()).unwrap_or(u16::MAX));
         let [title, list, foot] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(1), Constraint::Length(footer_rows)])
                 .areas(area);
@@ -77,8 +78,9 @@ impl Picker {
         ]);
         frame.render_widget(Paragraph::new(heading), title);
         self.draw_rows(frame, list);
+        let room = usize::from(area.width.saturating_sub(1));
         let mut lines: Vec<Line<'static>> =
-            footer.into_iter().map(|text| Line::from(format!(" {text}"))).collect();
+            footer.into_iter().map(|text| Line::from(format!(" {}", fit(&text, room)))).collect();
         lines.extend(
             hints.into_iter().map(|row| Line::from(Span::raw(format!("{row} ")).dim()).right_aligned()),
         );
@@ -88,11 +90,11 @@ impl Picker {
     /// The box over a review, its hints in the bottom border and the footer's text inside.
     fn draw_box(&mut self, frame: &mut Frame, area: Rect) {
         let width = BOX_MAX_WIDTH.min(area.width.saturating_sub(4)).max(area.width.min(40));
-        let rows = self.rows.len() as u16 + u16::from(!self.listed);
-        let height = (rows + 3).min(area.height.saturating_sub(2)).max(area.height.min(5));
+        let rows = u16::try_from(self.rows.len()).unwrap_or(u16::MAX).saturating_add(u16::from(!self.listed));
+        let height = rows.saturating_add(3).min(area.height.saturating_sub(2)).max(area.height.min(5));
         let rect = Rect {
-            x: area.x + (area.width - width) / 2,
-            y: area.y + (area.height - height) / 2,
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + area.height.saturating_sub(height) / 2,
             width,
             height,
         };
@@ -110,8 +112,8 @@ impl Picker {
         let [list, foot] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
         self.draw_rows(frame, list);
         if let Some(text) = self.footer_text() {
-            frame
-                .render_widget(Paragraph::new(format!(" {}", fit(&text, usize::from(foot.width) - 1))), foot);
+            let room = usize::from(foot.width.saturating_sub(1));
+            frame.render_widget(Paragraph::new(format!(" {}", fit(&text, room))), foot);
         }
     }
 
@@ -130,11 +132,18 @@ impl Picker {
         .collect()
     }
 
-    /// What happened, else what the picker knows about the repository as a whole.
+    /// What happened, else what the picker knows about the repository as a whole: a clean
+    /// tree points at the commits, and only a repository with none says there is nothing.
     fn footer_text(&self) -> Option<String> {
-        self.status
-            .clone()
-            .or_else(|| self.nothing_to_review().then(|| format!("Nothing to review in {}", self.name)))
+        self.status.clone().or_else(|| {
+            self.nothing_to_review().then(|| {
+                if self.has_commits() {
+                    "No uncommitted changes \u{b7} pick a commit below".to_owned()
+                } else {
+                    format!("Nothing to review in {}", self.name)
+                }
+            })
+        })
     }
 
     fn draw_rows(&mut self, frame: &mut Frame, list: Rect) {
@@ -156,7 +165,7 @@ impl Picker {
         let mut lines = Vec::new();
         self.geometry.rows.clear();
         for (index, row) in self.rows.iter().enumerate().skip(self.scroll).take(visible) {
-            let y = list.y + (index - self.scroll) as u16;
+            let y = list.y.saturating_add(u16::try_from(index - self.scroll).unwrap_or(u16::MAX));
             self.geometry.rows.push((Rect { x: list.x, y, width: list.width, height: 1 }, index));
             lines.push(self.row_line(row, index, columns, width, now, head));
         }
@@ -174,11 +183,11 @@ impl Picker {
             _ => 0,
         });
         let files = widest(&|row| match row.stat() {
-            Some(Stat::Lines { files, .. }) => file_count(files).width(),
+            Some(Stat::Lines { files, .. } | Stat::Files { files }) => file_count(files).width(),
             _ => 0,
         });
         let other = widest(&|row| match row.stat() {
-            Some(Stat::Lines { .. }) | None => 0,
+            Some(Stat::Lines { .. } | Stat::Files { .. }) | None => 0,
             Some(stat) => stat.text(false).width(),
         });
         let lines = if files > 0 { counts + " \u{b7} ".width() + files } else { 0 };
@@ -191,7 +200,10 @@ impl Picker {
             author: widest(&|row| row.author().map_or(0, |a| a.width().min(AUTHOR_MAX))),
             badge: widest(&|row| self.badge(row).width()),
         };
-        let narrow_stat = counts.max(other);
+        let narrow_stat = counts.max(other).max(widest(&|row| match row.stat() {
+            Some(stat @ Stat::Files { .. }) => stat.text(false).width(),
+            _ => 0,
+        }));
         let title_room = |c: Columns| width.saturating_sub(2 + c.width());
         let steps = [
             full,
@@ -279,6 +291,15 @@ impl Picker {
                         ));
                     }
                 }
+                // The file count in its column, where the counts would be blank.
+                Some(Stat::Files { files }) if c.files > 0 => {
+                    let tail = "   ".width() + c.files;
+                    spans.push((" ".repeat(c.stat.saturating_sub(tail)), Style::new()));
+                    spans.push((
+                        format!("   {:<w$}", file_count(files), w = c.files),
+                        quiet(Style::new().dim()),
+                    ));
+                }
                 Some(stat) => {
                     spans.push((format!("{:>w$}", stat.text(false), w = c.stat), Style::new().dim()));
                 }
@@ -290,7 +311,7 @@ impl Picker {
             spans.push((format!("{gap}{text:>w$}", w = c.age), quiet(Style::new().dim())));
         }
         if c.author > 0 {
-            let text = fit(row.author().unwrap_or_default(), c.author);
+            let text = fit(&row.author().unwrap_or_default(), c.author);
             let pad = c.author.saturating_sub(text.width());
             spans.push((format!("{gap}{text}{}", " ".repeat(pad)), quiet(Style::new().dim())));
         }
@@ -327,15 +348,19 @@ impl Picker {
             ),
             (key(&[Action::Quit]), "quit"),
         ];
+        let rows: Vec<_> = rows.into_iter().filter(|(keys, _)| !keys.is_empty()).collect();
+        // The key column as wide as its widest entry (`ctrl+d ctrl+u`).
+        let column = rows.iter().map(|(keys, _)| keys.width()).max().unwrap_or(0);
         let lines: Vec<Line<'static>> = rows
             .into_iter()
-            .filter(|(keys, _)| !keys.is_empty())
             .map(|(keys, what)| {
-                Line::from(vec![Span::raw(format!(" {keys:<10} ")).bold(), Span::raw(what.to_owned())])
+                let pad = " ".repeat(column.saturating_sub(keys.width()));
+                Line::from(vec![Span::raw(format!(" {keys}{pad}  ")).bold(), Span::raw(what.to_owned())])
             })
             .collect();
-        let width = (lines.iter().map(Line::width).max().unwrap_or(0) as u16 + 3).min(area.width);
-        let height = (lines.len() as u16 + 2).min(area.height);
+        let widest = u16::try_from(lines.iter().map(Line::width).max().unwrap_or(0)).unwrap_or(u16::MAX);
+        let width = widest.saturating_add(3).min(area.width);
+        let height = u16::try_from(lines.len()).unwrap_or(u16::MAX).saturating_add(2).min(area.height);
         let rect = Rect {
             x: area.x + area.width.saturating_sub(width) / 2,
             y: area.y + area.height.saturating_sub(height) / 2,
@@ -352,11 +377,6 @@ impl Picker {
         frame.render_widget(boxed, rect);
         frame.render_widget(Paragraph::new(lines), inner);
     }
-}
-
-/// `1 file`, `4 files`.
-fn file_count(files: usize) -> String {
-    if files == 1 { "1 file".to_owned() } else { format!("{files} files") }
 }
 
 /// The present, in seconds since the epoch.

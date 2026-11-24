@@ -367,17 +367,30 @@ The branch row is there when its base (`origin/HEAD`) is known and the branch ha
 past it. A row with nothing in it is dimmed and says `(no changes)`; `2 unsent` counts notes
 saved on that row's review and not sent yet, and `open` marks the review you came from. The
 cursor starts on the first row with changes, so when the agent has committed and the tree is
-clean, it is on that commit. The commits show at once; the sizes fill in from the
-background, the rows on screen first, with `…` until then.
+clean, it is on that commit and the footer says `No uncommitted changes · pick a commit
+below`. Over a review, the cursor starts on that review's row. The commits show at once; the
+sizes fill in from the background, the rows on screen first, with `…` until then. At most two
+git commands run for them at a time; `r`, a choice or closing the picker stops the ones
+running, and quitting leaves no git command or index copy behind.
 
 `j`/`k`, `g`/`G` and `PageUp`/`PageDown` move, `enter` (or a click) reviews the row and
 `more…` lists 20 older commits; the wheel scrolls. `r` lists the commits and counts the
 changes again. `?` shows these keys and `q` quits. Over a review, `esc` or `p` goes back to
 it. A review you pick takes the delivery target, the agent `P` chose, the diff settings and
 the keys of the one before; notes you had not sent stay saved on their own review, and the
-footer says so (`2 unsent notes kept on Uncommitted`). Each row reviews exactly that diff:
-an empty one only says so, and one that cannot open (a patch over 8 MiB, say) says why and
-the picker stays.
+footer says so (`2 unsent notes kept on Uncommitted`). Quitting asks first while notes are
+unsent on any review you opened this session, and names them (`1 unsent note on Commit
+2efc81b`); `esc` there opens the picker on that review. Choosing the row of the review you
+are in goes back to it as it was. Each row reviews exactly that diff: an empty one only says
+so, and one that cannot open (a patch over 8 MiB, say) says why and the picker stays; a
+commit gone since the list was read says to press `r`.
+
+A commit row is the diff `--commit` shows: a merge commit against its first parent. A commit
+that changes no lines (binary files, renames) shows its file count only. Unstaged and
+Uncommitted are two reviews with notes of their own, as `--unstaged` and a bare `review` are.
+A bare `review` in a repository with no commits yet still fails with `No uncommitted changes`;
+`--pick` opens the picker there anyway. `--pick` takes a folder, so a number after it is
+refused rather than read as a pull request: give a folder named only by digits as `./123`.
 
 ### Pull requests
 
@@ -756,9 +769,14 @@ Rex for Mac binds none of these keys by default. Change or add keys, or bind non
 require("plannotator.annotate").setup{
   placement = "split",                       -- tab | split | popup; default: [rex] placement, else tab
   keys = { annotate_gate = "ctrl+cmd+a", annotate_last = false },
+  -- annotate_review_pick = false leaves Ctrl+Cmd+P alone;
   -- keys = false binds none; the actions stay in the palette
 }
 ```
+
+A key you give any action in `keys` takes it from the default that had it: with
+`annotate_gate = "ctrl+cmd+p"`, Ctrl+Cmd+P opens the gate and the picker gets no key. A key
+you bind yourself with `rex.bind` wins when that line comes after `setup{}`.
 
 A review opens full size in a tab of its own, as Herdr's overlay does. It can open instead in
 a split to the right of the pane, so the agent stays in view, or in a floating popup over the
@@ -923,7 +941,10 @@ Then:
 - **Review from Pi:** `/plannotator-review` runs `plannotator-tui review --pick` in Pi's own
   terminal. Pi's screen steps aside, you [pick what to review](#pick-what-to-review) in the
   session's folder, and Send goes back to that session; Pi's screen returns when the review
-  quits. `PLANNOTATOR_TUI_BIN` names the binary, else `plannotator-tui` on `PATH`.
+  quits, also when Pi is told to end while the review runs (the review ends with it). If the
+  review cannot find that Pi session when you Send, it says so and copies the feedback
+  instead of sending it to any other pane.
+  `PLANNOTATOR_TUI_BIN` names the binary, else `plannotator-tui` on `PATH`.
 - `plannotator-tui pi list` lists the sessions; `plannotator-tui pi send --session <id or name>`
   sends stdin to one.
 

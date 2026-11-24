@@ -29,7 +29,8 @@ pub(crate) fn request(args: &[String], refusal: &str) -> Result<Target> {
 /// something to review: a folder outside a repository, or with no changes, fails here. A pull
 /// request is told as its link, so the pane finds it from any folder; its folder is the clone
 /// it was fetched into, else `dir`. The picker only needs a repository, so it opens at once;
-/// a bare review with nothing to show opens the picker instead of failing.
+/// a bare review with nothing to show opens the picker instead of failing, once the
+/// repository has a commit to pick.
 pub(crate) fn changes(dir: &Path, target: &Target) -> Result<(PathBuf, String)> {
     let request = match target {
         Target::Pick => return Ok((Repo::discover(dir)?.workdir().to_path_buf(), PICK.to_owned())),
@@ -37,7 +38,7 @@ pub(crate) fn changes(dir: &Path, target: &Target) -> Result<(PathBuf, String)> 
     };
     let (repo, capture) = super::capture_any(dir, request)?;
     let scope = match (&capture.pull, super::nothing_to_review(&repo, &capture)) {
-        (_, Some(_)) if target.picks_when_empty() => PICK.to_owned(),
+        (_, Some(_)) if target.picks_when_empty() && super::picks_instead(&repo) => PICK.to_owned(),
         (_, Some(nothing)) => anyhow::bail!(nothing),
         (Some(pull), None) => {
             scope_value(&Target::Review(Request::PullRequest { pr: pull.view.url.clone() }))
