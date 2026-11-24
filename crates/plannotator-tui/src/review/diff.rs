@@ -354,6 +354,29 @@ impl Diff {
         Ok(())
     }
 
+    /// Select `lines` from a drag, or a shift-click, that went `up` to `lines.first` from
+    /// `lines.last` or down to `lines.last`, the cursor on the line it went to, and leave
+    /// the view where it is.
+    ///
+    /// [`Self::select`] puts the cursor on the last line, scrolling when that line is not on
+    /// screen, and forgets which screen rows the viewer drew: until the next frame every
+    /// line looks off screen to it, so a [`Self::reveal`] of the first line right after a
+    /// drag up brought that line to the pane's bottom, and a pane resized before the next
+    /// frame (a footer that takes a row less) put the cursor's line on the wrong row. So a
+    /// selection is made by clicking where its two ends are drawn
+    /// ([`Self::select_in_place`]), and otherwise only when one end is off screen: a drag
+    /// held past the pane's edge, where the view goes to the line the pointer reached.
+    pub(super) fn select_from(&mut self, lines: &Lines, up: bool) -> Result<()> {
+        if self.select_in_place(lines, up)? {
+            return Ok(());
+        }
+        self.select(lines)?;
+        if up {
+            self.reveal(&lines.path, lines.side, lines.first)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn begin_or_end_selection(&mut self) -> Result<()> {
         self.run(Command::SelectLines)
     }
