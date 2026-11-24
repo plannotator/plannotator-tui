@@ -5,6 +5,7 @@
 use anyhow::Result;
 use diffs_rs::engine::{Command, DiffRow, DiffRowKind, InputEffect, Side};
 use diffs_rs::reading::SourceRange;
+use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 use super::{Diff, Lines};
 
@@ -35,7 +36,7 @@ impl Diff {
     /// side: in a split diff the cells of that side's pane. `None` when none is on screen.
     pub(in crate::review) fn rows_showing(&self, lines: &Lines) -> Option<(u16, u16)> {
         let old = lines.side == plannotator_tui_review::Side::Old;
-        let column = if old && self.split() { self.area.x + 1 } else { self.area.right().saturating_sub(2) };
+        let column = self.side_column(lines.side);
         let mut shown = (self.area.top()..self.area.bottom()).filter(|&y| {
             self.row_at(column, y).is_some_and(|row| {
                 let line = if old { row.old_line } else { row.new_line };
@@ -46,6 +47,38 @@ impl Diff {
         });
         let first = shown.next()?;
         Some((first, shown.last().unwrap_or(first)))
+    }
+
+    /// A column of the last frame in the pane of `side`: in a split diff the old side is on
+    /// the left.
+    fn side_column(&self, side: plannotator_tui_review::Side) -> u16 {
+        if side == plannotator_tui_review::Side::Old && self.split() {
+            self.area.x + 1
+        } else {
+            self.area.right().saturating_sub(2)
+        }
+    }
+
+    /// Select `lines` as `v` on the line a drag `up` (or down) started from and the cursor to
+    /// the other end would: a click on each where the last frame drew it, so nothing scrolls
+    /// and the viewer knows the screen row the cursor is on (it keeps that row when the pane
+    /// is resized). False when either line is not on screen, or the clicks did not end in
+    /// `lines`; the caller then selects them its own way.
+    pub(in crate::review) fn select_in_place(&mut self, lines: &Lines, up: bool) -> Result<bool> {
+        let row = |line: u32| self.rows_showing(&Lines { first: line, last: line, ..lines.clone() });
+        let (start, end) = if up { (lines.last, lines.first) } else { (lines.first, lines.last) };
+        let (Some((from, _)), Some((to, _))) = (row(start), row(end)) else { return Ok(false) };
+        let column = self.side_column(lines.side);
+        let click = |row: u16| {
+            let kind = MouseEventKind::Down(MouseButton::Left);
+            Event::Mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE })
+        };
+        self.engine.execute(Command::ClearSelection)?;
+        self.engine.handle_event(click(from), true)?;
+        self.engine.execute(Command::SelectLines)?;
+        self.engine.handle_event(click(to), true)?;
+        self.engine.execute(Command::SelectLines)?;
+        Ok(self.selection().as_ref() == Some(lines))
     }
 
     /// The screen row of the last frame that shows the heading of the file at `path`: its own

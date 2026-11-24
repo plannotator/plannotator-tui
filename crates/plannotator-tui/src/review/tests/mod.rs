@@ -28,6 +28,7 @@ mod pi_notes;
 mod place_flow;
 #[cfg(unix)]
 mod pull_flow;
+mod release_view;
 mod rex_picker;
 mod send_flow;
 mod settings_flow;

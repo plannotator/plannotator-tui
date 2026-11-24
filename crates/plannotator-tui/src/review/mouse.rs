@@ -179,10 +179,7 @@ impl Screen {
             let end = line.map_or(grown.lines.last, |(_, line)| line.clamp(grown.span.0, grown.span.1));
             let (first, last) = (grown.anchor.first.min(end), grown.anchor.first.max(end));
             let lines = Lines { first, last, ..grown.anchor.clone() };
-            diff.select(&lines)?;
-            if end < grown.anchor.first {
-                diff.reveal(&lines.path, lines.side, first)?;
-            }
+            diff.select_from(&lines, end < grown.anchor.first)?;
             self.grown = Some(Grown { lines, ..grown });
             return Ok(());
         }
@@ -265,13 +262,7 @@ impl Screen {
             return Ok(());
         }
         let up = drag.end < drag.anchor.first;
-        diff.select(&lines)?;
-        // The viewer puts the cursor on the last line, the one first pressed: after a drag
-        // up it goes to the first, where the pointer is, and the view stays on the lines the
-        // pointer went up to rather than going back to the press.
-        if up {
-            diff.reveal(&lines.path, lines.side, lines.first)?;
-        }
+        diff.select_from(&lines, up)?;
         self.grown = Some(Grown { anchor: drag.anchor.clone(), span: drag.span, lines: lines.clone() });
         let base = self.whole.as_ref().is_some_and(|w| w.version == Version::Base);
         if !base {
