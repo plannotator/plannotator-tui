@@ -7,7 +7,7 @@ use plannotator_tui_review::Side;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
 
-use super::mouse_flow::{COLS, ROWS, drag, draw, lines, locate, long_fixture, mouse, release};
+use super::mouse_flow::{COLS, ROWS, drag, draw, hold, lines, locate, long_fixture, mouse, release};
 use super::place_flow::mixed;
 use super::*;
 use crate::review::diff::Lines;
@@ -317,10 +317,8 @@ fn an_upward_drag_that_scrolled_keeps_the_view_where_it_went_on_release() {
     let from = locate(&mut screen, "v50 = 50", true);
     let top = screen.geometry.diff.y;
     drag(&mut screen, from, (from.0, top + 1));
-    for _ in 0..20 {
-        mouse(&mut screen, MouseEventKind::Drag(MouseButton::Left), (from.0, top - 1));
-        draw(&mut screen);
-    }
+    mouse(&mut screen, MouseEventKind::Drag(MouseButton::Left), (from.0, top - 1));
+    hold(&mut screen, 20);
     let before: Vec<String> = frame(&mut screen, COLS, ROWS).iter().map(|r| diff_side(&screen, r)).collect();
     let selected = screen.selected_lines().expect("dragging");
     release(&mut screen, (from.0, top - 1));

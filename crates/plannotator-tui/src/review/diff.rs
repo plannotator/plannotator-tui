@@ -280,10 +280,11 @@ impl Diff {
         self.notice.take()
     }
 
-    /// The first and last line on `side` of the hunk that shows `line` of `path`.
-    pub(super) fn hunk_span(&self, path: &str, side: Side, line: u32) -> Option<(u32, u32)> {
+    /// The hunk that shows `line` of `path` on `side`: its index in the file, and its first
+    /// and last line on that side.
+    pub(super) fn hunk_span(&self, path: &str, side: Side, line: u32) -> Option<(usize, (u32, u32))> {
         let file = self.index(path)?;
-        self.hunk_of(file, side == Side::Old, line).map(|(_, span)| span)
+        self.hunk_of(file, side == Side::Old, line)
     }
 
     /// The finished or growing selection, when there is one.

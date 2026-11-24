@@ -7,6 +7,9 @@ mod disk;
 mod doc_search;
 #[cfg(test)]
 mod doc_size_tests;
+mod drag;
+#[cfg(test)]
+mod drag_tests;
 mod draw;
 mod editor;
 mod feedback;
@@ -97,6 +100,8 @@ enum Focus {
 /// Screen geometry captured during the last draw, for hit-testing input.
 #[derive(Debug, Default, Clone)]
 struct Geometry {
+    /// The whole frame: a mouse report outside it is ignored (`ui::drag::on_screen`).
+    screen: Rect,
     tree: Rect,
     doc: Rect,
     /// The app's columns, as the tree's automatic showing reads them.
@@ -261,6 +266,8 @@ pub(crate) struct App {
     pub(crate) ui: UiConfig,
     /// The last primary-button press, for double-click detection.
     last_click: Option<(std::time::Instant, u16, u16)>,
+    /// The pointer of the mouse selection being dragged (`drag`).
+    mouse_drag: Option<drag::MouseDrag>,
     geometry: Geometry,
     status: Option<String>,
     /// When the event loop last compared the open file with its copy on disk.
@@ -344,6 +351,7 @@ impl App {
             editor_request: None,
             ui: UiConfig::default(),
             last_click: None,
+            mouse_drag: None,
             geometry: Geometry::default(),
             status: None,
             disk_checked: None,
@@ -647,13 +655,15 @@ impl App {
 
     /// Take what the background work has ready, on every wake of the event loop: the rest
     /// of the layout (a panic there ends the app here), file search results, a change on
-    /// disk, Pi notes, and the agent finder's answer. True when the screen changed.
+    /// disk, Pi notes, and the agent finder's answer; and a mouse selection held past the
+    /// text's edge scrolls. True when the screen changed.
     pub(crate) fn poll_background(&mut self) -> bool {
         let mut changed = self.poll_layout();
         changed |= self.poll_file_search();
         changed |= self.poll_disk();
         changed |= self.poll_pi();
         changed |= self.reach.poll();
+        changed |= self.step_at_edge(std::time::Instant::now());
         changed
     }
 

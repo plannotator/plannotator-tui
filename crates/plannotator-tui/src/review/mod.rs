@@ -118,6 +118,8 @@ enum Focus {
 /// Where things were drawn last frame, for the mouse.
 #[derive(Debug, Default, Clone)]
 struct Geometry {
+    /// The whole frame: a mouse report outside it is ignored (`ui::drag::on_screen`).
+    screen: Rect,
     diff: Rect,
     rail: Rect,
     /// The file list; empty while it is hidden.
@@ -356,7 +358,8 @@ impl Screen {
         self.quit
     }
 
-    /// Take what the viewers, the Pi link, the disk watch and the agent finder have ready.
+    /// Take what the viewers, the Pi link, the disk watch and the agent finder have ready, and
+    /// scroll for a drag held past the diff's edge.
     /// True when the screen changed.
     pub(crate) fn tick(&mut self) -> Result<bool> {
         let mut changed = false;
@@ -380,6 +383,7 @@ impl Screen {
             changed = true;
         }
         changed |= self.reach.poll();
+        changed |= self.step_at_edge(Instant::now())?;
         let whole_draw = self.whole.as_ref().is_some_and(whole::Whole::needs_draw);
         Ok(changed || self.diff.needs_draw() || whole_draw)
     }

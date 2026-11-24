@@ -39,6 +39,13 @@ impl MenuRow {
 
 impl Screen {
     pub(crate) fn handle_event(&mut self, event: Event) -> Result<()> {
+        let event = match event {
+            Event::Mouse(mouse) => match crate::ui::drag::on_screen(mouse, self.geometry.screen) {
+                Some(mouse) => Event::Mouse(mouse),
+                None => return Ok(()),
+            },
+            event => event,
+        };
         if matches!(event, Event::Key(_) | Event::Paste(_)) {
             self.last_key = Some(std::time::Instant::now());
             self.toolbar = None;
