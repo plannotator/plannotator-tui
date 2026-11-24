@@ -11,6 +11,7 @@ use super::whole_flow::settle_whole;
 use super::*;
 use crate::review::diff::Lines;
 use crate::review::{Draft, Focus, Mode};
+use crate::ui::drag::STEP;
 
 pub(super) const COLS: u16 = 120;
 pub(super) const ROWS: u16 = 40;
@@ -58,6 +59,16 @@ pub(super) fn drag(screen: &mut Screen, from: (u16, u16), to: (u16, u16)) {
         if to.1 >= from.1 { (from.1..=to.1).collect() } else { (to.1..=from.1).rev().collect() };
     for row in rows {
         mouse(screen, MouseEventKind::Drag(MouseButton::Left), (to.0, row));
+    }
+}
+
+/// Hold a drag where it is for `steps` of the timer that scrolls past the pane's edge, with a
+/// frame after each, as the event loop draws after a tick.
+pub(super) fn hold(screen: &mut Screen, steps: u32) {
+    let start = Instant::now();
+    for step in 0..steps {
+        screen.step_at_edge(start + STEP * step).expect("step");
+        let _ = draw(screen);
     }
 }
 
@@ -308,11 +319,9 @@ fn dragging_past_the_bottom_scrolls_and_keeps_selecting() {
     let bottom = screen.geometry.diff.bottom();
     drag(&mut screen, from, (from.0, bottom - 1));
     let on_screen = screen.selected_lines().expect("dragging").last;
-    for _ in 0..10 {
-        mouse(&mut screen, MouseEventKind::Drag(MouseButton::Left), (from.0, bottom + 2));
-        let _ = draw(&mut screen);
-    }
-    release(&mut screen, (from.0, bottom + 2));
+    mouse(&mut screen, MouseEventKind::Drag(MouseButton::Left), (from.0, bottom));
+    hold(&mut screen, 10);
+    release(&mut screen, (from.0, bottom));
     let picked = selection(&screen).expect("selected");
     assert_eq!(picked.first, 1);
     assert!(picked.last > on_screen + 5, "{} grew past {on_screen}", picked.last);
