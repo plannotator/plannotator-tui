@@ -415,3 +415,246 @@ fn opening_the_panel_or_the_list_resizing_or_moving_the_middle_line_never_scroll
         check(&mut screen, "the panel opened again", true);
     }
 }
+
+/// The first row of the pane that shows a line, by its file and line numbers: the top line.
+/// A wrapped line's later rows show the same numbers.
+fn top_line(view: &View) -> Option<(String, Option<u32>, Option<u32>)> {
+    rows(view).iter().flatten().find(|(_, old, new)| old.is_some() || new.is_some()).cloned()
+}
+
+/// Every line shown starts at its first character: each side shows its lines' code from one
+/// column, and at least `least` of them, which a view scrolled past the code's start lacks.
+fn from_start(columns: &Columns, least: usize, case: &str) {
+    assert!(columns.len() >= least, "{case}: the lines' code left the screen sideways: {columns:?}");
+    for side in ["old", "new", "any"] {
+        let mut shown = columns.iter().filter(|((s, _), _)| *s == side).map(|(_, c)| *c);
+        if let Some(first) = shown.next() {
+            assert!(shown.all(|c| c == first), "{case}: every {side} line from its start: {columns:?}");
+        }
+    }
+}
+
+const WIDE: &str = "Wide.kt";
+
+/// `Wide.kt`, sixty lines like `Screen.kt`'s, the last without a newline: lines 47-49
+/// removed and three long lines added after line 57, near enough the end for the hunk to
+/// reach it. The diff has rows with only an old line
+/// and rows with only a new one, so one half of a split row is empty, and the
+/// "No newline at end of file" mark under the last line.
+fn wide(tag: &str, config: &str) -> (Fixture, Screen) {
+    let fixture = Fixture::new(tag);
+    let before: String = (1..=60).map(|i| kotlin_line(i, false)).collect();
+    let after: String = (1..=60)
+        .filter(|i| !(47..=49).contains(i))
+        .flat_map(|i| {
+            let added: &[usize] = if i == 57 { &[901, 903, 905] } else { &[] };
+            std::iter::once(kotlin_line(i, false)).chain(added.iter().map(|&n| kotlin_line(n, false)))
+        })
+        .collect();
+    fixture.write(WIDE, before.trim_end_matches('\n'));
+    fixture.git(&["add", "."]);
+    fixture.git(&["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "wide"]);
+    fixture.write(WIDE, after.trim_end_matches('\n'));
+    fixture.write("notes.txt", "changed\n");
+    fixture.write_config(config);
+    let mut screen = fixture.open_configured();
+    let started = Instant::now();
+    while screen.diff.progress() != Progress::Ready {
+        assert!(started.elapsed() < Duration::from_secs(10), "the viewer never got ready");
+        screen.tick().expect("tick");
+        draw(&mut screen, SIZE);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    screen.diff.reveal(WIDE, Side::New, 57).expect("line 57");
+    draw(&mut screen, SIZE);
+    (fixture, screen)
+}
+
+/// The screen row of the first row of `Wide.kt` that `wanted` accepts, in the last frame.
+fn wide_row(screen: &Screen, wanted: impl Fn(&diffs_rs::engine::DiffRow) -> bool) -> u16 {
+    let pane = screen.geometry.diff;
+    (pane.top()..pane.bottom())
+        .find(|&y| {
+            screen.diff.row_at(pane.right() - 2, y).is_some_and(|row| row.path == WIDE && wanted(&row))
+        })
+        .expect("the row is on screen")
+}
+
+/// The column just inside the right edge of the old side, or of the new side (or of a
+/// unified row).
+fn far_right(screen: &Screen, old: bool) -> u16 {
+    let pane = screen.geometry.diff;
+    match screen.diff.split_line() {
+        Some(line) if old => line - 2,
+        _ => pane.right() - 3,
+    }
+}
+
+fn press_at(screen: &mut Screen, (x, y): (u16, u16)) {
+    report(screen, MouseEventKind::Down(MouseButton::Left), (x, y));
+    report(screen, MouseEventKind::Up(MouseButton::Left), (x, y));
+}
+
+/// Where a click lands that the viewer used to scroll to once the pane got narrower.
+#[derive(Debug, Clone, Copy)]
+enum Far {
+    /// Far right in the empty old half of an added row.
+    AddedRowsEmptyHalf,
+    /// Far right in the empty new half of a removed row.
+    RemovedRowsEmptyHalf,
+    /// Far right on the "No newline at end of file" mark, on the old or the new side.
+    NoNewline(bool),
+    /// An old-side drag from a context line down over the added rows, then `Esc`.
+    OldDragOverAdded,
+}
+
+fn far_click(screen: &mut Screen, far: Far) {
+    use diffs_rs::engine::DiffRowKind;
+    draw(screen, SIZE);
+    let code = |row: &diffs_rs::engine::DiffRow| row.kind == DiffRowKind::Code && row.part == 0;
+    match far {
+        Far::AddedRowsEmptyHalf => {
+            let y = wide_row(screen, |row| code(row) && row.new_line == Some(55) && row.old_line.is_none());
+            press_at(screen, (far_right(screen, true), y));
+        }
+        Far::RemovedRowsEmptyHalf => {
+            let y = wide_row(screen, |row| code(row) && row.old_line == Some(48) && row.new_line.is_none());
+            press_at(screen, (far_right(screen, false), y));
+        }
+        Far::NoNewline(old) => {
+            let y = wide_row(screen, |row| row.kind == DiffRowKind::NoNewline);
+            press_at(screen, (far_right(screen, old), y));
+        }
+        Far::OldDragOverAdded => {
+            let x = far_right(screen, true);
+            let from = wide_row(screen, |row| code(row) && row.new_line == Some(53));
+            let to = wide_row(screen, |row| code(row) && row.new_line == Some(56));
+            report(screen, MouseEventKind::Down(MouseButton::Left), (x, from));
+            for y in from + 1..=to {
+                report(screen, MouseEventKind::Drag(MouseButton::Left), (x, y));
+                draw(screen, SIZE);
+            }
+            press(screen, KeyCode::Esc);
+            report(screen, MouseEventKind::Up(MouseButton::Left), (x, to));
+        }
+    }
+}
+
+const LAYOUTS: [(&str, &str); 3] = [
+    ("split 30", "layout = \"split\"\nsplit_ratio = 0.3"),
+    ("split 50", "layout = \"split\""),
+    ("unified", "layout = \"unified\""),
+];
+
+/// What a person does after the click that narrows, widens or redraws the diff: the notes
+/// panel, the file list, a resize, the line between the sides, the layout and whitespace.
+fn reflow_by_hand(screen: &mut Screen, check: &dyn Fn(&mut Screen, &str)) {
+    for (keys, what) in [
+        ("z", "the panel opened"),
+        ("z", "the panel closed"),
+        ("ff", "the list closed"),
+        ("f", "the list opened"),
+    ] {
+        for key in keys.chars() {
+            press(screen, KeyCode::Char(key));
+        }
+        check(screen, what);
+    }
+    press(screen, KeyCode::Esc);
+    draw(screen, (150, 50));
+    draw(screen, (120, 50));
+    check(screen, "the terminal narrowed and widened again");
+    for key in [')', ')', '(', '(', '(', 'u', 'u', 'W', 'W'] {
+        press(screen, KeyCode::Char(key));
+        check(screen, &format!("then {key}"));
+    }
+}
+
+#[test]
+fn a_click_in_an_empty_half_or_on_the_no_newline_mark_never_scrolls_the_diff_sideways() {
+    for (name, layout) in LAYOUTS {
+        let fars = [
+            Far::AddedRowsEmptyHalf,
+            Far::RemovedRowsEmptyHalf,
+            Far::NoNewline(true),
+            Far::NoNewline(false),
+            Far::OldDragOverAdded,
+        ];
+        for far in fars {
+            let case = format!("{name} {far:?}");
+            let tag = format!("wide-{}-{far:?}", name.replace(' ', "-")).replace(['(', ')'], "");
+            let (_fixture, mut screen) = wide(&tag, &format!("[review]\n{layout}\nwrap = false\n"));
+            far_click(&mut screen, far);
+            let (before, columns) = look(&mut screen);
+            from_start(&columns, 10, &format!("{case}: clicked"));
+            let top = top_line(&before);
+            reflow_by_hand(&mut screen, &|screen, what| {
+                let (after, columns) = look(screen);
+                from_start(&columns, 10, &format!("{case}: {what}"));
+                // The same line: a pair's row in a split diff is two rows unified, old first.
+                let after = top_line(&after);
+                let same = match (&after, &top) {
+                    (Some((path, old, new)), Some((was, old_was, new_was))) => {
+                        path == was
+                            && ((old.is_some() && old == old_was) || (new.is_some() && new == new_was))
+                    }
+                    _ => false,
+                };
+                assert!(same, "{case}: {what}: the top line {top:?} became {after:?}");
+            });
+        }
+    }
+}
+
+/// How the cursor gets onto a wrapped line's second or later row before `w`.
+#[derive(Debug, Clone, Copy)]
+enum OnPart {
+    /// A click far right on the new side, or on the old side.
+    Click(bool),
+    /// `j` until the cursor is on one.
+    Down,
+}
+
+#[test]
+fn turning_wrapping_off_on_a_wrapped_row_keeps_the_top_line_and_every_line_from_its_start() {
+    for (name, layout) in LAYOUTS {
+        for on in [OnPart::Click(false), OnPart::Click(true), OnPart::Down] {
+            let case = format!("{name} {on:?}");
+            let tag = format!("unwrap-{}-{on:?}", name.replace(' ', "-")).replace(['(', ')'], "");
+            let (_fixture, mut screen) = kotlin(&tag, &format!("[review]\n{layout}\nwrap = true\n"));
+            draw(&mut screen, SIZE);
+            match on {
+                OnPart::Click(old) => {
+                    let pane = screen.geometry.diff;
+                    let y = (pane.top() + 10..pane.bottom())
+                        .find(|&y| screen.diff.row_at(pane.right() - 2, y).is_some_and(|row| row.part > 0))
+                        .expect("a wrapped row");
+                    let x = far_right(&screen, old);
+                    press_at(&mut screen, (x, y));
+                }
+                OnPart::Down => {
+                    for _ in 0..8 {
+                        press(&mut screen, KeyCode::Char('j'));
+                    }
+                    while screen.diff.cursor_row().is_some_and(|row| row.part == 0) {
+                        press(&mut screen, KeyCode::Char('j'));
+                    }
+                }
+            }
+            let (before, _) = look(&mut screen);
+            assert!(
+                screen.diff.cursor_row().is_some_and(|row| row.part > 0),
+                "{case}: the cursor is on a wrapped row"
+            );
+            let top = top_line(&before);
+            press(&mut screen, KeyCode::Char('w'));
+            let (after, columns) = look(&mut screen);
+            from_start(&columns, 20, &format!("{case}: wrapping off"));
+            assert_eq!(top_line(&after), top, "{case}: the top line, now on one row");
+            reflow_by_hand(&mut screen, &|screen, what| {
+                let (_, columns) = look(screen);
+                from_start(&columns, 20, &format!("{case}: {what}"));
+            });
+        }
+    }
+}

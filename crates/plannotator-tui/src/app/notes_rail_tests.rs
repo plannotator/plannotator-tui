@@ -184,3 +184,21 @@ fn a_rebound_toggle_is_the_key_the_footer_names() {
     assert!(draw(&mut app, 120, 20).contains("notes hidden: Z shows them"));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn a_rail_left_open_still_waits_for_a_documents_first_note() {
+    let (root, mut app, _) = file_app("rail-left-open");
+    app.ui.doc_width = 0;
+    let state = app.data_dir.join("clients/plannotator-tui");
+    std::fs::create_dir_all(&state).expect("state dir");
+    std::fs::write(state.join("ui-state.json"), r#"{"notesRail":"open"}"#).expect("state");
+    app.start_notes_rail();
+    let empty = draw(&mut app, 120, 20);
+    assert_eq!(app.geometry.doc.width, 118, "no empty rail takes columns:\n{empty}");
+    assert!(!empty.contains("notes hidden") && !empty.contains("rail hidden"), "{empty}");
+    add_comment_on_block_two(&mut app, "the first note");
+    let noted = draw(&mut app, 120, 20);
+    assert!(noted.contains("the first note"), "the rail comes with the first note:\n{noted}");
+    assert_eq!(app.geometry.doc.width, 120 - 2 - 1 - rail(120));
+    let _ = std::fs::remove_dir_all(&root);
+}
