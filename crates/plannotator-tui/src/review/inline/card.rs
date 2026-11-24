@@ -48,9 +48,17 @@ impl Card {
         if note.kind == NoteType::Suggestion {
             let mut rows = Vec::new();
             let mut code = |code: Option<&str>, sign: &'static str, style: Style| {
+                // The sign on a line's first row only, as a diff marks a wrapped line.
                 for line in code.into_iter().flat_map(|code| code.split('\n')) {
                     let line = Line::from(Span::styled(plain(line.trim_end_matches('\r')), style));
-                    split_line(&mut rows, &Span::styled(sign, style), &line, &[], text_width);
+                    let start = rows.len();
+                    split_line(&mut rows, &Span::styled("  ", style), &line, &[], text_width);
+                    if let Some(first) = rows.get_mut(start) {
+                        let text: String =
+                            first.line.spans.iter().map(|span| span.content.as_ref()).collect();
+                        let rest = text.get(2..).unwrap_or_default();
+                        first.line = Line::from(Span::styled(format!("{sign}{rest}"), style));
+                    }
                 }
             };
             code(note.original_code.as_deref(), "- ", Style::new().fg(palette().delete));
@@ -154,6 +162,10 @@ mod tests {
         assert_eq!(text(&card), ["simpler", "-   let a = b;", "+   let a = c;"]);
         let red = card.body.get(1).and_then(|line| line.spans.first()).map(|span| span.style.fg);
         assert_eq!(red, Some(Some(palette().delete)));
+        // A long line wraps with its sign on the first row only.
+        let code = r#","originalCode":"abcdefghijklmnop","suggestedCode":"x""#;
+        let card = Card::of(&note("suggestion", "line", "new", (3, 3), code), 14, 2);
+        assert_eq!(text(&card), ["- abcdefgh", "  ijklmnop", "+ x"]);
     }
 
     #[test]

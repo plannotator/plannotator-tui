@@ -77,9 +77,16 @@ pub(super) struct Diff {
     terminal_background: bool,
     /// The whole-file view: always unified, so no layout or split ratio applies.
     whole: bool,
-    /// Nothing moved the cursor or the view since the files were opened: the notes' boxes,
-    /// laid out for the first time, start from the top (`insets`).
-    at_start: bool,
+    /// Whether anything moved the cursor or the view since the files were opened: until
+    /// then the notes' boxes, laid out for the first time, start from the top (`insets`).
+    since: Since,
+}
+
+/// What happened to the view since the files were opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Since {
+    Opened,
+    Moved,
 }
 
 impl std::fmt::Debug for Diff {
@@ -128,7 +135,7 @@ impl Diff {
             notice: None,
             drawn: false,
             terminal_background: false,
-            at_start: true,
+            since: Since::Opened,
         }
     }
 
@@ -162,7 +169,7 @@ impl Diff {
         self.paths.clear();
         self.generation = next_generation();
         self.drawn = false;
-        self.at_start = true;
+        self.since = Since::Opened;
         Ok(())
     }
 
@@ -252,7 +259,7 @@ impl Diff {
     }
 
     pub(super) fn run(&mut self, command: Command) -> Result<()> {
-        self.at_start = false;
+        self.since = Since::Moved;
         let growing = self.growing();
         let effect = self.engine.execute(command)?;
         let step = match command {
@@ -277,7 +284,9 @@ impl Diff {
         };
         let growing = self.growing();
         let acted = self.engine.handle_event(event, true)? != InputEffect::Ignored;
-        self.at_start &= !acted;
+        if acted {
+            self.since = Since::Moved;
+        }
         if acted {
             self.keep_in_hunk(growing, step)?;
         }
@@ -360,7 +369,7 @@ impl Diff {
             first: lines.first,
             last: lines.last,
         };
-        self.at_start = false;
+        self.since = Since::Moved;
         self.engine.select_range(range)?;
         Ok(())
     }
@@ -399,7 +408,7 @@ impl Diff {
     /// Put the cursor on `lines.first`. An error means the diff does not show that line.
     pub(super) fn reveal(&mut self, path: &str, side: Side, line: u32) -> Result<()> {
         let file = self.index(path).with_context(|| format!("{path} is not in the diff"))?;
-        self.at_start = false;
+        self.since = Since::Moved;
         self.engine.reveal(file, engine_side(side), line)?;
         Ok(())
     }

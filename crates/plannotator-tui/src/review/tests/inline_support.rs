@@ -88,7 +88,7 @@ pub(super) type Spot = (String, Option<u32>, Option<u32>, String);
 
 pub(super) fn spot(screen: &Screen) -> Spot {
     let row = screen.diff.cursor_row().expect("a cursor");
-    (row.path.to_string(), row.old_line, row.new_line, format!("{:?}", row.kind))
+    (row.path.clone(), row.old_line, row.new_line, format!("{:?}", row.kind))
 }
 
 /// The screen row of the last frame that shows `spot`, its first part when wrapped.
@@ -105,7 +105,7 @@ pub(super) fn row_of_spot(screen: &Screen, spot: &Spot) -> Option<u16> {
     let x = column(side.unwrap_or(Side::New));
     (pane.top()..pane.bottom()).find(|&y| {
         screen.diff.row_at(x, y).is_some_and(|row| {
-            (row.path.to_string(), row.old_line, row.new_line, format!("{:?}", row.kind)) == *spot
+            (row.path.clone(), row.old_line, row.new_line, format!("{:?}", row.kind)) == *spot
         })
     })
 }

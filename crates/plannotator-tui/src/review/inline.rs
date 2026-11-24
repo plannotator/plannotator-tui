@@ -89,12 +89,21 @@ enum Part {
     Whole,
 }
 
-/// Where `note`'s box goes: under its last line on its side, or under its file's heading
-/// (`Some(None)`). `None` for a note with no box.
-fn place(note: &CodeAnnotation) -> Option<Option<(Side, u32)>> {
+/// Where a box goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Place {
+    /// Under this line of this side.
+    Line(Side, u32),
+    /// Under the file's heading.
+    Heading,
+}
+
+/// Where `note`'s box goes: under its last line on its side, or under its file's heading.
+/// `None` for a note with no box.
+fn place(note: &CodeAnnotation) -> Option<Place> {
     match note.scope {
-        NoteScope::Line if notes::in_diff(note) => Some(Some((note.side, note.line_end))),
-        NoteScope::File if !notes::is_outdated(note) => Some(None),
+        NoteScope::Line if notes::in_diff(note) => Some(Place::Line(note.side, note.line_end)),
+        NoteScope::File if !notes::is_outdated(note) => Some(Place::Heading),
         _ => None,
     }
 }
@@ -136,7 +145,7 @@ impl Screen {
             for note in order.into_iter().filter_map(|i| notes.get(i)) {
                 let path = note.file_path.as_str();
                 let shown = columns.entry(path).or_insert_with(|| self.diff.box_columns(path));
-                let (Some(line), Some(columns)) = (place(note), *shown) else {
+                let (Some(place), Some(columns)) = (place(note), *shown) else {
                     skipped += 1;
                     continue;
                 };
@@ -147,6 +156,10 @@ impl Screen {
                 }
                 let id = self.inline.id(&note.id);
                 let height = self.inline.card(id, note, width, tab).height();
+                let line = match place {
+                    Place::Line(side, line) => Some((side, line)),
+                    Place::Heading => None,
+                };
                 slots.push(Slot { id, path, line, height });
             }
         }
@@ -192,6 +205,15 @@ impl Screen {
             return Ok(false);
         }
         Ok(true)
+    }
+
+    /// The key help's row for the keys on a box: edit / remove.
+    pub(super) fn box_help(&self) -> (String, &'static str) {
+        let edit = [self.keys.hint(Action::Confirm), self.keys.hint_besides(Action::Edit, keys::DIFF)];
+        let edit = edit.into_iter().filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" ");
+        let remove = self.keys.hint_besides(Action::Remove, keys::DIFF);
+        let keys = [edit, remove].into_iter().filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" / ");
+        (keys, "on a note drawn in the diff: edit / remove it")
     }
 
     /// Where note `id`'s box was drawn in the last frame, when it was.

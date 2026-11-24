@@ -86,17 +86,16 @@ impl Screen {
         self.decide_auto(area.width, diff.width)?;
         self.draw_header(frame, header);
         let cursor_selected = self.cursor_selected();
-        match &mut self.whole {
-            Some(whole) => whole.draw(frame, diff)?,
-            None => {
-                // The notes' boxes as the last frame's columns size them, then again for this
-                // frame's when those changed (a resize, a pane opened or closed, the line
-                // between the sides moved), drawn again before anything shows.
-                self.sync_boxes();
+        if let Some(whole) = &mut self.whole {
+            whole.draw(frame, diff)?;
+        } else {
+            // The notes' boxes as the last frame's columns size them, then again for this
+            // frame's when those changed (a resize, a pane opened or closed, the line between
+            // the sides moved), drawn again before anything shows.
+            self.sync_boxes();
+            self.diff.draw(frame, diff)?;
+            if self.sync_boxes() {
                 self.diff.draw(frame, diff)?;
-                if self.sync_boxes() {
-                    self.diff.draw(frame, diff)?;
-                }
             }
         }
         let (middle, code) = match self.active_diff_mut() {

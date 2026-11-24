@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr as _;
 
 use super::Screen;
 use super::input::{MENU, MenuRow};
-use crate::keys::{self, Action};
+use crate::keys::Action;
 use crate::theme::palette;
 use crate::ui::hints;
 
@@ -118,18 +118,7 @@ impl Screen {
                     (key(&[Action::Comment]), "comment on the selection or line"),
                     (key(&[Action::Suggest]), "suggest code for new lines"),
                     (key(&[Action::FileComment]), "comment on the file"),
-                    (
-                        [self.keys.hint(Action::Confirm), self.keys.hint_besides(Action::Edit, keys::DIFF)]
-                            .into_iter()
-                            .filter(|k| !k.is_empty())
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                        "on a note drawn in the diff (settings: Notes): edit it",
-                    ),
-                    (
-                        self.keys.hint_besides(Action::Remove, keys::DIFF),
-                        "on a note drawn in the diff: remove it",
-                    ),
+                    self.box_help(),
                     (key(&[Action::WholeFile]), "the whole file as it is now, at this line"),
                     (key(&[Action::WholeBase]), "the whole file before the change (base)"),
                     (key(&[Action::GoToDefinition]), "go to the definition of a word on the line"),

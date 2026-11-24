@@ -63,15 +63,15 @@ fn the_panel_setting_keeps_no_rows_for_notes_and_draws_as_before() {
     comment(&mut screen, "file0.py", Side::Old, (12, 12), "an old one");
     let noted = draw(&mut screen, SIZE);
     assert!(screen.diff.boxes_set().is_empty(), "no rows kept");
-    assert!(screen.geometry.boxes.is_empty());
+    assert!(screen.geometry.boxes.is_empty(), "none drawn");
     assert!(!all(&noted).contains("comment \u{b7} L"), "no box:\n{}", all(&noted));
     // Inline and back: the diff is the one panel drew.
     set_notes(&mut screen, Notes::Inline);
-    assert!(!screen.diff.boxes_set().is_empty());
+    assert!(!screen.diff.boxes_set().is_empty(), "inline keeps rows");
     draw(&mut screen, SIZE);
     set_notes(&mut screen, Notes::Panel);
     let back = draw(&mut screen, SIZE);
-    assert!(screen.diff.boxes_set().is_empty());
+    assert!(screen.diff.boxes_set().is_empty(), "panel again keeps none");
     assert_eq!(pane(&screen, &back), pane(&screen, &noted), "panel again draws what it drew");
     assert_ne!(pane(&screen, &before), pane(&screen, &noted), "the notes' marks");
 }

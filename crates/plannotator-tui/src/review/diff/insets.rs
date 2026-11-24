@@ -7,7 +7,7 @@ use anyhow::Result;
 use diffs_rs::engine::{self, DiffRowKind, Inset, InsetAnchor};
 use plannotator_tui_review::Side;
 
-use super::{Diff, engine_side};
+use super::{Diff, Since, engine_side};
 
 pub(in crate::review) use diffs_rs::engine::InsetArea as BoxArea;
 
@@ -61,7 +61,7 @@ impl Diff {
         // first line, now with the boxes: the viewer keeps the cursor's row when boxes come,
         // so a box under the first heading would start above the top.
         let in_first = self.engine.cursor_row().is_some_and(|row| row.file == 0);
-        if first && self.at_start && in_first && !insets.is_empty() {
+        if first && self.since == Since::Opened && in_first && !insets.is_empty() {
             self.show_heading(0)?;
             self.engine.execute(engine::Command::FirstSource)?;
         }

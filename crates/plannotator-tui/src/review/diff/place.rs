@@ -7,7 +7,7 @@ use diffs_rs::engine::{Command, DiffRow, DiffRowKind, InputEffect, Side};
 use diffs_rs::reading::SourceRange;
 use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
-use super::{Diff, Lines};
+use super::{Diff, Lines, Since};
 
 impl Diff {
     /// The viewer's index of the file the cursor is in. `None` before any file arrived.
@@ -85,7 +85,7 @@ impl Diff {
             let kind = MouseEventKind::Down(MouseButton::Left);
             Event::Mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE })
         };
-        self.at_start = false;
+        self.since = Since::Moved;
         self.engine.execute(Command::ClearSelection)?;
         self.engine.handle_event(click(from), true)?;
         self.engine.execute(Command::SelectLines)?;
@@ -129,7 +129,7 @@ impl Diff {
         if index >= self.paths.len() {
             return Ok(());
         }
-        self.at_start = false;
+        self.since = Since::Moved;
         for _ in 0..=self.paths.len() {
             let Some(row) = self.cursor_row() else { return Ok(()) };
             let command = match row.file.cmp(&index) {

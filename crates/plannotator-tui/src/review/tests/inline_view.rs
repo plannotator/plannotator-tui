@@ -73,10 +73,10 @@ enum At {
 
 /// How many notes the review has before the first step.
 #[derive(Debug, Clone, Copy)]
-enum Many {
+enum Count {
     None,
     One,
-    Many,
+    Several,
 }
 
 /// What a frame shows: the cursor's line and row, and the code's columns.
@@ -159,14 +159,14 @@ fn near(screen: &Screen, delta: i64) -> u32 {
     (i64::from(line) + delta).clamp(58, 142) as u32
 }
 
-fn notes(screen: &mut Screen, many: Many) {
+fn notes(screen: &mut Screen, many: Count) {
     match many {
-        Many::None => {}
-        Many::One => {
+        Count::None => {}
+        Count::One => {
             let line = near(screen, -2);
             comment(screen, PATH, Side::New, (line, line), "one note here");
         }
-        Many::Many => {
+        Count::Several => {
             keys(screen, "C");
             type_and_save(screen, "about the whole file");
             for (side, lines, text) in [
@@ -374,7 +374,7 @@ fn drag_over(screen: &mut Screen) {
 fn every_step(name: &str, layout: &str) {
     for wrap in [false, true] {
         for at in [At::Top, At::Middle, At::LastPage] {
-            for many in [Many::None, Many::One, Many::Many] {
+            for many in [Count::None, Count::One, Count::Several] {
                 let case = format!("{name} wrap {wrap} {at:?} {many:?}");
                 let tag = format!("inline-view-{}-{wrap}-{at:?}-{many:?}", name.replace([' ', ':'], "-"));
                 let (fixture, mut screen) = kotlin(&tag, &format!("{layout}\nwrap = {wrap}"));
