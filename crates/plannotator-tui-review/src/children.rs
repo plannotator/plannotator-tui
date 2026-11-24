@@ -281,6 +281,7 @@ fn sweep_stale() {
 }
 
 /// The process id in an index folder's name.
+#[cfg(any(unix, test))]
 fn stale_pid(name: &str) -> Option<i32> {
     let rest = name.strip_prefix(PREFIX)?;
     let rest = rest.strip_prefix("index-").unwrap_or(rest);
