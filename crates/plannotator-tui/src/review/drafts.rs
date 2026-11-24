@@ -81,8 +81,9 @@ impl Screen {
         self.mode = Mode::Browse;
         let value = self.compose.value();
         let text = value.trim().to_owned();
-        // Code keeps its indentation; only trailing blank lines go.
-        let code = value.trim_end().to_owned();
+        // Code is kept as it is, carriage returns and trailing spaces included, so an unedited
+        // suggestion is the original; only a new line typed after the last one goes.
+        let code = value.strip_suffix('\n').unwrap_or(&value).to_owned();
         let key = self.capture.patch_key.clone();
         let note = match draft {
             _ if text.is_empty() => {

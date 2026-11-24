@@ -14,7 +14,8 @@
 //! - [`herdr`]: `plannotator-tui herdr review`. [`scope`]: what it shares with `rex review`
 //!   and `hc review`, and the pane they open.
 //! - [`input`]: keys and the mouse; [`mouse`]: clicks and drags in the diff. [`draw`],
-//!   [`footer`], [`rail`] and [`overlays`]: the frame. [`divider`]: dragging the lines
+//!   [`footer`], [`rail`] and [`overlays`]: the frame; [`compose_at`]: where the comment box
+//!   opens. [`divider`]: dragging the lines
 //!   between the panes.
 //! - [`send`]: send, resend, finish and undo. [`pi`]: the Pi link.
 //! - [`watch`]: noticing that the diff changed on disk, for the footer.
@@ -26,6 +27,7 @@
 //! agent as any review does. Nothing is posted to GitHub.
 
 pub(crate) mod cli;
+mod compose_at;
 mod diff;
 mod divider;
 mod drafts;
@@ -131,6 +133,8 @@ struct Geometry {
     toolbar_bar: Option<Rect>,
     /// The columns the comment box wrapped to last frame; 0 before its first.
     compose_wrap: usize,
+    /// Where the comment box drew its text, and the first of the text's rows shown there.
+    compose_text: Option<(Rect, usize)>,
 }
 
 /// The review screen.
@@ -170,6 +174,8 @@ pub(crate) struct Screen {
     /// The changed files on the left, and their filter.
     files: files::FileList,
     compose: Compose,
+    /// The side of its lines the open comment box took.
+    compose_at: Option<compose_at::Placed>,
     send_state: SendState,
     last_send: crate::ui::send_button::LastSend,
     /// Notes the last finish archived, for undo.
@@ -253,6 +259,7 @@ impl Screen {
             notes_rail: NotesRail::default(),
             files: files::FileList::default(),
             compose: Compose::default(),
+            compose_at: None,
             send_state: SendState::Ready,
             last_send: crate::ui::send_button::LastSend::None,
             undo: Vec::new(),

@@ -117,7 +117,7 @@ impl Screen {
                 // Up and Down move by the rows the box shows; before its first frame, by
                 // the widest it can be.
                 let wrap = match self.geometry.compose_wrap {
-                    0 => usize::from(super::draw::COMPOSE_MAX_WIDTH.saturating_sub(compose::CHROME)),
+                    0 => usize::from(super::compose_at::MAX_WIDTH.saturating_sub(compose::CHROME)),
                     drawn => drawn,
                 };
                 match self.compose.key(&self.keys, key, wrap) {
@@ -397,6 +397,19 @@ impl Screen {
                     MouseEventKind::ScrollDown => self.help_scroll = (self.help_scroll + 3).min(room),
                     MouseEventKind::ScrollUp => self.help_scroll = self.help_scroll.saturating_sub(3),
                     _ => {}
+                }
+                return Ok(());
+            }
+            // While the box is open a click on its text moves the text cursor; nothing else
+            // the mouse does changes anything: a click elsewhere keeps the draft, and the
+            // wheel leaves the diff, and the lines the box is next to, where they are.
+            Mode::Compose(_) => {
+                if click
+                    && let Some((text, first)) = self.geometry.compose_text
+                    && text.contains(at)
+                {
+                    let (row, col) = (first + usize::from(at.y - text.y), usize::from(at.x - text.x));
+                    self.compose.click(row, col, self.geometry.compose_wrap);
                 }
                 return Ok(());
             }

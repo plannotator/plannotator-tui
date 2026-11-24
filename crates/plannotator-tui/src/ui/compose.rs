@@ -6,6 +6,7 @@
 //! cursor, wrapped at word boundaries to the box width for display only — the saved body
 //! keeps exactly the newlines the user typed.
 
+use std::cell::Cell;
 use std::ops::Range;
 
 use ratatui::Frame;
@@ -35,17 +36,37 @@ pub(crate) struct Compose {
     initial: String,
     /// Esc was pressed with changed text, and the box is asking whether to discard it.
     asking: bool,
+    /// The first display row the box showed last frame. It moves only when the cursor leaves
+    /// the rows shown, so a click or an arrow inside them does not shift the text.
+    scroll: Cell<usize>,
 }
 
+/// The columns a tab takes in the box, as in the diff.
+const TAB_WIDTH: usize = 4;
+
+/// The columns `c` takes in the box: a tab four, a control character (a code line's `\r`)
+/// none.
 fn width_of(c: char) -> usize {
-    UnicodeWidthChar::width(c).unwrap_or(0)
+    if c == '\t' { TAB_WIDTH } else { UnicodeWidthChar::width(c).unwrap_or(0) }
+}
+
+/// A display row as the terminal draws it: tabs as spaces, control characters as nothing.
+/// The text itself keeps them.
+fn shown(row: &str) -> String {
+    row.chars()
+        .flat_map(|c| match c {
+            '\t' => vec![' '; TAB_WIDTH],
+            c if c.is_control() => Vec::new(),
+            c => vec![c],
+        })
+        .collect()
 }
 
 impl Compose {
     pub(crate) fn with_text(text: &str) -> Self {
         let chars: Vec<char> = text.chars().collect();
         let cursor = chars.len();
-        Self { chars, cursor, initial: text.to_owned(), asking: false }
+        Self { chars, cursor, initial: text.to_owned(), asking: false, scroll: Cell::new(0) }
     }
 
     pub(crate) fn value(&self) -> String {
@@ -219,7 +240,28 @@ impl Compose {
         let rows = self.rows(wrap_width);
         let (row, col) = self.cursor_position(&rows);
         let Some(target_row) = row.checked_add_signed(delta) else { return };
-        let Some(target) = rows.get(target_row) else { return };
+        if let Some(cursor) = self.index_at(&rows, target_row, col) {
+            self.cursor = cursor;
+        }
+    }
+
+    /// A click on the text: the cursor goes to display row `row` (the last, below the text) at
+    /// display column `col`, or the end of that row. While the box asks whether to discard,
+    /// a click is no answer and changes nothing.
+    #[cfg_attr(not(unix), allow(dead_code, reason = "only the code review reads it"))]
+    pub(crate) fn click(&mut self, row: usize, col: usize, wrap_width: usize) {
+        if self.asking {
+            return;
+        }
+        let rows = self.rows(wrap_width);
+        if let Some(cursor) = self.index_at(&rows, row.min(rows.len().saturating_sub(1)), col) {
+            self.cursor = cursor;
+        }
+    }
+
+    /// The index shown on display row `row` of `rows` nearest display column `col`.
+    fn index_at(&self, rows: &[Range<usize>], row: usize, col: usize) -> Option<usize> {
+        let target = rows.get(row)?;
         let mut cursor = target.start;
         let mut used = 0;
         for &c in self.chars.get(target.clone()).unwrap_or_default() {
@@ -231,8 +273,8 @@ impl Compose {
             cursor += 1;
         }
         // A wrapped row's end is the next row's start, which displays on that next row.
-        let wraps = rows.get(target_row + 1).is_some_and(|next| next.start == target.end);
-        self.cursor = if wraps && cursor == target.end { cursor.saturating_sub(1) } else { cursor };
+        let wraps = rows.get(row + 1).is_some_and(|next| next.start == target.end);
+        Some(if wraps && cursor == target.end { cursor.saturating_sub(1) } else { cursor })
     }
 
     /// The range of `chars` each display row shows at `width`. Explicit newlines always
@@ -334,37 +376,55 @@ pub(crate) fn height(compose: &Compose, wrap_width: usize) -> u16 {
     content_rows(compose, wrap_width) as u16 + 2
 }
 
-/// Draw the box in `rect` (as tall as [`height`] says) with its text wrapped at
-/// `rect.width - CHROME`, and put the terminal cursor at the insertion point. A title too
+/// Draw the box in `rect` with its text wrapped at `rect.width - CHROME`, and put the
+/// terminal cursor at the insertion point. The box shows as many rows of text as `rect` has
+/// inside its borders ([`height`] asks for them all, up to eight); taller text scrolls to keep
+/// the cursor's row in view, and stays where it is while the cursor is in view. A title too
 /// long for the top border continues on the bottom one. It is dim, and bold while the box
-/// asks to discard its text.
-pub(crate) fn draw(frame: &mut Frame, rect: Rect, compose: &Compose, title: &str) {
-    let title_style = if compose.asking { Style::new().bold() } else { Style::new().dim() };
-    let wrap_width = usize::from(rect.width.saturating_sub(CHROME));
-    let (lines, cursor_row, cursor_col) = compose.wrapped(wrap_width);
-    let content_rows = content_rows(compose, wrap_width);
-    let (title, title_rest) = split_title(title, usize::from(rect.width.saturating_sub(2)));
+/// asks to discard its text. A `rect` too short for borders shows the text alone, and
+/// nothing is ever drawn outside `rect`.
+///
+/// Returns where the text is drawn and the first of its display rows shown there, for a click.
+pub(crate) fn draw(frame: &mut Frame, rect: Rect, compose: &Compose, title: &str) -> (Rect, usize) {
+    let rect = rect.intersection(frame.area());
     frame.render_widget(Clear, rect);
-    let mut boxed = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(palette().comment))
-        .title(Span::styled(title, title_style));
-    if !title_rest.is_empty() {
-        boxed = boxed.title_bottom(Span::styled(format!(" {title_rest} "), title_style));
+    let bordered = rect.height >= 3 && rect.width > CHROME;
+    let text = if bordered {
+        let title_style = if compose.asking { Style::new().bold() } else { Style::new().dim() };
+        let (title, title_rest) = split_title(title, usize::from(rect.width.saturating_sub(2)));
+        let mut boxed = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::new().fg(palette().comment))
+            .title(Span::styled(title, title_style));
+        if !title_rest.is_empty() {
+            boxed = boxed.title_bottom(Span::styled(format!(" {title_rest} "), title_style));
+        }
+        let inner = boxed.inner(rect);
+        frame.render_widget(boxed, rect);
+        Rect { x: inner.x + 1, width: inner.width.saturating_sub(1), ..inner }
+    } else {
+        rect
+    };
+    if text.is_empty() {
+        return (text, compose.scroll.get());
     }
-    let inner = boxed.inner(rect);
-    frame.render_widget(boxed, rect);
-    // Keep the cursor's row visible when the text is taller than the box.
-    let scroll = cursor_row.saturating_sub(content_rows - 1);
+    // One column stays free so the cursor can sit past a full row.
+    let wrap_width = usize::from(text.width.saturating_sub(1)).max(1);
+    let (lines, cursor_row, cursor_col) = compose.wrapped(wrap_width);
+    let content_rows = usize::from(text.height);
+    let last_start = lines.len().saturating_sub(content_rows);
+    let scroll =
+        compose.scroll.get().min(last_start).clamp(cursor_row.saturating_sub(content_rows - 1), cursor_row);
+    compose.scroll.set(scroll);
     for (i, line) in lines.iter().skip(scroll).take(content_rows).enumerate() {
-        let row =
-            Rect { x: inner.x + 1, y: inner.y + i as u16, width: inner.width.saturating_sub(1), height: 1 };
-        frame.render_widget(Paragraph::new(Line::from(line.clone())), row);
+        let row = Rect { y: text.y + i as u16, height: 1, ..text };
+        frame.render_widget(Paragraph::new(Line::from(shown(line))), row);
     }
-    let cursor_x = inner.x + 1 + cursor_col as u16;
-    let cursor_y = inner.y + (cursor_row - scroll) as u16;
-    frame.set_cursor_position((cursor_x.min(inner.right().saturating_sub(1)), cursor_y));
+    let cursor_x = text.x + cursor_col as u16;
+    let cursor_y = text.y + (cursor_row - scroll) as u16;
+    frame.set_cursor_position((cursor_x.min(text.right().saturating_sub(1)), cursor_y));
+    (text, scroll)
 }
 
 #[cfg(test)]
@@ -606,6 +666,80 @@ mod tests {
         compose.cursor = 7;
         send(&mut compose, KeyCode::Up, KeyModifiers::NONE);
         assert_eq!(compose.cursor, 1);
+    }
+
+    #[test]
+    fn a_click_puts_the_cursor_at_the_clicked_cell_or_the_end_of_its_row() {
+        let mut compose = Compose::with_text("the quick brown fox\njumps");
+        compose.click(0, 4, 10);
+        assert_eq!(compose.cursor, 4, "on the q");
+        compose.click(1, 40, 10);
+        assert_eq!(compose.cursor, 19, "past the end of the second display row: its end");
+        compose.click(7, 1, 10);
+        assert_eq!(compose.cursor, 21, "below the text: the last row");
+    }
+
+    /// `compose` drawn in `rect` of a `cols`×`rows` screen: the rows as text, and where the
+    /// text went.
+    fn drawn(compose: &Compose, cols: u16, rows: u16, rect: Rect) -> (Vec<String>, (Rect, usize)) {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(cols, rows)).expect("terminal");
+        let mut at = (Rect::default(), 0);
+        terminal.draw(|frame| at = draw(frame, rect, compose, " comment ")).expect("draw");
+        let buffer = terminal.backend().buffer();
+        let text = (0..rows)
+            .map(|y| (0..cols).filter_map(|x| buffer.cell((x, y)).map(|c| c.symbol().to_owned())).collect())
+            .collect();
+        (text, at)
+    }
+
+    #[test]
+    fn tabs_draw_as_four_columns_and_stay_tabs_in_the_text() {
+        let compose = Compose::with_text("\tindented\twith tabs\r");
+        let (rows, _) = drawn(&compose, 40, 3, Rect::new(0, 0, 40, 3));
+        assert!(rows.get(1).is_some_and(|r| r.contains("    indented    with tabs ")), "{rows:?}");
+        assert_eq!(compose.value(), "\tindented\twith tabs\r");
+    }
+
+    #[test]
+    fn a_box_too_short_for_its_borders_draws_its_text_inside_its_rectangle_alone() {
+        for height in [0, 1, 2] {
+            let mut compose = Compose::default();
+            compose.insert_text("some draft text");
+            let rect = Rect::new(2, 2, 30, height);
+            let (rows, (text, _)) = drawn(&compose, 40, 6, rect);
+            for (y, row) in rows.iter().enumerate() {
+                let inside = (rect.top()..rect.bottom()).contains(&(y as u16));
+                assert!(inside || row.trim().is_empty(), "height {height}: row {y} is {row:?}");
+            }
+            assert!(rect.union(text) == rect || text.is_empty(), "height {height}: {text:?}");
+            if height > 0 {
+                assert!(rows.get(2).is_some_and(|r| r.contains("some draft")), "height {height}: {rows:?}");
+                assert!(!rows.concat().contains('\u{256d}'), "no borders");
+            }
+            assert_eq!(compose.value(), "some draft text", "the draft stays");
+        }
+    }
+
+    #[test]
+    fn the_text_stays_put_while_the_cursor_moves_inside_the_rows_shown() {
+        let text: Vec<String> = (0..50).map(|n| format!("line {n}")).collect();
+        let mut compose = Compose::with_text(&text.join("\n"));
+        let rect = Rect::new(0, 0, 30, 10);
+        let (rows, (_, first)) = drawn(&compose, 30, 10, rect);
+        assert_eq!(first, 42, "the end shows: {rows:?}");
+        compose.click(45, 0, 26);
+        let (rows, (_, first)) = drawn(&compose, 30, 10, rect);
+        assert_eq!(first, 42, "a click on a shown row moves nothing: {rows:?}");
+        compose.click(first + 1, 0, 26);
+        compose.insert_text("X");
+        assert!(compose.value().contains("\nXline 43\n"), "the next click lands on the row clicked");
+        compose.handle_key(KeyEvent::from(KeyCode::Up), 26);
+        let (_, (_, first)) = drawn(&compose, 30, 10, rect);
+        assert_eq!(first, 42, "Up inside the rows shown moves nothing either");
+        compose.handle_key(KeyEvent::from(KeyCode::Up), 26);
+        let (_, (_, first)) = drawn(&compose, 30, 10, rect);
+        assert_eq!(first, 41, "Up past the first row shown scrolls one row");
     }
 
     #[test]

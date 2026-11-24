@@ -1,6 +1,6 @@
 //! The frame: our header and footer (`footer`) around the diff (the viewer draws no chrome),
 //! the file list on the left (`files`), the notes rail on the right (`rail`), and the
-//! comment box, menu, picker and help over them (`overlays`). The look
+//! comment box (`compose_at`), menu, picker and help over them (`overlays`). The look
 //! is the document review's: the same buttons, hints and boxes from `ui/`.
 
 use anyhow::Result;
@@ -23,8 +23,6 @@ const RAIL_WIDTH: u16 = 36;
 pub(super) const RAIL_MIN_WIDTH: u16 = 28;
 /// Below this the rail is dropped; notes still show as gutter markers.
 pub(super) const RAIL_MIN_TOTAL_WIDTH: u16 = 80;
-/// The comment box's widest; code suggestions want the room.
-pub(super) const COMPOSE_MAX_WIDTH: u16 = 84;
 
 /// The most characters of a PR's title the header shows.
 const PR_TITLE_MAX: usize = 48;
@@ -109,6 +107,9 @@ impl Screen {
         }
         self.dividers.draw(frame);
         self.draw_footer(frame, footer);
+        if !matches!(self.mode, Mode::Compose(_)) {
+            self.compose_at = None;
+        }
         match &self.mode {
             Mode::Compose(draft) => {
                 let draft = draft.clone();
@@ -190,18 +191,9 @@ impl Screen {
         }
     }
 
-    /// The comment box, along the bottom of the diff, as wide as code needs.
+    /// The comment box, next to what it is about (`compose_at`).
     fn draw_compose(&mut self, frame: &mut Frame, diff: Rect, draft: &Draft) {
-        let width = diff.width.min(COMPOSE_MAX_WIDTH);
-        let wrap_width = usize::from(width.saturating_sub(compose::CHROME));
-        self.geometry.compose_wrap = wrap_width;
-        let height = compose::height(&self.compose, wrap_width).min(diff.height);
-        let rect = Rect {
-            x: diff.x + (diff.width - width) / 2,
-            y: diff.bottom().saturating_sub(height),
-            width,
-            height,
-        };
+        let rect = self.compose_rect(diff, draft);
         let verb = match draft {
             Draft::Comment(lines) => {
                 format!("comment on {}", lines_label(lines))
@@ -215,7 +207,10 @@ impl Screen {
             Draft::Edit(_) => "edit".to_owned(),
         };
         let title = self.compose.heading(&verb, self.shift_enter, &self.keys);
-        compose::draw(frame, rect, &self.compose, &title);
+        let (text, first) = compose::draw(frame, rect, &self.compose, &title);
+        // The text wraps one column short of its area, which keeps a column for the cursor.
+        self.geometry.compose_wrap = usize::from(text.width.saturating_sub(1)).max(1);
+        self.geometry.compose_text = Some((text, first));
     }
 }
 
