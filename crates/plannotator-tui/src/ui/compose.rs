@@ -227,6 +227,7 @@ impl Compose {
     /// A click on the text: the cursor goes to display row `row` (the last, below the text) at
     /// display column `col`, or the end of that row. While the box asks whether to discard,
     /// a click is no answer and changes nothing.
+    #[cfg_attr(not(unix), allow(dead_code, reason = "only the code review reads it"))]
     pub(crate) fn click(&mut self, row: usize, col: usize, wrap_width: usize) {
         if self.asking {
             return;
