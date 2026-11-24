@@ -162,8 +162,9 @@ impl Screen {
     /// ([`super::pick::shown::Switched`]).
     pub(super) fn request_quit(&mut self) {
         self.count_unsent_elsewhere();
-        if self.has_unsent() || !self.switched.unsent.is_empty() {
+        if self.has_unsent() || !self.switched.unsent.is_empty() || !self.switched.gone.is_empty() {
             self.mode = Mode::ConfirmQuit;
+            self.told_of_gone();
         } else {
             self.quit = true;
         }

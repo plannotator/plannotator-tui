@@ -272,10 +272,10 @@ impl Picker {
     }
 
     /// Ask for the sizes not known yet, the rows on screen first, while the work has room and
-    /// no capture waits for it.
+    /// no capture waits for it or is ready to open.
     fn ask_sizes(&mut self) {
         let shown = self.scroll..self.scroll + self.geometry.visible.max(1);
-        while self.work.has_room() && self.opening.is_none() {
+        while self.work.has_room() && self.opening.is_none() && self.opened.is_none() {
             let waiting = |row: &Row| row.size == Sized::Waiting && row.kind != Kind::More;
             let next = shown
                 .clone()

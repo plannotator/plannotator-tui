@@ -24,31 +24,52 @@ const FOOTER_ONE_ROW: u16 = 120;
 const HEADING_COUNTS: usize = 24;
 
 impl Screen {
+    /// The quit prompt. `y` sends this review's notes only; the other reviews' unsent notes
+    /// are named apart, with `esc` to go to them, and those whose review is gone are said
+    /// to be kept.
+    ///
+    /// ` send notes to X before quitting? y send · n quit · esc cancel`, or with others:
+    /// ` quit? y send these to X · 1 more unsent on Commit 2efc81b (esc go to it) · n quit`.
+    pub(super) fn quit_question(&self) -> String {
+        let label = |action, text| self.keys.labelled(action, text);
+        let here = self.has_unsent();
+        let gone = self.gone_text();
+        let target = self.delivery.describe();
+        if let Some(more) = self.more_unsent_text() {
+            let go = label(Action::Back, "go to it").map(|go| format!(" ({go})")).unwrap_or_default();
+            let parts = [
+                here.then(|| label(Action::Yes, "send these").map(|yes| format!("{yes} to {target}")))
+                    .flatten(),
+                Some(if here {
+                    format!("{more}{go}")
+                } else {
+                    format!("{}{go}", self.unsent_elsewhere_text().unwrap_or(more))
+                }),
+                gone,
+                label(Action::No, "quit"),
+            ];
+            return format!(" quit? {}", parts.into_iter().flatten().collect::<Vec<_>>().join(" \u{b7} "));
+        }
+        let answers = [(Action::Yes, "send"), (Action::No, "quit"), (Action::Back, "cancel")]
+            .into_iter()
+            .filter(|(action, _)| here || *action != Action::Yes)
+            .filter_map(|(action, text)| label(action, text))
+            .collect::<Vec<_>>()
+            .join(" \u{b7} ");
+        match (here, gone) {
+            (true, None) => format!(" send notes to {target} before quitting? {answers}"),
+            (true, Some(gone)) => format!(" send notes to {target} before quitting? {answers} \u{b7} {gone}"),
+            (false, gone) => format!(" {} \u{b7} {answers}", gone.unwrap_or_default()),
+        }
+    }
+
     pub(super) fn footer_height(&self, width: u16) -> u16 {
         if self.mode == Mode::ConfirmQuit { 1 } else { self.footer_text(width).1.len().max(1) as u16 }
     }
 
     pub(super) fn draw_footer(&self, frame: &mut Frame, area: Rect) {
         if self.mode == Mode::ConfirmQuit {
-            let here = self.has_unsent();
-            let elsewhere = self.unsent_elsewhere_text();
-            let back = if elsewhere.is_some() { "go to it" } else { "cancel" };
-            let answers = [(Action::Yes, "send"), (Action::No, "quit"), (Action::Back, back)]
-                .into_iter()
-                .filter(|(action, _)| here || *action != Action::Yes)
-                .filter_map(|(action, label)| self.keys.labelled(action, label))
-                .collect::<Vec<_>>()
-                .join(" \u{b7} ");
-            let question = match (here, elsewhere) {
-                (true, None) => {
-                    format!(" send notes to {} before quitting? {answers}", self.delivery.describe())
-                }
-                (true, Some(elsewhere)) => format!(
-                    " send notes to {} before quitting? ({elsewhere} too) {answers}",
-                    self.delivery.describe()
-                ),
-                (false, elsewhere) => format!(" {} \u{b7} {answers}", elsewhere.unwrap_or_default()),
-            };
+            let question = self.quit_question();
             frame.render_widget(Paragraph::new(Line::from(Span::raw(question).bold())), area);
             return;
         }

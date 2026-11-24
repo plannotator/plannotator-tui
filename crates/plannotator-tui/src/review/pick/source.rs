@@ -68,7 +68,11 @@ impl Source for GitSource {
     }
 
     fn size(&self, scope: &Scope) -> Result<Size, String> {
-        let stat = self.repo.diff_stat(scope).map_err(|e| e.to_string())?;
+        let stat = self.repo.diff_stat(scope).map_err(|e| match e {
+            // A filter that asks on the terminal: the row says so, briefly.
+            plannotator_tui_review::Error::NeedsTerminal { .. } => super::rows::NEEDS_TERMINAL.to_owned(),
+            e => e.to_string(),
+        })?;
         let root = self.repo.root();
         // The same record the review opens (`Capture::record_owner` for a local scope).
         let unsent =

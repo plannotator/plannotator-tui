@@ -634,6 +634,8 @@ pub(crate) fn with_terminal<T>(
         &config.colors,
     );
     let mut terminal = ratatui::init();
+    // From here a code review's git runs in the background, off the terminal.
+    plannotator_tui_review::children::screen_taken(true);
     #[cfg(unix)]
     crate::hangup::watch();
     // ratatui's hook leaves the alternate screen and raw mode on a panic. The modes this app
@@ -657,6 +659,7 @@ pub(crate) fn with_terminal<T>(
     let result = run(&mut terminal, Session { config, config_notice, shift_enter });
     release_input(shift_enter);
     ratatui::restore();
+    plannotator_tui_review::children::screen_taken(false);
     result
 }
 

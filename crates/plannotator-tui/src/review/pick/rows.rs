@@ -77,6 +77,7 @@ impl Row {
         }
         Some(match &self.size {
             Sized::Waiting | Sized::Asking => Stat::Pending,
+            Sized::Failed(error) if error == NEEDS_TERMINAL => Stat::NeedsTerminal,
             Sized::Failed(_) => Stat::Failed,
             Sized::Known(size) if size.stat.is_empty() => Stat::Empty,
             // Binary files and pure renames change no lines: `+0 −0` would read as nothing.
@@ -118,11 +119,16 @@ impl Row {
     }
 }
 
+/// A size that could not be counted because git asked for input on the terminal.
+pub(super) const NEEDS_TERMINAL: &str = "needs the terminal";
+
 /// A row's size, in the words it is drawn with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Stat {
     Pending,
     Failed,
+    /// git (a filter, say) asked for input on the terminal, which a count cannot give.
+    NeedsTerminal,
     Empty,
     Lines {
         added: u64,
@@ -141,6 +147,7 @@ impl Stat {
         match self {
             Self::Pending => "\u{2026}".to_owned(),
             Self::Failed => "(unreadable)".to_owned(),
+            Self::NeedsTerminal => format!("({NEEDS_TERMINAL})"),
             Self::Empty => "(no changes)".to_owned(),
             Self::Lines { added, removed, files: count } if files => {
                 let noun = if count == 1 { "file" } else { "files" };

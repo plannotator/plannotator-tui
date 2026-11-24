@@ -371,7 +371,10 @@ clean, it is on that commit and the footer says `No uncommitted changes · pick 
 below`. Over a review, the cursor starts on that review's row. The commits show at once; the
 sizes fill in from the background, the rows on screen first, with `…` until then. At most two
 git commands run for them at a time; `r`, a choice or closing the picker stops the ones
-running, and quitting leaves no git command or index copy behind.
+running, and quitting leaves no git command or index copy behind. They run off the
+terminal: one that asks for input there (a clean filter or credential helper) is stopped and
+its row says `(needs the terminal)`. Before any screen opens, git runs as before, so such a
+prompt shows and can be answered.
 
 `j`/`k`, `g`/`G` and `PageUp`/`PageDown` move, `enter` (or a click) reviews the row and
 `more…` lists 20 older commits; the wheel scrolls. `r` lists the commits and counts the
@@ -379,8 +382,10 @@ changes again. `?` shows these keys and `q` quits. Over a review, `esc` or `p` g
 it. A review you pick takes the delivery target, the agent `P` chose, the diff settings and
 the keys of the one before; notes you had not sent stay saved on their own review, and the
 footer says so (`2 unsent notes kept on Uncommitted`). Quitting asks first while notes are
-unsent on any review you opened this session, and names them (`1 unsent note on Commit
-2efc81b`); `esc` there opens the picker on that review. Choosing the row of the review you
+unsent on any review you opened this session, and names them apart from the review's own
+(`y send these to … · 1 more unsent on Commit 2efc81b (esc go to it) · n quit`); `esc` there
+opens the picker on that review. A review gone from the branch since (a commit amended away)
+is named once: its notes are kept, and quitting does not ask about them again. Choosing the row of the review you
 are in goes back to it as it was. Each row reviews exactly that diff: an empty one only says
 so, and one that cannot open (a patch over 8 MiB, say) says why and the picker stays; a
 commit gone since the list was read says to press `r`.

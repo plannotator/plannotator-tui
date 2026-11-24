@@ -255,6 +255,11 @@ pub(crate) struct Switched {
     left: Vec<Left>,
     /// Counted when quit was asked: the reviews left with notes still unsent, and how many.
     pub(crate) unsent: Vec<(Scope, String, usize)>,
+    /// Counted with them: those whose review the picker can no longer show (a commit amended
+    /// away), not told of yet. Quitting says so once, then lets them be.
+    pub(crate) gone: Vec<(Scope, String, usize)>,
+    /// The ones the quit prompt has told of.
+    told_gone: Vec<Scope>,
     /// Where the next picker puts its cursor: the quit prompt's "go to it".
     pick_at: Option<Scope>,
 }
@@ -273,10 +278,11 @@ impl Screen {
     /// Count the notes unsent on the reviews this session left, for the quit prompt. As for
     /// this review's own, only when Send goes to an agent.
     pub(in crate::review) fn count_unsent_elsewhere(&mut self) {
-        self.switched.unsent = if self.delivery.is_agent() {
+        let counted: Vec<(Scope, String, usize)> = if self.delivery.is_agent() {
             self.switched
                 .left
                 .iter()
+                .filter(|left| !self.switched.told_gone.contains(&left.scope))
                 .filter_map(|left| {
                     let store =
                         ReviewStore::load(&self.data_dir, &left.project, &left.owner, &left.scope).ok()?;
@@ -287,6 +293,49 @@ impl Screen {
         } else {
             Vec::new()
         };
+        let (unsent, gone) = counted.into_iter().partition(|(scope, ..)| self.repo.still_listed(scope));
+        self.switched.unsent = unsent;
+        self.switched.gone = gone;
+    }
+
+    /// The quit prompt is showing the reviews that are gone: it does not again.
+    pub(in crate::review) fn told_of_gone(&mut self) {
+        let gone = self.switched.gone.iter().map(|(scope, ..)| scope.clone());
+        self.switched.told_gone.extend(gone);
+    }
+
+    /// `Commit 2efc81b is gone from this branch; its 1 note is kept but cannot be shown`.
+    pub(in crate::review) fn gone_text(&self) -> Option<String> {
+        let parts: Vec<String> = self
+            .switched
+            .gone
+            .iter()
+            .map(|(_, title, count)| {
+                let notes =
+                    if *count == 1 { "its 1 note is".to_owned() } else { format!("its {count} notes are") };
+                format!("{title} is gone from this branch; {notes} kept but cannot be shown")
+            })
+            .collect();
+        (!parts.is_empty()).then(|| parts.join(" \u{b7} "))
+    }
+
+    /// `1 more unsent on Commit 2efc81b`, `3 more unsent on Staged, 1 on Commit 2efc81b`: the
+    /// quit prompt's words for them beside this review's own.
+    pub(in crate::review) fn more_unsent_text(&self) -> Option<String> {
+        let parts: Vec<String> = self
+            .switched
+            .unsent
+            .iter()
+            .enumerate()
+            .map(|(index, (_, title, count))| {
+                if index == 0 {
+                    format!("{count} more unsent on {title}")
+                } else {
+                    format!("{count} on {title}")
+                }
+            })
+            .collect();
+        (!parts.is_empty()).then(|| parts.join(", "))
     }
 
     /// `1 unsent note on Commit 2efc81b`, `3 unsent notes on Staged, 1 on Commit 2efc81b`.

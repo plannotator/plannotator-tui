@@ -81,6 +81,23 @@ impl Repo {
         (merge_base != head).then_some(scope)
     }
 
+    /// Whether the picker can still show `scope`: a commit that is still on the branch
+    /// (`HEAD` or before it; not amended, rebased or reset away), a branch whose base still
+    /// resolves. The working tree's scopes and pull requests always can.
+    pub fn still_listed(&self, scope: &Scope) -> bool {
+        match scope {
+            Scope::Commit { sha } => {
+                !sha.starts_with('-') && {
+                    let mut cmd = git::command(self.root());
+                    cmd.args(["merge-base", "--is-ancestor", sha, "HEAD"]);
+                    git::succeeds(cmd).unwrap_or(true)
+                }
+            }
+            Scope::Branch { base } => self.commit(base).is_ok(),
+            Scope::Uncommitted | Scope::Staged | Scope::Unstaged | Scope::PullRequest { .. } => true,
+        }
+    }
+
     /// The size of `scope`'s diff, without capturing it. A pull request has no local size.
     pub fn diff_stat(&self, scope: &Scope) -> Result<DiffStat> {
         let (_, _, out) = self.scope_diff(scope, &["--numstat", "-z"], MAX_PATCH_BYTES)?;

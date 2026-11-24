@@ -119,6 +119,7 @@ pub(super) fn open(args: ReviewArgs) -> Result<()> {
         Some(dir) => crate::workspace_paths::absolute(&dir),
         None => std::env::current_dir().context("current directory")?,
     };
+    let _exit = super::exit::guard();
     let start = starting(&dir, &args.target, std::io::stdout().is_terminal())?;
     // The review is drawn on stdout; redirected, there is nothing to draw on.
     anyhow::ensure!(
@@ -126,7 +127,6 @@ pub(super) fn open(args: ReviewArgs) -> Result<()> {
         "the code review is drawn on the terminal, and stdout is not one"
     );
     let data_dir = crate::workspace_paths::data_dir();
-    let _exit = super::exit::guard();
     crate::cli::with_terminal(|terminal, session| {
         let (wake, ready) = mpsc::sync_channel(1);
         // The diff draws as `[review]` says, with the choices remembered from the last review

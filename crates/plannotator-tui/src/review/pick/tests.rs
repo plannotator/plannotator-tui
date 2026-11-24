@@ -545,6 +545,40 @@ fn quitting_while_sizes_are_counted_leaves_no_git_running_and_no_index_copy() {
     }
 }
 
+/// A count whose git waits on the terminal (here a clean filter that stops itself, as a read
+/// from the terminal stops a background process) ends with the row saying so, and the other
+/// rows are counted all the same.
+#[cfg(unix)]
+#[test]
+fn a_count_that_waits_on_the_terminal_is_stopped_and_the_row_says_so() {
+    let fixture = Fixture::new("pick-tty");
+    let log = fixture.dir.join("filter.log");
+    let filter = format!("sh -c 'echo $$ - >> {}; kill -STOP $$; cat'", log.display());
+    fixture.git(&["config", "filter.tty.clean", &filter]);
+    fixture.write(".gitattributes", "*.py filter=tty\n");
+    let mut shown = picking(&fixture);
+    let started = Instant::now();
+    let rows = loop {
+        let rows = settle(&mut shown, 120, 20);
+        let counted = rows.iter().filter(|row| row.contains(" \u{b7} ")).count();
+        if row_with(&rows, "Uncommitted").contains("(needs the terminal)") && counted > 0 {
+            break rows;
+        }
+        assert!(started.elapsed() < Duration::from_secs(20), "{}", rows.join("\n"));
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(row_with(&rows, "init").contains("file"), "{}", rows.join("\n"));
+    assert!(!filter_runs(&log).is_empty(), "the filter ran");
+    for (pid, _) in filter_runs(&log) {
+        let pid = rustix::process::Pid::from_raw(pid).expect("a pid");
+        let gone = (0..100).any(|_| {
+            std::thread::sleep(Duration::from_millis(10));
+            rustix::process::test_kill_process(pid) == Err(rustix::io::Errno::SRCH)
+        });
+        assert!(gone, "the stopped filter {pid:?} was left");
+    }
+}
+
 #[test]
 fn a_click_while_the_keys_box_is_open_only_closes_it() {
     let fixture = Fixture::new("pick-help-click");
@@ -665,13 +699,63 @@ fn quitting_counts_the_notes_left_unsent_on_another_review_and_can_go_to_it() {
     keys(&mut shown, "q");
     let rows = draw(&mut shown, 160, 30);
     let prompt = rows.last().expect("footer");
+    // `y` reads as sending this review's notes only; the others are named apart.
     assert!(
-        prompt.contains("send notes to test agent before quitting? (1 unsent note on Uncommitted too)")
-            && prompt.contains("y send"),
+        prompt.contains("quit? y send these to test agent \u{b7} 1 more unsent on Uncommitted (esc go to it) \u{b7} n quit"),
         "{prompt}"
     );
     keys(&mut shown, "n");
     assert!(shown.wants_quit());
+}
+
+#[test]
+fn a_review_gone_from_the_branch_is_named_once_when_quitting_and_not_again() {
+    let fixture = Fixture::new("pick-quit-gone");
+    commit(&fixture, "second");
+    fixture.write("app.py", crate::review::tests::AFTER.replace("import sys", "import os").as_str());
+    let mut shown = reviewing(&fixture);
+    // A note on the commit `second`, then back to the uncommitted changes.
+    keys(&mut shown, "p");
+    settle(&mut shown, 120, 30);
+    keys(&mut shown, "jjj");
+    press(&mut shown, KeyCode::Enter);
+    until_open(&mut shown);
+    {
+        let screen = shown.screen_mut().expect("the commit's review");
+        at(screen, 1);
+        crate::review::tests::keys(screen, "c");
+        type_and_save(screen, "why?");
+    }
+    keys(&mut shown, "p");
+    settle(&mut shown, 120, 30);
+    keys(&mut shown, "kkk");
+    press(&mut shown, KeyCode::Enter);
+    until_open(&mut shown);
+    // The commit is amended away.
+    fixture.git(&[
+        "-c",
+        "user.name=T",
+        "-c",
+        "user.email=t@example.com",
+        "commit",
+        "--amend",
+        "-qm",
+        "second, again",
+    ]);
+
+    keys(&mut shown, "q");
+    assert!(!shown.wants_quit(), "it says so first");
+    let rows = draw(&mut shown, 160, 30);
+    let prompt = rows.last().expect("footer");
+    assert!(prompt.contains("is gone from this branch; its 1 note is kept but cannot be shown"), "{prompt}");
+    assert!(
+        prompt.contains("n quit") && !prompt.contains("go to it") && !prompt.contains("y send"),
+        "{prompt}"
+    );
+    press(&mut shown, KeyCode::Esc);
+    assert!(!shown.wants_quit(), "esc stays");
+    keys(&mut shown, "q");
+    assert!(shown.wants_quit(), "once told, quitting does not ask about it again");
 }
 
 #[test]
