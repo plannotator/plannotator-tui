@@ -18,6 +18,7 @@ mod file_list_mouse;
 mod file_moves;
 #[cfg(unix)]
 mod first_look;
+mod inline_engine;
 mod inline_fixes;
 mod inline_flow;
 mod inline_support;
