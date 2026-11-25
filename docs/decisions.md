@@ -371,13 +371,30 @@ branch `beta`, `packages/cli`) keeps the same data directory and, on the standar
 `time_updated`, `time_archived`) and `session_message` (`type` is the role, `seq` the order,
 `data` the payload; an assistant's text is `content[].type == "text"`, a user's is `text`;
 `synthetic`, `system`, `skill`, `shell`, `compaction` and the `*-switched` rows are not
-rendered). There is no `part` table. Other channels use `opencode-<channel>.db` beside it
-(`packages/cli/src/server-process.ts`). After the v1 migration both table families hold data,
+rendered). This version has no part table; 2.4 adds one (below). Other channels use
+`opencode-<channel>.db` beside it (`packages/cli/src/server-process.ts`). After the v1 migration both table families hold data,
 so the reader now considers every `opencode*.db` in the data dir and both schemas, and picks
 the newest top-level unarchived session for the cwd across all of them; a `--session-id` is
 looked up in whichever table holds it. Verified against the `beta` source
 (`packages/core/src/session/sql.ts`, `packages/schema/src/session-message.ts`,
 `packages/util/src/global-roots.ts`) and a mixed-schema fixture reproducing the report.
+
+**OpenCode 2.4** (2026-11-25, plannotator-tui#209, #203). OpenCode 2.4 (migration
+`20261029002625_session_part`) writes each part of an assistant message as its own
+`session_part` row (`message_id`, `session_id`, `ordinal`, `type`, `data`) and leaves
+`session_message.data.content` empty, so the reader found no recent replies. A session
+resumed under 2.4 holds both shapes. A reply's text is its inline `content[]` text when it has
+any, else its `text` parts in `ordinal` order, so no reply is listed twice; `reasoning`,
+`tool` and `step` parts, and parts flagged `synthetic` or `ignored`, are not reply text. The
+shape is decided per reply, not by `session_v2.version`, which a resumed session keeps.
+OpenCode's own reader (`withParts` in `packages/core/src/session/history.ts`) shows the parts
+and then any inline content; both exist only when an older build wrote to a message 2.4 had
+split. A database without `session_part` reads as before, and the part query is prepared on
+the first reply that needs it, so a session whose replies are all inline never depends on that
+table's columns. A part row that will not parse fails the read and names the session, message
+and database: it was selected for that reply, so skipping it would drop text silently.
+Verified against the `dev` source (the migration, `packages/core/src/session/sql.ts`,
+`history.ts`, `projector.ts`) and a synthetic 2.4 database.
 
 **Command Code** (2026-10-27, plannotator-tui#106). Command Code writes pi's session format:
 a `session` header with the `cwd`, then `id`/`parentId` entries (`message`, `session_info`,
