@@ -7,8 +7,8 @@
 //! column it did, no row is left empty, and every box is inside its rows, over no code, under
 //! its own note's line, saying that note's words (`inline_support`).
 //!
-//! The exceptions are the documented ones: at the very start of the diff the line can move
-//! up; wrapping turned on or off, reading the diff again, the file filter and jumping to a
+//! The exceptions are the documented ones: at the very top of the diff the top stays and the
+//! cursor's line moves as boxes above it come and go; wrapping turned on or off, reading the diff again, the file filter and jumping to a
 //! note from the panel move the view by design (wrapping as it does with no boxes: the
 //! cursor's file's heading comes to the top), and there only the boxes and the columns are
 //! checked.
@@ -139,7 +139,9 @@ fn kept(before: &Look, after: &Look, keeps: Keeps, case: &str) {
         Keeps::Cursor => {
             assert_eq!(after.cursor, before.cursor, "{case}: the cursor stays on its line");
             match (before.row, after.row) {
-                (Some(was), Some(now)) if now < was && after.at_start => {}
+                // At the very top of the diff the top stays the top: boxes coming or going
+                // above the cursor move its line instead.
+                (Some(_), Some(_)) if before.at_start && after.at_start => {}
                 (was, now) => assert_eq!(
                     now, was,
                     "{case}: the cursor's line keeps its screen row\nbefore:\n{}\nafter:\n{}",

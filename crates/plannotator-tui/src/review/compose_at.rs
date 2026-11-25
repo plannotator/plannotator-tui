@@ -65,7 +65,14 @@ impl Screen {
         let anchor = self.anchor(draft);
         // Where the viewer drew the line between a split diff's sides, wherever it was dragged.
         let middle = self.active_diff().filter(|diff| diff.split()).and_then(super::diff::Diff::split_line);
+        let boxes = self.notes_inline() && self.whole.is_none();
         let (x, width) = match &anchor {
+            // Where the notes' boxes are drawn, the box lines up with them.
+            Anchor::Lines(lines)
+                if let Some(columns) = boxes.then(|| self.box_columns(pane, lines)).flatten() =>
+            {
+                columns
+            }
             Anchor::Lines(lines) => columns(pane, middle, lines.side),
             Anchor::File(_) | Anchor::Centre => (pane.x, pane.width.min(MAX_WIDTH)),
             Anchor::Over(rect) => (rect.x, rect.width),
@@ -78,7 +85,6 @@ impl Screen {
             return Rect { x, y, width, height: wanted.min(pane.bottom() - y) };
         }
         let diff = self.active_diff();
-        let boxes = self.notes_inline() && self.whole.is_none();
         let rows = match &anchor {
             Anchor::Lines(lines) => diff.and_then(|diff| diff.rows_showing(lines)).map(|(first, last)| {
                 let at_first = diff.and_then(|diff| diff.line_on(lines.side).ok().flatten());

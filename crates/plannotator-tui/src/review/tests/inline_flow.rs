@@ -111,30 +111,116 @@ fn boxes_hang_under_their_notes_last_line_on_its_side_in_the_order_made() {
 }
 
 #[test]
-fn split_a_box_sits_over_its_sides_half_or_across_when_that_half_is_narrow() {
+fn split_boxes_sit_side_by_side_over_their_sides_or_across_when_a_side_is_narrow() {
     let (_fixture, mut screen) = opened("inline-split", "layout = \"split\"\nnotes = \"inline\"");
     comment(&mut screen, "file0.py", Side::Old, (12, 12), "old side note");
     comment(&mut screen, "file0.py", Side::New, (12, 12), "new side note");
+    comment(&mut screen, "file0.py", Side::Old, (12, 12), "second old note");
     let buffer = draw(&mut screen, SIZE);
     check_boxes(&screen, &buffer, "split 50");
     let line = screen.diff.split_line().expect("split");
     let old = box_saying(&screen, "old side note").expect("old");
     let new = box_saying(&screen, "new side note").expect("new");
+    let second = box_saying(&screen, "second old note").expect("second");
     assert!(old.right() <= line, "the old box over the old side: {old:?} {line}");
     assert!(new.x > line, "the new box over the new side: {new:?} {line}");
-    assert_eq!(new.y, old.bottom(), "both hang under the row, in the order made");
-    // 30:70 leaves the old side under 48 columns: its box runs across.
+    assert_eq!(new.y, old.y, "side by side, from the same row");
+    assert_eq!((second.x, second.y), (old.x, old.bottom()), "the next old one under it");
+    let pane = screen.geometry.diff;
+    let under = (pane.top()..pane.bottom())
+        .find(|&y| screen.diff.row_at(pane.right() - 2, y).is_some_and(|row| row.new_line == Some(13)))
+        .expect("line 13");
+    assert_eq!(under, second.bottom(), "no rows besides the block's");
+    // 30:70 leaves the old side under 48 columns: its boxes run across, each its own block.
     keys(&mut screen, "((((");
     let buffer = draw(&mut screen, SIZE);
     check_boxes(&screen, &buffer, "split 30");
     let line = screen.diff.split_line().expect("split");
-    assert!(line - screen.geometry.diff.x < 48, "narrow old side");
     let old = box_saying(&screen, "old side note").expect("old");
-    let area = screen.diff.box_areas().first().map(|a| a.area).expect("an area");
-    assert_eq!((old.x, old.width), (area.x, area.width.min(84)), "across from the old code");
-    assert!(old.right() > line);
     let new = box_saying(&screen, "new side note").expect("new");
-    assert!(new.x > line);
+    let second = box_saying(&screen, "second old note").expect("second");
+    assert!(old.x < line && old.right() > line, "across from the old code: {old:?} {line}");
+    assert!(new.x > line && new.y == old.bottom(), "the new one over its side, below: {new:?}");
+    assert_eq!(second.y, new.bottom(), "in the order made");
+}
+
+#[test]
+fn the_cursor_stops_on_side_boxes_left_column_first_and_takes_their_side() {
+    let (_fixture, mut screen) = opened("inline-stops", "layout = \"split\"\nnotes = \"inline\"");
+    comment(&mut screen, "file0.py", Side::Old, (12, 12), "first old");
+    comment(&mut screen, "file0.py", Side::New, (12, 12), "the new one");
+    comment(&mut screen, "file0.py", Side::Old, (12, 12), "second old");
+    screen.diff.reveal("file0.py", Side::New, 12).expect("line 12");
+    draw(&mut screen, SIZE);
+    let side = |screen: &Screen| screen.diff.cursor_row().map(|row| row.side);
+    let on = |screen: &Screen| screen.cursor_note().and_then(|n| n.text.clone());
+    let mut stops = Vec::new();
+    for _ in 0..4 {
+        press(&mut screen, KeyCode::Char('j'));
+        draw(&mut screen, SIZE);
+        stops.push((on(&screen), side(&screen)));
+    }
+    let old = Some(diffs_rs::engine::Side::Old);
+    let new = Some(diffs_rs::engine::Side::New);
+    assert_eq!(
+        stops,
+        [
+            (Some("first old".to_owned()), old),
+            (Some("second old".to_owned()), old),
+            (Some("the new one".to_owned()), new),
+            (None, new),
+        ],
+        "left column top to bottom, then the right; leaving it on the new side"
+    );
+    assert_eq!(screen.diff.cursor_row().and_then(|row| row.new_line), Some(13));
+    // Back up onto the block, then across to the box beside.
+    keys(&mut screen, "kkk");
+    assert_eq!(on(&screen).as_deref(), Some("first old"));
+    press(&mut screen, KeyCode::Char('l'));
+    assert_eq!((on(&screen).as_deref(), side(&screen)), (Some("the new one"), new), "the box beside");
+}
+
+#[test]
+fn a_click_on_either_of_two_boxes_side_by_side_picks_its_own_note() {
+    let (_fixture, mut screen) = opened("inline-click-sides", "layout = \"split\"\nnotes = \"both\"");
+    open_notes(&mut screen);
+    comment(&mut screen, "file0.py", Side::Old, (12, 12), "left note");
+    comment(&mut screen, "file0.py", Side::New, (12, 12), "right note");
+    draw(&mut screen, SIZE);
+    for text in ["right note", "left note", "right note"] {
+        let boxed = box_saying(&screen, text).expect("drawn");
+        let at = (boxed.x + 3, boxed.y + 1);
+        report(&mut screen, MouseEventKind::Down(MouseButton::Left), at);
+        report(&mut screen, MouseEventKind::Up(MouseButton::Left), at);
+        draw(&mut screen, SIZE);
+        assert_eq!(screen.cursor_note().and_then(|n| n.text.as_deref()), Some(text));
+        assert_eq!(screen.selected_note().and_then(|n| n.text.as_deref()), Some(text), "the panel");
+        assert_eq!(screen.diff.selection(), None);
+    }
+}
+
+#[test]
+fn a_new_comment_lines_up_with_the_boxes() {
+    for layout in ["unified", "split"] {
+        let (_fixture, mut screen) =
+            opened("inline-compose-x", &format!("layout = \"{layout}\"\nnotes = \"inline\""));
+        comment(&mut screen, "file0.py", Side::New, (12, 12), "a new-side box");
+        comment(&mut screen, "file0.py", Side::Old, (14, 14), "an old-side box");
+        draw(&mut screen, SIZE);
+        // Two lines under each box's line, on its side.
+        for (side, line, text) in [(Side::New, 12, "a new-side box"), (Side::Old, 14, "an old-side box")] {
+            screen.diff.reveal("file0.py", side, line).expect("the line");
+            keys(&mut screen, "jjj");
+            draw(&mut screen, SIZE);
+            let boxed = box_saying(&screen, text).expect("drawn");
+            press(&mut screen, KeyCode::Char('c'));
+            let buffer = draw(&mut screen, SIZE);
+            let compose = the_box(&buffer, "comment on");
+            assert_eq!((compose.x, compose.width), (boxed.x, boxed.width), "{layout} {side:?}");
+            press(&mut screen, KeyCode::Esc);
+            draw(&mut screen, SIZE);
+        }
+    }
 }
 
 #[test]
@@ -296,8 +382,9 @@ fn a_review_opened_with_notes_starts_at_the_top_with_the_first_files_box() {
     assert_eq!(top.kind, diffs_rs::engine::DiffRowKind::Header, "the first heading on top");
     let file = box_saying(&again, "about file zero").expect("the file's box shows");
     assert_eq!(file.y, pane.y + 1, "right under it");
+    // The cursor where a review opens without boxes: on the first heading.
     let cursor = again.diff.cursor_row().expect("a cursor");
-    assert_eq!((cursor.file, cursor.old_line, cursor.part), (0, Some(1), 0), "on the first line");
+    assert_eq!((cursor.file, cursor.kind), (0, diffs_rs::engine::DiffRowKind::Header));
     assert!(box_saying(&again, "on line one").is_some());
 }
 

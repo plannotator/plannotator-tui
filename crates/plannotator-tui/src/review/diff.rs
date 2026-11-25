@@ -26,7 +26,7 @@ mod sections;
 mod settings;
 mod whitespace;
 
-pub(super) use insets::{Columns, Slot};
+pub(super) use insets::Slot;
 use sections::Sections;
 use settings::{layout, options};
 
@@ -77,16 +77,6 @@ pub(super) struct Diff {
     terminal_background: bool,
     /// The whole-file view: always unified, so no layout or split ratio applies.
     whole: bool,
-    /// Whether anything moved the cursor or the view since the files were opened: until
-    /// then the notes' boxes, laid out for the first time, start from the top (`insets`).
-    since: Since,
-}
-
-/// What happened to the view since the files were opened.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Since {
-    Opened,
-    Moved,
 }
 
 impl std::fmt::Debug for Diff {
@@ -135,7 +125,6 @@ impl Diff {
             notice: None,
             drawn: false,
             terminal_background: false,
-            since: Since::Opened,
         }
     }
 
@@ -169,7 +158,6 @@ impl Diff {
         self.paths.clear();
         self.generation = next_generation();
         self.drawn = false;
-        self.since = Since::Opened;
         Ok(())
     }
 
@@ -259,7 +247,6 @@ impl Diff {
     }
 
     pub(super) fn run(&mut self, command: Command) -> Result<()> {
-        self.since = Since::Moved;
         let growing = self.growing();
         let effect = self.engine.execute(command)?;
         let step = match command {
@@ -284,9 +271,6 @@ impl Diff {
         };
         let growing = self.growing();
         let acted = self.engine.handle_event(event, true)? != InputEffect::Ignored;
-        if acted {
-            self.since = Since::Moved;
-        }
         if acted {
             self.keep_in_hunk(growing, step)?;
         }
@@ -335,7 +319,13 @@ impl Diff {
 
     /// The side the cursor is on.
     pub(super) fn cursor_side(&self) -> Result<Option<Side>> {
-        Ok(self.engine.selected_source()?.map(|at| side_of(at.side)))
+        if let Some(at) = self.engine.selected_source()? {
+            return Ok(Some(side_of(at.side)));
+        }
+        // On a note's box: the side it is over.
+        let on_box =
+            self.engine.cursor_row().filter(|row| matches!(row.kind, engine::DiffRowKind::Inset { .. }));
+        Ok(on_box.map(|row| side_of(row.side)))
     }
 
     /// The cursor's line on `side`, with its file: `None` on a header, a gap, or a row that
@@ -369,7 +359,6 @@ impl Diff {
             first: lines.first,
             last: lines.last,
         };
-        self.since = Since::Moved;
         self.engine.select_range(range)?;
         Ok(())
     }
@@ -408,7 +397,6 @@ impl Diff {
     /// Put the cursor on `lines.first`. An error means the diff does not show that line.
     pub(super) fn reveal(&mut self, path: &str, side: Side, line: u32) -> Result<()> {
         let file = self.index(path).with_context(|| format!("{path} is not in the diff"))?;
-        self.since = Since::Moved;
         self.engine.reveal(file, engine_side(side), line)?;
         Ok(())
     }

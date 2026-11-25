@@ -3,14 +3,16 @@
 //! the lines it replaces and the code it suggests as `-` and `+` lines. At most
 //! [`BODY_LINES`] lines show; the box says when there is more, which opening the note shows.
 
+mod code;
+
 use std::hash::{Hash as _, Hasher as _};
 
 use plannotator_tui_review::{CodeAnnotation, NoteScope, NoteType, Side};
 use ratatui::style::Style;
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 
 use crate::theme::palette;
-use crate::wrap::{split_line, wrap_line};
+use crate::wrap::wrap_line;
 
 /// The most lines of text a box shows.
 pub(super) const BODY_LINES: usize = 6;
@@ -46,24 +48,9 @@ impl Card {
             }
         }
         if note.kind == NoteType::Suggestion {
-            let mut rows = Vec::new();
-            let mut code = |code: Option<&str>, sign: &'static str, style: Style| {
-                // The sign on a line's first row only, as a diff marks a wrapped line.
-                for line in code.into_iter().flat_map(|code| code.split('\n')) {
-                    let line = Line::from(Span::styled(plain(line.trim_end_matches('\r')), style));
-                    let start = rows.len();
-                    split_line(&mut rows, &Span::styled("  ", style), &line, &[], text_width);
-                    if let Some(first) = rows.get_mut(start) {
-                        let text: String =
-                            first.line.spans.iter().map(|span| span.content.as_ref()).collect();
-                        let rest = text.get(2..).unwrap_or_default();
-                        first.line = Line::from(Span::styled(format!("{sign}{rest}"), style));
-                    }
-                }
-            };
-            code(note.original_code.as_deref(), "- ", Style::new().fg(palette().delete));
-            code(note.suggested_code.as_deref(), "+ ", Style::new().fg(palette().looks_good));
-            body.extend(rows.into_iter().map(|row| row.line));
+            let styles = (Style::new().fg(palette().delete), Style::new().fg(palette().looks_good));
+            let (old, new) = (note.original_code.as_deref(), note.suggested_code.as_deref());
+            body.extend(code::rows(old, new, text_width, usize::from(tab), styles));
         }
         let more = body.len() > BODY_LINES;
         body.truncate(BODY_LINES);
@@ -159,7 +146,7 @@ mod tests {
         let code = r#","text":"simpler","originalCode":"\tlet a = b;","suggestedCode":"\tlet a = c;""#;
         let suggestion = note("suggestion", "line", "new", (3, 3), code);
         let card = Card::of(&suggestion, 40, 2);
-        assert_eq!(text(&card), ["simpler", "-   let a = b;", "+   let a = c;"]);
+        assert_eq!(text(&card), ["simpler", "- let a = b;", "+ let a = c;"]);
         let red = card.body.get(1).and_then(|line| line.spans.first()).map(|span| span.style.fg);
         assert_eq!(red, Some(Some(palette().delete)));
         // A long line wraps with its sign on the first row only.

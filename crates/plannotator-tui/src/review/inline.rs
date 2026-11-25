@@ -30,7 +30,7 @@ use plannotator_tui_review::{CodeAnnotation, NoteScope, Side};
 use ratatui::crossterm::event::KeyEvent;
 
 use super::compose_at::{MAX_WIDTH, MIN_SIDE_WIDTH};
-use super::diff::{Columns, Slot};
+use super::diff::{Lines, Slot};
 use super::{Screen, notes};
 use crate::config::review::Notes;
 use crate::keys::{self, Action};
@@ -80,15 +80,6 @@ impl Inline {
     }
 }
 
-/// Which of a box's columns it draws in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Part {
-    Old,
-    New,
-    /// Across the diff: a file's note, or a side too narrow for the box.
-    Whole,
-}
-
 /// Where a box goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Place {
@@ -108,20 +99,27 @@ fn place(note: &CodeAnnotation) -> Option<Place> {
     }
 }
 
-/// The columns `note`'s box draws in, and its width there.
-fn part(note: &CodeAnnotation, columns: Columns) -> (Part, u16) {
-    let part = match (note.scope, columns.panes) {
-        (NoteScope::Line, None) => Part::New,
-        (NoteScope::Line, Some((old, _))) if note.side == Side::Old && old >= MIN_SIDE_WIDTH => Part::Old,
-        (NoteScope::Line, Some((_, new))) if note.side == Side::New && new >= MIN_SIDE_WIDTH => Part::New,
-        _ => Part::Whole,
-    };
-    let width = match part {
-        Part::Old => columns.old,
-        Part::New => columns.new,
-        Part::Whole => columns.whole,
-    };
-    (part, width.min(MAX_WIDTH))
+/// The widths a box in one file can have: over the old side, over the new side, across.
+type Widths = [Option<u16>; 3];
+
+/// The width of a box over `over`'s side, or across for `None`.
+fn width(widths: Widths, over: Option<Side>) -> Option<u16> {
+    let [old, new, across] = widths;
+    match over {
+        Some(Side::Old) => old,
+        Some(Side::New) => new,
+        None => across,
+    }
+}
+
+/// Which side a box at `place` sits over in a split diff, `None` across both: its own side
+/// when that side's column is wide enough for the comment box (`compose_at`'s rule), and
+/// across for a file's note. Unified, every box is across.
+fn over(place: Place, split: bool, widths: Widths) -> Option<Side> {
+    let Place::Line(side, _) = place else { return None };
+    let [old, new, _] = widths;
+    let width = if side == Side::Old { old } else { new };
+    (split && width.is_some_and(|w| w >= MIN_SIDE_WIDTH)).then_some(side)
 }
 
 impl Screen {
@@ -139,17 +137,22 @@ impl Screen {
         let mut skipped = 0;
         if self.settings.now.notes != Notes::Panel {
             let tab = self.settings.now.tab_width.get();
-            let mut columns: HashMap<&str, Option<Columns>> = HashMap::new();
+            let area = self.geometry.diff;
+            let split = self.diff.split();
+            let mut widths: HashMap<&str, Widths> = HashMap::new();
             let mut order: Vec<usize> = (0..notes.len()).collect();
             order.sort_by_key(|&i| (notes.get(i).map_or(0, |note| note.created_at), i));
             for note in order.into_iter().filter_map(|i| notes.get(i)) {
                 let path = note.file_path.as_str();
-                let shown = columns.entry(path).or_insert_with(|| self.diff.box_columns(path));
-                let (Some(place), Some(columns)) = (place(note), *shown) else {
+                let widths = *widths.entry(path).or_insert_with(|| {
+                    [Some(Side::Old), Some(Side::New), None].map(|over| self.diff.box_width(area, path, over))
+                });
+                let Some(place) = place(note) else {
                     skipped += 1;
                     continue;
                 };
-                let (_, width) = part(note, columns);
+                let over = over(place, split, widths);
+                let width = width(widths, over).unwrap_or(0).min(MAX_WIDTH);
                 if width < MIN_WIDTH {
                     skipped += 1;
                     continue;
@@ -160,7 +163,7 @@ impl Screen {
                     Place::Line(side, line) => Some((side, line)),
                     Place::Heading => None,
                 };
-                slots.push(Slot { id, path, line, height });
+                slots.push(Slot { id, path, line, over, height });
             }
         }
         self.inline.skipped = skipped;
@@ -171,6 +174,23 @@ impl Screen {
                 false
             }
         }
+    }
+
+    /// The first column and width the box of a note on `lines` would have in `pane`, for the
+    /// comment box to line up with the boxes. `None` when it would get none.
+    pub(super) fn box_columns(&self, pane: ratatui::layout::Rect, lines: &Lines) -> Option<(u16, u16)> {
+        let split = self.diff.split();
+        let widths =
+            [Some(Side::Old), Some(Side::New), None].map(|over| self.diff.box_width(pane, &lines.path, over));
+        let over = over(Place::Line(lines.side, lines.last), split, widths);
+        let full = width(widths, over)?;
+        // Every box ends at the pane's right edge but one over the old side, which ends at
+        // the line between the sides.
+        let right = match over {
+            Some(Side::Old) => self.diff.split_line()?,
+            _ => pane.right(),
+        };
+        Some((right.checked_sub(full)?, full.min(MAX_WIDTH))).filter(|&(_, width)| width >= MIN_WIDTH)
     }
 
     /// How many notes have no box in the diff now, for the footer.

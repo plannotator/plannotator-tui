@@ -9,8 +9,8 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Widget as _};
 
+use super::super::compose_at::MAX_WIDTH;
 use super::card::Card;
-use super::{Part, part};
 use crate::keys::Action;
 use crate::review::Screen;
 use crate::theme::palette;
@@ -39,14 +39,8 @@ impl Screen {
             else {
                 continue;
             };
-            let Some(columns) = self.diff.box_columns(&note.file_path) else { continue };
-            let (part, width) = part(note, columns);
-            let rect = match part {
-                Part::Old => area.left,
-                Part::New => area.right,
-                Part::Whole => area.area,
-            };
-            let rect = Rect { width: width.min(rect.width), ..rect };
+            let width = area.area.width.min(MAX_WIDTH);
+            let rect = Rect { width, ..area.area };
             let look = Look { sent: !self.store.is_pending(note), cursor: area.cursor };
             let card = self.inline.card(area.id, note, width, tab);
             paint(frame.buffer_mut(), rect, area.clipped_top, card, look, &more);

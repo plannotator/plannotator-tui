@@ -35,7 +35,7 @@ pub(super) fn check_boxes(screen: &Screen, buffer: &Buffer, case: &str) {
                 && rect.bottom() <= pane.bottom()
         );
         for y in rect.top()..rect.bottom() {
-            for x in [rect.left(), rect.right() - 1, pane.left(), pane.right() - 1] {
+            for x in [rect.left(), rect.left() + rect.width / 2, rect.right() - 1] {
                 assert_eq!(screen.diff.box_at(x, y), Some(id), "{what}: row {y} is its own, over no code");
             }
         }
@@ -50,7 +50,7 @@ pub(super) fn check_boxes(screen: &Screen, buffer: &Buffer, case: &str) {
                 let body = cells(buffer, rect.x, rect.y + 1, rect.width);
                 assert!(body.contains(word), "{what}: says its note's words: {body:?}");
             }
-            anchored(screen, note, rect.y, &what);
+            anchored(screen, note, rect, &what);
         }
         let bottom_cut = area.height - area.clipped_top - area.area.height;
         if bottom_cut == 0 {
@@ -62,10 +62,10 @@ pub(super) fn check_boxes(screen: &Screen, buffer: &Buffer, case: &str) {
 
 /// The first row above screen row `y` that is no box shows the note's line, or its file's
 /// heading for a file note.
-fn anchored(screen: &Screen, note: &CodeAnnotation, y: u16, what: &str) {
+fn anchored(screen: &Screen, note: &CodeAnnotation, rect: Rect, what: &str) {
     let pane = screen.geometry.diff;
-    let column = pane.right() - 2;
-    let above = (pane.top()..y).rev().find(|&row| screen.diff.box_at(column, row).is_none());
+    let column = rect.x + 1;
+    let above = (pane.top()..rect.y).rev().find(|&row| screen.diff.box_at(column, row).is_none());
     let Some(above) = above else { return };
     let row = screen.diff.row_at(column, above).unwrap_or_else(|| panic!("{what}: a row above"));
     assert_eq!(row.path, note.file_path, "{what}: under a row of its file");
