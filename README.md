@@ -264,7 +264,7 @@ document review.
 to. Sends go to the same place a document review's do (Herdr pane, Rex, Pi or the
 clipboard, or the agent you choose when nothing named one; see [Choosing the agent](#choosing-the-agent)), and are kept in the feedback archive. `q` asks first when notes are unsent.
 `m` opens the Review menu: `M` comment on the whole change, `R` resend all, `F` finish
-review, `U` undo.
+review, `U` undo. `U` also brings back the last note removed in this session, where it was.
 
 `o` shows the whole file under the cursor as it is now, scrolled to the same line; `O`
 shows it as it was before the change (the base), at the matching old line. The header says
@@ -320,8 +320,11 @@ order they were made, and a note on the whole file sits under the file's heading
 shows the note's kind and lines, its author when it is not you, `sent` once sent, and up to
 six lines of its text (a suggestion's code as `-`/`+` lines); `… enter for more` says there
 is more. The cursor stops once on each box: `enter` or `e` opens the note in the comment box
-over it, `delete` removes it, and a click on a box picks its note (in the panel too). A drag
-selects code only, and boxes never move the line you are on. Notes on the whole change, and
+over it, `delete` removes it (`U` brings it back), `c` or `s` there writes another note on
+the same lines, under it, and a click on a box picks its note (in the panel too). A drag
+selects code only, and boxes never move the line you are on: a note saved on the pane's last
+row says `note saved · below, ↓ shows it`. A pane under 10 rows shows no boxes (`pane too
+small for inline notes`). Notes on the whole change, and
 notes whose lines the diff does not show now (outdated, in a hunk hidden with `W`, in a
 filtered-out file), get no box: the footer counts them (`2 notes not shown inline · z`) and
 the panel lists them. With `inline` the panel starts away whatever notes there are; `z`
