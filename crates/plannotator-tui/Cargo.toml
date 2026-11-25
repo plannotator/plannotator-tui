@@ -50,7 +50,7 @@ signal-hook = "0.3"
 # Default features off: `dev-tty` would switch crossterm, for this whole build, to reading
 # /dev/tty, and `clipboard` is its own macOS clipboard; this app owns its input and copies.
 # 0.2.4: the version the unpublished branch patched in at the workspace root carries.
-diffs-rs = { version = "0.2.5", default-features = false }
+diffs-rs = { version = "0.2.6", default-features = false }
 
 [dev-dependencies]
 rusqlite = { version = "0.31.0", features = ["bundled"] }
