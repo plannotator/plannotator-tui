@@ -47,6 +47,15 @@ impl Screen {
     /// `s`: the comment box filled with the selected new-side lines; what the person makes
     /// of them is the suggested code.
     pub(super) fn start_suggestion(&mut self) -> Result<()> {
+        if self.diff.selection().is_none()
+            && self.cursor_note().is_some_and(|note| note.scope == NoteScope::File)
+        {
+            self.status = Some(match self.keys.hint(crate::keys::Action::Comment) {
+                key if key.is_empty() => "a suggestion needs lines of code".to_owned(),
+                key => format!("a suggestion needs lines of code; {key} adds a file comment"),
+            });
+            return Ok(());
+        }
         let Some(lines) = self.target_lines()? else {
             self.status = Some("move the cursor onto a line of code first".into());
             return Ok(());

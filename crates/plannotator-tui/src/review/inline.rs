@@ -188,10 +188,19 @@ impl Screen {
     /// The first column and width the box of a note on `lines` would have in `pane`, for the
     /// comment box to line up with the boxes. `None` when it would get none.
     pub(super) fn box_columns(&self, pane: ratatui::layout::Rect, lines: &Lines) -> Option<(u16, u16)> {
+        self.columns_at(pane, &lines.path, Place::Line(lines.side, lines.last))
+    }
+
+    /// [`Self::box_columns`] for a note on the file at `path`, under its heading.
+    pub(super) fn heading_box_columns(&self, pane: ratatui::layout::Rect, path: &str) -> Option<(u16, u16)> {
+        self.columns_at(pane, path, Place::Heading)
+    }
+
+    fn columns_at(&self, pane: ratatui::layout::Rect, path: &str, place: Place) -> Option<(u16, u16)> {
         let split = self.diff.split();
         let widths =
-            [Some(Side::Old), Some(Side::New), None].map(|over| self.diff.box_width(pane, &lines.path, over));
-        let over = over(Place::Line(lines.side, lines.last), split, widths);
+            [Some(Side::Old), Some(Side::New), None].map(|over| self.diff.box_width(pane, path, over));
+        let over = over(place, split, widths);
         let full = width(widths, over)?;
         // Every box ends at the pane's right edge but one over the old side, which ends at
         // the line between the sides.

@@ -5,7 +5,8 @@
 //!   shows them, else above the first, so the box covers none of them; in a split diff over
 //!   that side's pane, wherever the line between the sides was dragged. Lines taller than
 //!   the room keep the box at the end the person last moved to, the cursor's end.
-//! - A file (`C`, editing a file note): under the file's heading, else at the top of the pane.
+//! - A file (`C`, editing a file note): under the file's heading (and the file notes' boxes
+//!   there, lined up with them), else at the top of the pane.
 //! - The whole change (`M`, editing its note), or lines no longer on screen: centred.
 //! - Editing a note whose box the diff shows (`inline`): over the box, as wide as it. Notes'
 //!   boxes under the lines of a new one count as theirs: the box opens below them.
@@ -74,6 +75,11 @@ impl Screen {
                 columns
             }
             Anchor::Lines(lines) => columns(pane, middle, lines.side),
+            Anchor::File(path)
+                if let Some(columns) = boxes.then(|| self.heading_box_columns(pane, path)).flatten() =>
+            {
+                columns
+            }
             Anchor::File(_) | Anchor::Centre => (pane.x, pane.width.min(MAX_WIDTH)),
             Anchor::Over(rect) => (rect.x, rect.width),
         };
@@ -95,6 +101,8 @@ impl Screen {
                 (first, last, top)
             }),
             Anchor::File(path) => match diff.and_then(|diff| diff.heading_row(path)) {
+                // Below the file notes' boxes under the heading, never over them.
+                Some(row) if boxes => Some((row, diff.map_or(row, |diff| diff.under_boxes(row)), false)),
                 Some(row) => Some((row, row, false)),
                 // No heading on screen: at the top of the pane.
                 None => return Rect { x, y: pane.y, width, height: wanted },

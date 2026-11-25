@@ -394,6 +394,11 @@ impl Screen {
         next.notes_rail.settle(!next.store.annotations().is_empty());
         next.reach = std::mem::take(&mut self.reach);
         next.pi_link = self.pi_link.take();
+        // Each review's undo history, for the session: back on one, `U` still takes back
+        // what was done there.
+        next.undos = std::mem::take(&mut self.undos);
+        next.undos.insert(self.store.path().to_path_buf(), std::mem::take(&mut self.undo));
+        next.undo = next.undos.remove(next.store.path()).unwrap_or_default();
         // The reviews left so far and this one, less the one opening.
         let here = self.left();
         let opening = next.left();

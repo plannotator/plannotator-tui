@@ -84,11 +84,10 @@ impl Screen {
                     (key(&[Action::SendAndClose]), "send and close"),
                     (key(&[Action::ChangeComment]), "comment on the whole change"),
                     (
-                        key(&[Action::ReviewMenu]),
-                        "review menu: whole-change comment, resend all, finish, undo",
+                        key(&[Action::ReviewMenu, Action::UndoFinish]),
+                        "review menu: comment, resend, finish / undo a finish or a removal",
                     ),
                     (key(&[Action::PickTarget]), "choose the agent Send goes to"),
-                    (key(&[Action::UndoFinish]), "undo the last note removed, or the last finish"),
                     (
                         key(&[Action::PickChanges]),
                         "pick what to review: uncommitted, unstaged, staged, a commit",

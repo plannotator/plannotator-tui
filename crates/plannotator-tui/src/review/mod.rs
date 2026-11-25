@@ -208,6 +208,9 @@ pub(crate) struct Screen {
     last_send: crate::ui::send_button::LastSend,
     /// What `undo-finish` takes back, the last first: a finish, or a removed note.
     undo: Vec<send::Undo>,
+    /// The undo histories of the reviews switched away from in this session, by their
+    /// record's path, for when they are back.
+    undos: std::collections::HashMap<PathBuf, Vec<send::Undo>>,
     status: Option<String>,
     geometry: Geometry,
     /// A drag with the left button in the diff, until the release.
@@ -312,6 +315,7 @@ impl Screen {
             send_state: SendState::Ready,
             last_send: crate::ui::send_button::LastSend::None,
             undo: Vec::new(),
+            undos: std::collections::HashMap::new(),
             status: None,
             geometry: Geometry::default(),
             drag: None,

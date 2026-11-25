@@ -240,3 +240,51 @@ fn a_note_saved_on_the_panes_last_row_says_its_box_is_below_and_nothing_moves() 
     draw(&mut screen, SIZE);
     assert_eq!(screen.status.as_deref(), Some("note saved"));
 }
+
+#[test]
+fn c_on_a_file_notes_box_opens_under_the_headings_boxes_lined_up_and_s_says_why_not() {
+    for layout in ["unified", "split"] {
+        let (_fixture, mut screen) =
+            opened(&format!("fix-file-{layout}"), &format!("layout = \"{layout}\"\nnotes = \"inline\""));
+        keys(&mut screen, "C");
+        type_and_save(&mut screen, "about the whole file");
+        screen.diff.show_heading(0).expect("heading");
+        draw(&mut screen, SIZE);
+        press(&mut screen, KeyCode::Char('j'));
+        assert!(
+            screen.cursor_note().is_some_and(|n| n.scope == plannotator_tui_review::NoteScope::File),
+            "{layout}: on the file note's box"
+        );
+        draw(&mut screen, SIZE);
+        let boxed = box_saying(&screen, "about the whole file").expect("drawn");
+        keys(&mut screen, "s");
+        assert_eq!(screen.mode, Mode::Browse, "{layout}");
+        assert_eq!(
+            screen.status.as_deref(),
+            Some("a suggestion needs lines of code; c adds a file comment"),
+            "{layout}"
+        );
+        keys(&mut screen, "c");
+        let Mode::Compose(draft) = screen.mode.clone() else { panic!("{layout}: a file comment") };
+        assert!(matches!(&draft, Draft::File(path) if path == "file0.py"), "{layout}: {draft:?}");
+        let buffer = draw(&mut screen, SIZE);
+        let compose = screen.compose_rect(screen.geometry.diff, &draft);
+        assert_eq!((compose.x, compose.width), (boxed.x, boxed.width), "{layout}: lined up with the box");
+        assert_eq!(compose.y, boxed.bottom(), "{layout}: right under the box, over none of it");
+        assert_eq!(cells(&buffer, boxed.x, boxed.y, 1), "\u{256d}", "{layout}: the box still shows");
+        press(&mut screen, KeyCode::Esc);
+    }
+}
+
+#[test]
+fn the_key_help_fits_forty_rows_in_both_modes() {
+    for notes in [Notes::Panel, Notes::Inline] {
+        let (_fixture, mut screen) = opened(&format!("fix-help-{notes:?}"), "layout = \"unified\"");
+        set_notes(&mut screen, notes);
+        keys(&mut screen, "?");
+        let text = all(&draw(&mut screen, (SIZE.0, 40)));
+        assert_eq!(screen.help_room.get(), 0, "{notes:?}: nothing below the fold:\n{text}");
+        assert!(text.contains("remove") && text.contains("undo a finish or a removal"), "{notes:?}:\n{text}");
+        press(&mut screen, KeyCode::Esc);
+    }
+}
