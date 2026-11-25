@@ -41,7 +41,7 @@ impl Diff {
                     Some(_) => return None,
                     None => InsetAnchor::FileHeading,
                 };
-                Some(Inset { review, id: slot.id, file, anchor, span: span(slot.over), height: slot.height })
+                Some(Inset::new(review, slot.id, file, anchor, slot.height).with_span(span(slot.over)))
             })
             .collect();
         if self.engine.insets() == insets.as_slice() {

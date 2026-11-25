@@ -524,7 +524,7 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 [[package]]
 name = "diffs-fancy-regex"
 version = "0.1.0"
-source = "git+https://github.com/plannotator/diffs-rs?branch=feat%2Finsets#50c794cf6a4ac5e2dc639dab64c4bf170e9f0737"
+source = "git+https://github.com/plannotator/diffs-rs?branch=feat%2Finsets#094634d2abbda6f1ac29c8db6532d748152e3daf"
 dependencies = [
  "bit-set 0.8.0",
  "regex-automata",
@@ -534,7 +534,7 @@ dependencies = [
 [[package]]
 name = "diffs-rs"
 version = "0.2.5"
-source = "git+https://github.com/plannotator/diffs-rs?branch=feat%2Finsets#50c794cf6a4ac5e2dc639dab64c4bf170e9f0737"
+source = "git+https://github.com/plannotator/diffs-rs?branch=feat%2Finsets#094634d2abbda6f1ac29c8db6532d748152e3daf"
 dependencies = [
  "anyhow",
  "clap",
@@ -560,7 +560,7 @@ dependencies = [
 [[package]]
 name = "diffs-syntect"
 version = "0.1.0"
-source = "git+https://github.com/plannotator/diffs-rs?branch=feat%2Finsets#50c794cf6a4ac5e2dc639dab64c4bf170e9f0737"
+source = "git+https://github.com/plannotator/diffs-rs?branch=feat%2Finsets#094634d2abbda6f1ac29c8db6532d748152e3daf"
 dependencies = [
  "bincode",
  "diffs-fancy-regex",
@@ -580,7 +580,7 @@ dependencies = [
 [[package]]
 name = "diffs-two-face"
 version = "0.1.0"
-source = "git+https://github.com/plannotator/diffs-rs?branch=feat%2Finsets#50c794cf6a4ac5e2dc639dab64c4bf170e9f0737"
+source = "git+https://github.com/plannotator/diffs-rs?branch=feat%2Finsets#094634d2abbda6f1ac29c8db6532d748152e3daf"
 dependencies = [
  "diffs-syntect",
  "serde",
