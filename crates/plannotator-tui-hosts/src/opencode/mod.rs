@@ -21,8 +21,9 @@
 //!
 //! `OpenCode` 2.4 (migration `20261029002625_session_part`) writes each part as its own
 //! `session_part` row (`message_id`, `session_id`, `ordinal`, `type`, `data`) and leaves the
-//! assistant payload's `content` empty. The text of such a reply is its `text` parts in
-//! `ordinal` order. A reply keeps whichever format carries its text; the two are never mixed.
+//! assistant payload's `content` empty. A reply's text is its payload text when it has any,
+//! else its `text` parts in `ordinal` order; one source per reply, so none is listed twice
+//! (`docs/decisions.md`, decision 14).
 
 mod messages;
 mod parts;
