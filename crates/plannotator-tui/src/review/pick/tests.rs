@@ -835,3 +835,39 @@ fn a_repository_with_no_commits_says_there_is_nothing() {
     assert!(rows.iter().any(|r| r.contains("Nothing to review in fresh")), "{}", rows.join("\n"));
     assert!(!rows.iter().any(|r| r.contains("pick a commit")), "{}", rows.join("\n"));
 }
+
+#[test]
+fn u_still_takes_back_a_removal_after_another_target_and_back() {
+    let fixture = Fixture::new("pick-undo");
+    commit(&fixture, "second");
+    fixture.write("app.py", crate::review::tests::AFTER.replace("import sys", "import os").as_str());
+    let mut shown = reviewing(&fixture);
+    {
+        let screen = shown.screen_mut().expect("review");
+        at(screen, 1);
+        crate::review::tests::keys(screen, "c");
+        type_and_save(screen, "why os?");
+        let id = screen.store.annotations().first().map(|n| n.id.clone()).expect("the note");
+        screen.remove_note(&id).expect("removed");
+        assert_eq!(screen.status.as_deref(), Some("note removed \u{b7} U undo"));
+    }
+    keys(&mut shown, "p");
+    settle(&mut shown, 120, 30);
+    keys(&mut shown, "jjj"); // the commit `second`
+    press(&mut shown, KeyCode::Enter);
+    until_open(&mut shown);
+    keys(&mut shown, "U");
+    let screen = shown.screen().expect("the commit's review");
+    assert_eq!(screen.status.as_deref(), Some("nothing to undo"), "its own history: none");
+
+    keys(&mut shown, "p");
+    settle(&mut shown, 120, 30);
+    keys(&mut shown, "g");
+    press(&mut shown, KeyCode::Enter);
+    until_open(&mut shown);
+    keys(&mut shown, "U");
+    let screen = shown.screen().expect("back on uncommitted");
+    assert_eq!(screen.capture.scope, Scope::Uncommitted);
+    assert_eq!(screen.status.as_deref(), Some("note restored"));
+    assert_eq!(screen.store.annotations().len(), 1, "the note is back");
+}

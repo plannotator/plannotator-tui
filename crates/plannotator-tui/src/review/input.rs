@@ -276,6 +276,9 @@ impl Screen {
     }
 
     fn diff_key(&mut self, key: KeyEvent) -> Result<()> {
+        if self.box_key(&key)? {
+            return Ok(());
+        }
         match self.keys.action(&key, keys::DIFF) {
             Some(action) => self.diff_action(action),
             None => Ok(()),
@@ -544,7 +547,9 @@ impl Screen {
         }
         if self.geometry.diff.contains(at) {
             if click {
-                return self.press(mouse);
+                self.press(mouse)?;
+                self.follow_box();
+                return Ok(());
             }
             if let Some(whole) = &mut self.whole {
                 whole.handle_event(Event::Mouse(mouse))?;

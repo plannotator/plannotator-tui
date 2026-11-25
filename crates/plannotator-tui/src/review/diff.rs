@@ -20,11 +20,13 @@ use ratatui::crossterm::event::{Event, MouseEventKind};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 
+mod insets;
 mod place;
 mod sections;
 mod settings;
 mod whitespace;
 
+pub(super) use insets::Slot;
 use sections::Sections;
 use settings::{layout, options};
 
@@ -317,7 +319,13 @@ impl Diff {
 
     /// The side the cursor is on.
     pub(super) fn cursor_side(&self) -> Result<Option<Side>> {
-        Ok(self.engine.selected_source()?.map(|at| side_of(at.side)))
+        if let Some(at) = self.engine.selected_source()? {
+            return Ok(Some(side_of(at.side)));
+        }
+        // On a note's box: the side it is over.
+        let on_box =
+            self.engine.cursor_row().filter(|row| matches!(row.kind, engine::DiffRowKind::Inset { .. }));
+        Ok(on_box.map(|row| side_of(row.side)))
     }
 
     /// The cursor's line on `side`, with its file: `None` on a header, a gap, or a row that

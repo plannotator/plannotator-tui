@@ -86,9 +86,17 @@ impl Screen {
         self.decide_auto(area.width, diff.width)?;
         self.draw_header(frame, header);
         let cursor_selected = self.cursor_selected();
-        match &mut self.whole {
-            Some(whole) => whole.draw(frame, diff)?,
-            None => self.diff.draw(frame, diff)?,
+        if let Some(whole) = &mut self.whole {
+            whole.draw(frame, diff)?;
+        } else {
+            // The notes' boxes as the last frame's columns size them, then again for this
+            // frame's when those changed (a resize, a pane opened or closed, the line between
+            // the sides moved), drawn again before anything shows.
+            self.sync_boxes();
+            self.diff.draw(frame, diff)?;
+            if self.sync_boxes() {
+                self.diff.draw(frame, diff)?;
+            }
         }
         let (middle, code) = match self.active_diff_mut() {
             Some(shown) => {
@@ -99,6 +107,8 @@ impl Screen {
         };
         let code = |y: u16| code.get(usize::from(y - diff.y)).copied().unwrap_or(true);
         let selected = super::mouse::tint_selection(frame.buffer_mut(), diff, middle, cursor_selected, code);
+        self.draw_boxes(frame);
+        self.tell_saved_below();
         if files.width > 0 {
             let listing = self.listing();
             self.draw_files(frame, files, &listing);

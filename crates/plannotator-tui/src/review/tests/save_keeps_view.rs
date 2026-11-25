@@ -20,12 +20,12 @@ use super::compose_near::{View, draw, report, view};
 use super::*;
 use crate::review::diff::{Lines, Progress};
 
-const SIZE: (u16, u16) = (190, 50);
-const PATH: &str = "Screen.kt";
+pub(super) const SIZE: (u16, u16) = (190, 50);
+pub(super) const PATH: &str = "Screen.kt";
 
 /// Line `i` of `Screen.kt`, before or after the change: every fourth from line 2 a short comment, the
 /// others longer than any pane, each with its own `rowNNN` to find it by.
-fn kotlin_line(i: usize, after: bool) -> String {
+pub(super) fn kotlin_line(i: usize, after: bool) -> String {
     if i % 4 == 2 {
         return format!("        // section {i}\n");
     }
@@ -37,7 +37,7 @@ fn kotlin_line(i: usize, after: bool) -> String {
     )
 }
 
-fn source(after: bool) -> String {
+pub(super) fn source(after: bool) -> String {
     (1..=200).map(|i| kotlin_line(i, after)).collect()
 }
 
@@ -112,9 +112,9 @@ fn drag(screen: &mut Screen, side: Side, (first, last): (u32, u32), up: bool) {
 
 /// Where each `rowNNN` is drawn on each side, from that side's left edge: the code's
 /// columns. Equal maps mean no line scrolled sideways (and none left the screen).
-type Columns = BTreeMap<(&'static str, u32), u16>;
+pub(super) type Columns = BTreeMap<(&'static str, u32), u16>;
 
-fn columns(screen: &Screen, buffer: &Buffer) -> Columns {
+pub(super) fn columns(screen: &Screen, buffer: &Buffer) -> Columns {
     let pane = screen.geometry.diff;
     let sides: Vec<(&'static str, u16, u16)> = match screen.diff.split_line() {
         Some(line) => vec![("old", pane.x, line), ("new", line + 1, pane.right())],

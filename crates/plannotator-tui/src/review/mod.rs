@@ -15,7 +15,7 @@
 //!   and `hc review`, and the pane they open.
 //! - [`input`]: keys and the mouse; [`mouse`]: clicks and drags in the diff. [`draw`],
 //!   [`header`], [`footer`], [`rail`] and [`overlays`]: the frame; [`compose_at`]: where the
-//!   comment box opens. [`divider`]: dragging the lines between the panes and between a split
+//!   comment box opens; [`inline`]: notes drawn in the diff. [`divider`]: dragging the lines between the panes and between a split
 //!   diff's sides.
 //! - [`settings`]: how the diff is drawn (`[review]`), its menu, and remembering the choices.
 //! - [`send`]: send, resend, finish and undo. [`pi`]: the Pi link.
@@ -40,6 +40,7 @@ mod files;
 mod footer;
 mod header;
 pub(crate) mod herdr;
+mod inline;
 mod input;
 mod jump;
 mod mouse;
@@ -149,6 +150,8 @@ struct Geometry {
     /// The buttons of the toolbar beside a mouse selection, and the whole bar.
     toolbar: Vec<(Rect, crate::keys::Action)>,
     toolbar_bar: Option<Rect>,
+    /// The notes' boxes drawn in the diff last frame, with their ids.
+    boxes: Vec<(Rect, u64)>,
     /// The columns the comment box wrapped to last frame; 0 before its first.
     compose_wrap: usize,
     /// Where the comment box drew its text, and the first of the text's rows shown there.
@@ -196,13 +199,18 @@ pub(crate) struct Screen {
     notes_rail: NotesRail,
     /// The changed files on the left, and their filter.
     files: files::FileList,
+    /// The notes drawn in the diff, when the Notes setting says so.
+    inline: inline::Inline,
     compose: Compose,
     /// The side of its lines the open comment box took.
     compose_at: Option<compose_at::Placed>,
     send_state: SendState,
     last_send: crate::ui::send_button::LastSend,
-    /// Notes the last finish archived, for undo.
-    undo: Vec<String>,
+    /// What `undo-finish` takes back, the last first: a finish, or a removed note.
+    undo: Vec<send::Undo>,
+    /// The undo histories of the reviews switched away from in this session, by their
+    /// record's path, for when they are back.
+    undos: std::collections::HashMap<PathBuf, Vec<send::Undo>>,
     status: Option<String>,
     geometry: Geometry,
     /// A drag with the left button in the diff, until the release.
@@ -301,11 +309,13 @@ impl Screen {
             rail_scroll: 0,
             notes_rail: NotesRail::default(),
             files: files::FileList::default(),
+            inline: inline::Inline::new(settings.now.notes),
             compose: Compose::default(),
             compose_at: None,
             send_state: SendState::Ready,
             last_send: crate::ui::send_button::LastSend::None,
             undo: Vec::new(),
+            undos: std::collections::HashMap::new(),
             status: None,
             geometry: Geometry::default(),
             drag: None,
@@ -358,20 +368,33 @@ impl Screen {
     }
 
     /// Whether the rail is shown, width allowing. Hidden, notes keep their gutter marks.
+    /// With notes inline only, it shows once opened by hand, for the session.
     fn rail_shown(&self) -> bool {
+        if self.settings.now.notes == crate::config::review::Notes::Inline {
+            return self.inline.rail;
+        }
         self.notes_rail.shown(!self.store.annotations().is_empty())
     }
 
     /// `toggle-notes`: close the rail, or open it again, and remember which. The next frame
     /// gives the diff the rail's columns, or takes them back, and the viewer reflows as on a
-    /// resize.
+    /// resize. With notes inline only, it opens or closes for the session.
     fn toggle_notes(&mut self) {
+        if self.settings.now.notes == crate::config::review::Notes::Inline {
+            self.inline.rail = !self.inline.rail;
+            self.after_rail_change(Ok(()));
+            return;
+        }
         let remembered = self.notes_rail.toggle(!self.store.annotations().is_empty(), &self.data_dir);
         self.after_rail_change(remembered);
     }
 
     /// Moving the focus to the notes opens a closed rail.
     fn reveal_notes(&mut self) {
+        if self.settings.now.notes == crate::config::review::Notes::Inline {
+            self.inline.rail = true;
+            return;
+        }
         let remembered = self.notes_rail.reveal(!self.store.annotations().is_empty(), &self.data_dir);
         self.after_rail_change(remembered);
     }
@@ -529,6 +552,7 @@ impl Screen {
         if let Err(err) = self.diff.set_markers(&marks) {
             self.status = Some(format!("could not mark notes in the diff: {err:#}"));
         }
+        self.sync_boxes();
         self.sync_whole_markers();
     }
 

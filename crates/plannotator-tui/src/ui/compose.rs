@@ -41,8 +41,8 @@ pub(crate) struct Compose {
     scroll: Cell<usize>,
 }
 
-/// The columns a tab takes in the box, as in the diff.
-const TAB_WIDTH: usize = 4;
+/// The columns a tab takes in the box, and in a note's box in the diff.
+pub(crate) const TAB_WIDTH: usize = 4;
 
 /// The columns `c` takes in the box: a tab four, a control character (a code line's `\r`)
 /// none.
