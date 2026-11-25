@@ -133,3 +133,32 @@ fn malformed_part_json_is_an_error_naming_the_message_session_and_database() {
         other => panic!("expected a part read error, got {other:?}"),
     }
 }
+
+#[test]
+fn replies_with_payload_text_read_even_when_the_part_table_has_other_columns() {
+    let db = Db::new("parts-other-columns");
+    let writer = populate_v2_parts(db.file());
+    // A later `OpenCode` could reshape the part table; a session that never needs it still reads.
+    writer
+        .execute_batch(
+            "DROP TABLE session_part;
+             CREATE TABLE session_part (message_id TEXT NOT NULL, position INTEGER NOT NULL,
+                 payload TEXT NOT NULL, PRIMARY KEY (message_id, position));",
+        )
+        .expect("reshaped part table");
+    message_v2(&writer, "msg2_i1", "ses2_inline", 1, "user", r#"{"text":"inline question"}"#);
+    message_v2(
+        &writer,
+        "msg2_i2",
+        "ses2_inline",
+        2,
+        "assistant",
+        r#"{"content":[{"type":"text","text":"inline reply"}],"time":{"created":70010}}"#,
+    );
+    let messages =
+        opencode::messages_for_session(db.file(), "ses2_inline", Schema::V2, 25).expect("messages");
+    assert_eq!(
+        messages.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(),
+        ["inline reply", "inline question"]
+    );
+}

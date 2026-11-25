@@ -82,7 +82,8 @@ fn messages_v1(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, Ho
 fn messages_v2(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, HostError> {
     let connection = open_read_only(db, WHAT)?;
     // The part table arrived in 2.4; a database written before it has none, and the message
-    // payload is then the only source. Prepared once, the reader serves every row.
+    // payload is then the only source. The part query is prepared on the first reply without
+    // payload text and then serves every such reply.
     let mut parts = Parts::new(&connection, db, session_id)?;
     let mut statement = connection
         .prepare(
