@@ -18,8 +18,7 @@ pub(super) fn injected(json: &Value) -> bool {
     flagged("synthetic") || flagged("ignored")
 }
 
-/// The text of an `OpenCode` 1 `part.data` payload when it is real text. A row that will not
-/// parse is not text; the 1.x reader has always skipped those rather than failed.
+/// The text of an `OpenCode` 1 `part.data` payload when it is real text.
 pub(super) fn part_text(data: &str) -> Option<String> {
     let json: Value = serde_json::from_str(data).ok()?;
     let text = json_text(&json)?;
