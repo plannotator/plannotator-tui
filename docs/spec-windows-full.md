@@ -82,7 +82,7 @@ The application already contains the Windows-specific path behavior required by 
   ([`locate.rs`](../crates/plannotator-tui/src/last/locate.rs#L71-L78),
   [`locate.rs`](../crates/plannotator-tui/src/last/locate.rs#L180-L193)).
 - OpenCode path comparisons convert backslashes to slashes and compare case-insensitively on
-  Windows ([`opencode.rs`](../crates/plannotator-tui-hosts/src/opencode.rs#L291-L299)). Copilot
+  Windows ([`opencode/mod.rs`](../crates/plannotator-tui-hosts/src/opencode/mod.rs#L145-L153)). Copilot
   and Droid directory matching also tolerate Windows separators and case
   ([`copilot.rs`](../crates/plannotator-tui-hosts/src/copilot.rs#L160-L163),
   [`droid.rs`](../crates/plannotator-tui-hosts/src/droid.rs#L28-L37)).
