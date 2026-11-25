@@ -15,11 +15,11 @@ use crate::config::review::Notes;
 use crate::review::{Draft, Mode};
 use crate::theme::palette;
 
-const SIZE: (u16, u16) = (COLS, ROWS);
+pub(super) const SIZE: (u16, u16) = (COLS, ROWS);
 
 /// The long fixture opened with `[review]` as `config` says, the cursor on new line 30 of
 /// file0.py, near the bottom: new lines 8 to 30 are on screen.
-fn opened(tag: &str, config: &str) -> (Fixture, Screen) {
+pub(super) fn opened(tag: &str, config: &str) -> (Fixture, Screen) {
     let fixture = long(tag, false);
     fixture.write_config(&format!("[review]\n{config}\n"));
     let mut screen = fixture.open_configured();
@@ -51,7 +51,7 @@ fn pane(screen: &Screen, buffer: &ratatui::buffer::Buffer) -> Vec<String> {
     (pane.top()..pane.bottom()).map(|y| cells(buffer, pane.x, y, pane.width)).collect()
 }
 
-fn all(buffer: &ratatui::buffer::Buffer) -> String {
+pub(super) fn all(buffer: &ratatui::buffer::Buffer) -> String {
     (0..buffer.area.height).map(|y| cells(buffer, 0, y, buffer.area.width)).collect::<Vec<_>>().join("\n")
 }
 
@@ -309,7 +309,7 @@ fn on_a_box_enter_edits_it_over_the_box_delete_removes_it_and_x_stays_viewed() {
     // Delete removes it, and the cursor is back on its line.
     press(&mut screen, KeyCode::Delete);
     assert_eq!(screen.store.annotations().len(), 1);
-    assert_eq!(screen.status.as_deref(), Some("note removed"));
+    assert_eq!(screen.status.as_deref(), Some("note removed \u{b7} U undo"));
     assert_eq!(screen.diff.line_on(Side::New).expect("line"), Some(("file0.py", 9)));
     let buffer = draw(&mut screen, SIZE);
     check_boxes(&screen, &buffer, "removed");

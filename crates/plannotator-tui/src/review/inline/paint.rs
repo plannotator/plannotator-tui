@@ -29,10 +29,15 @@ impl Screen {
         if self.whole.is_some() || !self.notes_inline() {
             return;
         }
-        let tab = self.settings.now.tab_width.get();
         let more = self.keys.labelled(Action::Confirm, "for more").unwrap_or_else(|| "more".to_owned());
         let areas = self.diff.box_areas().to_vec();
         let notes = self.store.annotations();
+        // The note in the comment box: its box keeps its rows, blank, under the comment box,
+        // which can be shorter than the box was.
+        let editing = match &self.mode {
+            crate::review::Mode::Compose(crate::review::Draft::Edit(id)) => Some(id.as_str()),
+            _ => None,
+        };
         for area in areas {
             let Some(note) =
                 self.inline.notes.get(&area.id).and_then(|id| notes.iter().find(|n| n.id == *id))
@@ -41,10 +46,27 @@ impl Screen {
             };
             let width = area.area.width.min(MAX_WIDTH);
             let rect = Rect { width, ..area.area };
-            let look = Look { sent: !self.store.is_pending(note), cursor: area.cursor };
-            let card = self.inline.card(area.id, note, width, tab);
-            paint(frame.buffer_mut(), rect, area.clipped_top, card, look, &more);
+            if editing == Some(note.id.as_str()) {
+                blank(frame.buffer_mut(), rect);
+            } else {
+                let look = Look { sent: !self.store.is_pending(note), cursor: area.cursor };
+                let card = self.inline.card(area.id, note, width);
+                paint(frame.buffer_mut(), rect, area.clipped_top, card, look, &more);
+            }
             self.geometry.boxes.push((rect, area.id));
+        }
+    }
+}
+
+/// `rect` of `buf` empty, on the diff's background.
+fn blank(buf: &mut Buffer, rect: Rect) {
+    for y in rect.top()..rect.bottom() {
+        for x in rect.left()..rect.right() {
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                let bg = cell.bg;
+                cell.reset();
+                cell.bg = bg;
+            }
         }
     }
 }

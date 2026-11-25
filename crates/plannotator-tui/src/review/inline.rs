@@ -38,6 +38,10 @@ use crate::keys::{self, Action};
 /// Narrower than this a box would show next to nothing: the note gets none.
 const MIN_WIDTH: u16 = 12;
 
+/// A diff pane shorter than this shows no boxes, which would leave next to no code beside
+/// them (a box of one line of text takes three rows): the footer says so instead.
+pub(super) const MIN_PANE_ROWS: u16 = 10;
+
 /// The boxes' state for one review.
 #[derive(Debug, Default)]
 pub(super) struct Inline {
@@ -49,6 +53,10 @@ pub(super) struct Inline {
     /// Notes that got no box at the last count: on the whole change, not in the diff, or
     /// with no room.
     skipped: usize,
+    /// The pane was too short for boxes at the last count ([`MIN_PANE_ROWS`]).
+    small: bool,
+    /// The note saved last, until the frame after: the footer says when its box is below.
+    pub(super) saved: Option<String>,
     /// While notes show inline only, whether the panel was opened by hand.
     pub(super) rail: bool,
     /// The Notes setting the screen last followed.
@@ -71,10 +79,10 @@ impl Inline {
     }
 
     /// The card for `note` at `width`, laid out again only when either changed.
-    fn card(&mut self, id: u64, note: &CodeAnnotation, width: u16, tab: u8) -> &card::Card {
-        let card = self.cards.entry(id).or_insert_with(|| card::Card::of(note, width, tab));
-        if !card.is_for(note, width, tab) {
-            *card = card::Card::of(note, width, tab);
+    fn card(&mut self, id: u64, note: &CodeAnnotation, width: u16) -> &card::Card {
+        let card = self.cards.entry(id).or_insert_with(|| card::Card::of(note, width));
+        if !card.is_for(note, width) {
+            *card = card::Card::of(note, width);
         }
         card
     }
@@ -135,8 +143,8 @@ impl Screen {
         let notes = self.store.annotations();
         let mut slots = Vec::new();
         let mut skipped = 0;
-        if self.settings.now.notes != Notes::Panel {
-            let tab = self.settings.now.tab_width.get();
+        let small = self.geometry.diff.height < MIN_PANE_ROWS;
+        if self.settings.now.notes != Notes::Panel && !small {
             let area = self.geometry.diff;
             let split = self.diff.split();
             let mut widths: HashMap<&str, Widths> = HashMap::new();
@@ -158,7 +166,7 @@ impl Screen {
                     continue;
                 }
                 let id = self.inline.id(&note.id);
-                let height = self.inline.card(id, note, width, tab).height();
+                let height = self.inline.card(id, note, width).height();
                 let line = match place {
                     Place::Line(side, line) => Some((side, line)),
                     Place::Heading => None,
@@ -167,6 +175,7 @@ impl Screen {
             }
         }
         self.inline.skipped = skipped;
+        self.inline.small = small;
         match self.diff.set_boxes(&slots) {
             Ok(changed) => changed,
             Err(error) => {
@@ -193,12 +202,41 @@ impl Screen {
         Some((right.checked_sub(full)?, full.min(MAX_WIDTH))).filter(|&(_, width)| width >= MIN_WIDTH)
     }
 
-    /// How many notes have no box in the diff now, for the footer.
+    /// How many notes have no box in the diff now, for the footer: none in the whole file,
+    /// which draws no boxes, nor while the pane is too short for any.
     pub(super) fn notes_not_inline(&self) -> usize {
-        if !self.notes_inline() {
+        if !self.notes_inline() || self.whole.is_some() || self.inline.small {
             return 0;
         }
         self.inline.skipped + self.diff.hidden_boxes().len()
+    }
+
+    /// Whether the diff is too short for the notes' boxes, while there are notes to draw.
+    pub(super) fn too_small_for_boxes(&self) -> bool {
+        self.notes_inline()
+            && self.whole.is_none()
+            && self.inline.small
+            && !self.store.annotations().is_empty()
+    }
+
+    /// After a frame: a note just saved whose box is wholly below the pane (saved on its last
+    /// row, say) is not scrolled to, as nothing moves the view; the footer says where it is.
+    pub(super) fn tell_saved_below(&mut self) {
+        let Some(note) = self.inline.saved.take() else { return };
+        if self.whole.is_some() || !self.notes_inline() || self.status.as_deref() != Some("note saved") {
+            return;
+        }
+        let Some(&id) = self.inline.ids.get(&note) else { return };
+        if self.drawn_box(&note).is_some() || !self.diff.keeps_box(id) {
+            return;
+        }
+        let down = KeyEvent::from(ratatui::crossterm::event::KeyCode::Down);
+        let key = if self.keys.is(Action::Down, &down) {
+            "\u{2193}".to_owned()
+        } else {
+            self.keys.hint(Action::Down)
+        };
+        self.status = Some(format!("note saved \u{b7} below, {key} shows it"));
     }
 
     /// The note whose box the cursor is on, in the diff (not the whole file).
@@ -227,13 +265,16 @@ impl Screen {
         Ok(true)
     }
 
-    /// The key help's row for the keys on a box: edit / remove.
-    pub(super) fn box_help(&self) -> (String, &'static str) {
+    /// The key help's rows for the keys on a box, edit and remove, while notes show in the
+    /// diff; none in the panel's mode, whose help is as it was.
+    pub(super) fn box_help(&self) -> Vec<(String, &'static str)> {
+        if !self.notes_inline() {
+            return Vec::new();
+        }
         let edit = [self.keys.hint(Action::Confirm), self.keys.hint_besides(Action::Edit, keys::DIFF)];
         let edit = edit.into_iter().filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" ");
         let remove = self.keys.hint_besides(Action::Remove, keys::DIFF);
-        let keys = [edit, remove].into_iter().filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" / ");
-        (keys, "on a note drawn in the diff: edit / remove it")
+        vec![(edit, "on a note's box in the diff: edit it"), (remove, "on a note's box: remove it")]
     }
 
     /// Where note `id`'s box was drawn in the last frame, when it was.

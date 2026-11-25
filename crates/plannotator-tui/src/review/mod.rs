@@ -206,8 +206,8 @@ pub(crate) struct Screen {
     compose_at: Option<compose_at::Placed>,
     send_state: SendState,
     last_send: crate::ui::send_button::LastSend,
-    /// Notes the last finish archived, for undo.
-    undo: Vec<String>,
+    /// What `undo-finish` takes back, the last first: a finish, or a removed note.
+    undo: Vec<send::Undo>,
     status: Option<String>,
     geometry: Geometry,
     /// A drag with the left button in the diff, until the release.

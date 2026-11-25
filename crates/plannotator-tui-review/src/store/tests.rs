@@ -132,6 +132,31 @@ fn a_send_is_never_dated_before_the_edits_it_covers() {
 }
 
 #[test]
+fn a_taken_note_goes_back_where_it_was_as_sent_as_it_was() {
+    let f = Fixture::new("take");
+    let mut store = f.load();
+    let ids = [add(&mut store, "a"), add(&mut store, "b"), add(&mut store, "c")];
+    let [a, b, c] = ids.clone();
+    store.record_delivery("agent", std::slice::from_ref(&b)).expect("records");
+    let (index, taken) = store.take(&b).expect("saves").expect("there");
+    assert_eq!((index, taken.id.as_str()), (1, b.as_str()));
+    assert!(store.take(&b).expect("saves").is_none(), "gone");
+    let mut store = f.load();
+    assert_eq!(store.annotations().len(), 2, "the removal was saved");
+    assert!(store.put_back(index, taken.clone()).expect("saves"));
+    let ids_now: Vec<&str> = store.annotations().iter().map(|n| n.id.as_str()).collect();
+    assert_eq!(ids_now, [a.as_str(), b.as_str(), c.as_str()]);
+    assert!(!store.is_pending(&store.annotations()[1]), "still sent");
+    assert!(!store.put_back(index, taken).expect("no-op"), "never twice");
+    assert_eq!(f.load().annotations().len(), 3, "and saved");
+    // Fewer notes left than its place: it goes last.
+    let (index, last) = store.take(&c).expect("saves").expect("there");
+    store.take(&a).expect("saves");
+    assert!(store.put_back(index, last).expect("saves"));
+    assert_eq!(store.annotations().last().map(|n| n.id.clone()), Some(c));
+}
+
+#[test]
 fn finishing_archives_sent_notes_and_restoring_brings_them_back() {
     let f = Fixture::new("archive");
     let mut store = f.load();

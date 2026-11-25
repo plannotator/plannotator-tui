@@ -62,6 +62,11 @@ impl Diff {
         self.engine.hidden_insets()
     }
 
+    /// Whether box `id` keeps rows in the diff now: set, and its line shown.
+    pub(in crate::review) fn keeps_box(&self, id: u64) -> bool {
+        self.engine.insets().iter().any(|inset| inset.id == id) && !self.engine.hidden_insets().contains(&id)
+    }
+
     /// The width a box in the file at `path` has over `over`'s side (across the diff for
     /// `None`), in a frame drawn into `area` with the settings as they are now. `None` for a
     /// file the viewer does not have and an area too small for the diff.

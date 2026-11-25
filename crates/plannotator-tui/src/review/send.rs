@@ -24,6 +24,15 @@ pub(crate) struct PickThen {
     close: bool,
 }
 
+/// One thing `undo-finish` can take back.
+#[derive(Debug)]
+pub(super) enum Undo {
+    /// The notes a finish archived.
+    Finish(Vec<String>),
+    /// A removed note and where it was among the notes.
+    Removed(usize, Box<CodeAnnotation>),
+}
+
 impl Screen {
     /// The feedback text for `notes`, as the agent receives it.
     pub(super) fn feedback(&self, notes: &[&CodeAnnotation]) -> String {
@@ -195,21 +204,42 @@ impl Screen {
             format!("archived {} note(s)", ids.len())
         });
         if !ids.is_empty() {
-            self.undo = ids;
+            self.undo.push(Undo::Finish(ids));
         }
         self.after_note_change();
     }
 
+    /// `undo-finish`: take back the last finish or removal of this session. A note comes back
+    /// where it was, as sent as it was, its box where it was.
     pub(super) fn undo_finish(&mut self) -> Result<()> {
-        if self.undo.is_empty() {
-            self.status = Some("nothing to undo".into());
-            return Ok(());
+        match self.undo.pop() {
+            None => self.status = Some("nothing to undo".into()),
+            Some(Undo::Finish(ids)) => {
+                let restored = self.store.restore_archived(&ids)?;
+                self.place_notes()?;
+                self.status = Some(format!("restored {restored} note(s)"));
+                self.after_note_change();
+            }
+            Some(Undo::Removed(index, note)) => {
+                let id = note.id.clone();
+                self.status = Some(if self.store.put_back(index, *note)? {
+                    "note restored".to_owned()
+                } else {
+                    "that note is back already".to_owned()
+                });
+                self.after_note_change();
+                self.select_note(&id);
+            }
         }
-        let restored = self.store.restore_archived(&std::mem::take(&mut self.undo))?;
-        self.place_notes()?;
-        self.status = Some(format!("restored {restored} note(s)"));
-        self.after_note_change();
         Ok(())
+    }
+
+    /// The review menu's undo row: what it would take back.
+    pub(super) fn undo_label(&self) -> &'static str {
+        match self.undo.last() {
+            Some(Undo::Removed(..)) => "Undo remove",
+            _ => "Undo finish",
+        }
     }
 
     /// The Send button's words.

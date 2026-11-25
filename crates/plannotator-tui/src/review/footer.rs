@@ -170,7 +170,9 @@ impl Screen {
         }
         // Notes drawn in the diff: the ones that are not, and where they are.
         let away = self.notes_not_inline();
-        if away > 0 {
+        if self.too_small_for_boxes() {
+            parts.push("pane too small for inline notes".to_owned());
+        } else if away > 0 {
             let what = if away == 1 {
                 "1 note not shown inline".to_owned()
             } else {

@@ -164,6 +164,32 @@ impl ReviewStore {
         Ok(removed)
     }
 
+    /// Remove a note and hand it back with where it was, for [`Self::put_back`] to undo.
+    /// Its send history stays, so a note put back is as sent as it was.
+    pub fn take(&mut self, id: &str) -> Result<Option<(usize, CodeAnnotation)>> {
+        let Some(index) = self.record.annotations.iter().position(|n| n.id == id) else { return Ok(None) };
+        let mut taken = None;
+        self.commit(|record| {
+            taken = (index < record.annotations.len()).then(|| record.annotations.remove(index));
+            taken.is_some()
+        })?;
+        Ok(taken.map(|note| (index, note)))
+    }
+
+    /// Put a note [`Self::take`] removed back where it was, or last when fewer notes are left.
+    /// A note whose id is there again stays out. Returns whether it went back.
+    pub fn put_back(&mut self, index: usize, note: CodeAnnotation) -> Result<bool> {
+        if self.find(&note.id).is_some() {
+            return Ok(false);
+        }
+        self.commit(|record| {
+            let index = index.min(record.annotations.len());
+            record.annotations.insert(index, note);
+            true
+        })?;
+        Ok(true)
+    }
+
     /// Apply resolutions (parallel to [`Self::annotations`], as
     /// [`crate::Capture::resolve_all`] returns them) and save when a note moved or changed
     /// state. Returns whether anything changed.

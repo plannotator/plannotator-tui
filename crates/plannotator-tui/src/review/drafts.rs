@@ -2,23 +2,39 @@
 //! Enter and Delete on a note's box in the diff), and saving what the comment box holds.
 
 use anyhow::Result;
-use plannotator_tui_review::{CodeAnnotation, NoteType, Side};
+use plannotator_tui_review::{CodeAnnotation, NoteScope, NoteType, Side};
 
 use super::diff::Lines;
 use super::{Draft, Focus, Mode, Screen};
 use crate::ui::compose::Compose;
 
 impl Screen {
-    /// The lines a note made now would cover: the selection, else the cursor's line.
+    /// The lines a note made now would cover: the selection, else the cursor's line, else
+    /// with the cursor on a note's box the lines it hangs under, so the new note's box
+    /// stacks under it.
     fn target_lines(&self) -> Result<Option<Lines>> {
-        match self.diff.selection() {
-            Some(lines) => Ok(Some(lines)),
-            None => self.diff.cursor(),
+        if let Some(lines) = self.diff.selection() {
+            return Ok(Some(lines));
         }
+        if let Some(lines) = self.diff.cursor()? {
+            return Ok(Some(lines));
+        }
+        Ok(self.cursor_note().filter(|note| note.scope == NoteScope::Line).map(|note| Lines {
+            path: note.file_path.clone(),
+            side: note.side,
+            first: note.line_start,
+            last: note.line_end,
+        }))
     }
 
-    /// `c`: comment on the selection or the cursor line.
+    /// `c`: comment on the selection or the cursor line; on a file note's box, on the file.
     pub(super) fn start_comment(&mut self) -> Result<()> {
+        if self.diff.selection().is_none()
+            && self.cursor_note().is_some_and(|note| note.scope == NoteScope::File)
+        {
+            self.start_file_comment();
+            return Ok(());
+        }
         let Some(lines) = self.target_lines()? else {
             self.status = Some("move the cursor onto a line of code first".into());
             return Ok(());
@@ -134,8 +150,10 @@ impl Screen {
             self.status = Some("that file is no longer in the diff".into());
             return Ok(());
         };
+        let id = note.id.clone();
         self.add_note(note)?;
         self.status = Some("note saved".into());
+        self.inline.saved = Some(id);
         Ok(())
     }
 
@@ -157,10 +175,14 @@ impl Screen {
         }
     }
 
-    /// Remove note `id`, at once, as the rail's `x` does.
+    /// Remove note `id`, at once, as the rail's `x` does; `undo-finish` brings it back.
     pub(super) fn remove_note(&mut self, id: &str) -> Result<()> {
-        if self.store.remove(id)? {
-            self.status = Some("note removed".into());
+        if let Some((index, note)) = self.store.take(id)? {
+            self.undo.push(super::send::Undo::Removed(index, Box::new(note)));
+            self.status = Some(match self.keys.hint(crate::keys::Action::UndoFinish) {
+                key if key.is_empty() => "note removed".to_owned(),
+                key => format!("note removed \u{b7} {key} undo"),
+            });
         }
         self.after_note_change();
         if self.store.annotations().is_empty() {

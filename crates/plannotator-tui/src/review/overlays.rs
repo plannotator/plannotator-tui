@@ -26,7 +26,7 @@ impl Screen {
                         format!("Resend all \u{b7} {} notes", self.store.annotations().len())
                     }
                     MenuRow::Finish => format!("Finish review \u{b7} archive {sent} sent"),
-                    MenuRow::Undo => "Undo finish".to_owned(),
+                    MenuRow::Undo => self.undo_label().to_owned(),
                 };
                 format!(" {}  {label} ", self.keys.hint(row.binding()))
             })
@@ -88,6 +88,7 @@ impl Screen {
                         "review menu: whole-change comment, resend all, finish, undo",
                     ),
                     (key(&[Action::PickTarget]), "choose the agent Send goes to"),
+                    (key(&[Action::UndoFinish]), "undo the last note removed, or the last finish"),
                     (
                         key(&[Action::PickChanges]),
                         "pick what to review: uncommitted, unstaged, staged, a commit",
@@ -118,7 +119,10 @@ impl Screen {
                     (key(&[Action::Comment]), "comment on the selection or line"),
                     (key(&[Action::Suggest]), "suggest code for new lines"),
                     (key(&[Action::FileComment]), "comment on the file"),
-                    self.box_help(),
+                ]
+                .into_iter()
+                .chain(self.box_help())
+                .chain([
                     (key(&[Action::WholeFile]), "the whole file as it is now, at this line"),
                     (key(&[Action::WholeBase]), "the whole file before the change (base)"),
                     (key(&[Action::GoToDefinition]), "go to the definition of a word on the line"),
@@ -141,7 +145,8 @@ impl Screen {
                     ),
                     (key(&[Action::HideViewed]), "hide viewed files, or show them again"),
                     (key(&[Action::NarrowFiles, Action::WidenFiles]), "narrow / widen the file list"),
-                ],
+                ])
+                .collect(),
             ),
             (
                 "file list",

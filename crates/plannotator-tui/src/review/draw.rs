@@ -108,6 +108,7 @@ impl Screen {
         let code = |y: u16| code.get(usize::from(y - diff.y)).copied().unwrap_or(true);
         let selected = super::mouse::tint_selection(frame.buffer_mut(), diff, middle, cursor_selected, code);
         self.draw_boxes(frame);
+        self.tell_saved_below();
         if files.width > 0 {
             let listing = self.listing();
             self.draw_files(frame, files, &listing);
