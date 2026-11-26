@@ -88,20 +88,20 @@ struct Candidate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RexAgents {
     pub(crate) bin: PathBuf,
-    /// `REX_SESSION`: its agents come first.
+    /// The review's session, or a block in that session (see [`command::session_from`]).
+    /// The picker lists this session's agents first.
     pub(crate) session: String,
     /// `REX_BLOCK`: never listed, it is the review's own block. Its window comes first.
     pub(crate) own_block: Option<String>,
 }
 
 impl RexAgents {
-    /// Inside Rex (`REX_SESSION` set), the agents Rex runs; else `None`. Rex sets
-    /// `REX_SESSION`, `REX_BLOCK` and `REX_BIN_DIR` in every block, so the review's own pane
-    /// has them whether a launcher opened it or you ran it there.
+    /// Inside Rex (`REX_BLOCK` or `REX_SESSION` set), the agents Rex runs; else `None`. Rex
+    /// sets `REX_BLOCK` and `REX_BIN_DIR` in every block, so the review's own pane has them
+    /// whether a launcher opened it or you ran it there.
     pub(crate) fn from_lookup(env: impl Fn(&str) -> Option<String>) -> Option<Self> {
-        let non_empty = |k: &str| env(k).filter(|v| !v.is_empty());
-        let session = non_empty("REX_SESSION")?;
-        let own_block = non_empty("REX_BLOCK");
+        let session = command::session_from(&env)?;
+        let own_block = env("REX_BLOCK").filter(|v| !v.is_empty());
         Some(Self { bin: command::bin_from(&env), session, own_block })
     }
 
@@ -110,16 +110,31 @@ impl RexAgents {
     pub(crate) fn list(&self) -> Vec<BlockAgent> {
         let listed = self.read(&["ls", "--json"]);
         let mut found = listed.as_ref().map(sessions).unwrap_or_default();
-        if !found.iter().any(|(id, _)| *id == self.session) {
-            found.push((self.session.clone(), short_id(&self.session).to_owned()));
-        }
+        // `rex ls` lists sessions by their session IDs. If `session` is not in that list, it is
+        // a block's ID, or `rex ls` failed. The window list of `session` gives the real session
+        // ID. It is also that session's own window list, so the loop below does not read it again.
+        // When it cannot be read, the other sessions are still listed, as for any unreadable
+        // session.
+        let mut own_view = None;
+        let session = if found.iter().any(|(id, _)| *id == self.session) {
+            self.session.clone()
+        } else if let Some((id, view)) = self.own_window_list() {
+            if !found.iter().any(|(listed, _)| *listed == id) {
+                found.push((id.clone(), label_or(&view, short_id(&id))));
+            }
+            own_view = Some(view);
+            id
+        } else {
+            self.session.clone()
+        };
         // The review's session first; the sort is stable, so the rest keep Rex's order.
-        found.sort_by_key(|(id, _)| *id != self.session);
+        found.sort_by_key(|(id, _)| *id != session);
         let candidates: Vec<Candidate> = found
             .iter()
             .enumerate()
             .filter_map(|(at, (id, label))| {
-                let view = self.read(&["window", "ls", "-s", id, "--json"])?;
+                let own = if *id == session { own_view.take() } else { None };
+                let view = own.or_else(|| self.read(&["window", "ls", "-s", id, "--json"]))?;
                 Some(blocks(&view, at, label, self.own_block.as_deref()))
             })
             .flatten()
@@ -133,6 +148,13 @@ impl RexAgents {
                 })
             })
             .collect()
+    }
+
+    /// `rex window ls` of the review's session or block, with the session ID it names.
+    fn own_window_list(&self) -> Option<(String, Value)> {
+        let view = self.read(&["window", "ls", "-s", &self.session, "--json"])?;
+        let id = view.get("session_id").and_then(Value::as_str).filter(|id| !id.is_empty())?.to_owned();
+        Some((id, view))
     }
 
     /// The agent in `candidate`'s block, if one runs there. Only an agent's title is read.
@@ -360,7 +382,7 @@ d='{d}'
 echo "$*" >> "$d/calls"
 case "$1 $2" in
   'ls --json') cat "$d/ls.json" ;;
-  'window ls') f=$(grep -l "\"session_id\": \"$4\"" "$d"/window-ls-*.json | head -1); [ -n "$f" ] || exit 3; cat "$f" ;;
+  'window ls') f=$(grep -Fl "\"$4\"" "$d"/window-ls-*.json | head -1); [ -n "$f" ] || exit 3; cat "$f" ;;
   do\ com.superlogical.terminal.*)
     m=${{2#com.superlogical.terminal.}}; b=$4; f="$d/${{b#"${{b%??????}}"}}.$m.json"
     [ -f "$f" ] || exit 3; cat "$f" ;;
@@ -494,8 +516,11 @@ mod tests {
         let env = |vars: &'static [(&'static str, &'static str)]| {
             move |k: &str| vars.iter().find(|(name, _)| *name == k).map(|(_, v)| (*v).to_owned())
         };
-        assert_eq!(RexAgents::from_lookup(env(&[("REX_BLOCK", "block:b")])), None);
-        assert_eq!(RexAgents::from_lookup(env(&[("REX_SESSION", "")])), None);
+        assert_eq!(RexAgents::from_lookup(env(&[])), None);
+        assert_eq!(RexAgents::from_lookup(env(&[("REX_SESSION", ""), ("REX_BLOCK", "")])), None);
+        let block_only = RexAgents::from_lookup(env(&[("REX_BLOCK", "block:b")])).expect("rex");
+        assert_eq!(block_only.session, "block:b");
+        assert_eq!(block_only.own_block.as_deref(), Some("block:b"));
         let inside =
             RexAgents::from_lookup(env(&[("REX_SESSION", "session:s"), ("REX_BIN_DIR", "/opt/rex")]))
                 .expect("rex");
@@ -539,6 +564,46 @@ mod tests {
         assert_eq!(titles, 5, "one title per agent: {calls}");
         let gone = RexAgents { bin: dir.join("absent"), session: FIXTURE_SESSION.into(), own_block: None };
         assert_eq!(gone.list(), []);
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_review_known_only_by_its_block_lists_its_own_session_first_and_once() {
+        let dir =
+            std::env::temp_dir().join(format!("plannotator-tui-rex-agents-by-block-{}", std::process::id()));
+        let bin = fake_rex(&dir);
+        // `rex ls` lists `side` second, so only the sort can put its agent first.
+        let side_block = "block:01a1f658-9a2c-7d0b-a3ae-7899dcfd82e9";
+        let rex = RexAgents { bin, session: side_block.into(), own_block: None };
+        let agents = rex.list();
+        assert_eq!(agents.len(), 5, "each session once: {agents:?}");
+        assert_eq!(agents[0].place(), "side › Window 122adf3e · fd82e9");
+        assert_eq!(agents[0].rank.0, 0, "the review's session comes first");
+        assert!(agents[1..].iter().all(|a| a.rank.0 == 1));
+        let calls = std::fs::read_to_string(dir.join("calls")).expect("calls");
+        let window_reads: Vec<&str> = calls.lines().filter(|l| l.starts_with("window ls")).collect();
+        assert_eq!(
+            window_reads,
+            [
+                format!("window ls -s {side_block} --json"),
+                "window ls -s session:01a1f658-7c0a-71ad-8ff6-a1bcbc31504f --json".to_owned(),
+            ],
+            "the block's window list is the session's, so it is read once"
+        );
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_review_whose_own_session_cannot_be_read_still_lists_the_other_sessions() {
+        let dir =
+            std::env::temp_dir().join(format!("plannotator-tui-rex-agents-unread-{}", std::process::id()));
+        let bin = fake_rex(&dir);
+        // A block Rex no longer knows: its window list fails, `rex ls` still answers.
+        let rex =
+            RexAgents { bin, session: "block:01a1f658-0000-0000-0000-000000000000".into(), own_block: None };
+        assert_eq!(rex.list(), recorded(None), "every listed session, in Rex's order");
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 }

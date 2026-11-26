@@ -259,10 +259,19 @@ impl Screen {
             key if key.is_empty() => String::new(),
             key => format!(" ({key})"),
         };
+        // Before a send this session, the review's record says where its notes went last, so
+        // a reopened review whose notes were only copied does not read `Sent ✓`.
+        let copied = match self.last_send {
+            LastSend::Clipboard => true,
+            LastSend::Agent => false,
+            LastSend::None => {
+                self.store.deliveries().last().is_some_and(|d| d.target == Clipboard.describe())
+            }
+        };
         match &self.send_state {
             SendState::Blocked(_) => format!("{} at a dialog · retry{key}", self.delivery.describe()),
+            SendState::Sent if copied => "Copied ✓".to_owned(),
             SendState::Sent if self.delivery.is_agent() => format!("Sent ✓{to}"),
-            SendState::Sent if self.last_send == LastSend::Clipboard => "Copied ✓".to_owned(),
             SendState::Sent => "Sent ✓".to_owned(),
             SendState::Ready => format!("{verb} {count} new{to}{key}"),
         }
