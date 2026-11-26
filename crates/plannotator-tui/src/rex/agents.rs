@@ -113,22 +113,19 @@ impl RexAgents {
         // `rex ls` lists sessions by their session IDs. If `session` is not in that list, it is
         // a block's ID, or `rex ls` failed. The window list of `session` gives the real session
         // ID. It is also that session's own window list, so the loop below does not read it again.
+        // When it cannot be read, the other sessions are still listed, as for any unreadable
+        // session.
         let mut own_view = None;
         let session = if found.iter().any(|(id, _)| *id == self.session) {
             self.session.clone()
-        } else {
-            let Some(view) = self.read(&["window", "ls", "-s", &self.session, "--json"]) else {
-                return Vec::new();
-            };
-            let Some(id) = view.get("session_id").and_then(Value::as_str).filter(|id| !id.is_empty()) else {
-                return Vec::new();
-            };
-            let id = id.to_owned();
+        } else if let Some((id, view)) = self.own_window_list() {
             if !found.iter().any(|(listed, _)| *listed == id) {
                 found.push((id.clone(), label_or(&view, short_id(&id))));
             }
             own_view = Some(view);
             id
+        } else {
+            self.session.clone()
         };
         // The review's session first; the sort is stable, so the rest keep Rex's order.
         found.sort_by_key(|(id, _)| *id != session);
@@ -151,6 +148,13 @@ impl RexAgents {
                 })
             })
             .collect()
+    }
+
+    /// `rex window ls` of the review's session or block, with the session ID it names.
+    fn own_window_list(&self) -> Option<(String, Value)> {
+        let view = self.read(&["window", "ls", "-s", &self.session, "--json"])?;
+        let id = view.get("session_id").and_then(Value::as_str).filter(|id| !id.is_empty())?.to_owned();
+        Some((id, view))
     }
 
     /// The agent in `candidate`'s block, if one runs there. Only an agent's title is read.
@@ -587,6 +591,19 @@ mod tests {
             ],
             "the block's window list is the session's, so it is read once"
         );
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_review_whose_own_session_cannot_be_read_still_lists_the_other_sessions() {
+        let dir =
+            std::env::temp_dir().join(format!("plannotator-tui-rex-agents-unread-{}", std::process::id()));
+        let bin = fake_rex(&dir);
+        // A block Rex no longer knows: its window list fails, `rex ls` still answers.
+        let rex =
+            RexAgents { bin, session: "block:01a1f658-0000-0000-0000-000000000000".into(), own_block: None };
+        assert_eq!(rex.list(), recorded(None), "every listed session, in Rex's order");
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 }
