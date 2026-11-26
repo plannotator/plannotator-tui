@@ -75,6 +75,14 @@ fn parent_exe() -> Option<PathBuf> {
     None
 }
 
+/// The session a Rex terminal runs in: `REX_SESSION`, else `REX_BLOCK`. From server
+/// 0.1.0-preview.23, Rex sets only `REX_BLOCK` in a new terminal. A block's ID names its
+/// session anywhere Rex takes a session, so the block is enough.
+pub(crate) fn session_from(env: impl Fn(&str) -> Option<String>) -> Option<String> {
+    let non_empty = |k: &str| env(k).filter(|v| !v.is_empty());
+    non_empty("REX_SESSION").or_else(|| non_empty("REX_BLOCK"))
+}
+
 /// The last six characters of a Rex ID, the short form `rex ls` prints.
 pub(crate) fn short_id(id: &str) -> &str {
     id.char_indices().rev().nth(5).map_or(id, |(at, _)| id.get(at..).unwrap_or(id))
@@ -88,12 +96,12 @@ pub(crate) struct Rex {
 }
 
 impl Rex {
-    /// `rex` as `bin` finds it, scoped to `session` when given, else `REX_SESSION`.
+    /// `rex` as `bin` finds it, scoped to `session` when given, else the terminal's own
+    /// session (see [`session_from`]).
     pub(crate) fn from_lookup(env: impl Fn(&str) -> Option<String>, session: Option<String>) -> Result<Self> {
-        let non_empty = |k: &str| env(k).filter(|v| !v.is_empty());
         let session = session
-            .or_else(|| non_empty("REX_SESSION"))
-            .context("no Rex session: pass --session or run inside Rex (REX_SESSION is not set)")?;
+            .or_else(|| session_from(&env))
+            .context("no Rex session: pass --session or run inside Rex (REX_BLOCK is not set)")?;
         Ok(Self { bin: bin(&env, parent_rex), session })
     }
 
@@ -182,5 +190,14 @@ mod tests {
         let explicit = rex(&[("REX_SESSION", "session:a")], Some("session:b")).expect("rex");
         assert_eq!(explicit.session, "session:b");
         assert!(rex(&[], None).is_err());
+    }
+
+    #[test]
+    fn a_terminal_without_rex_session_is_scoped_by_its_block() {
+        let block_only = rex(&[("REX_BLOCK", "block:b")], None).expect("rex");
+        assert_eq!(block_only.session, "block:b");
+        let both = rex(&[("REX_SESSION", "session:a"), ("REX_BLOCK", "block:b")], None).expect("rex");
+        assert_eq!(both.session, "session:a");
+        assert!(rex(&[("REX_SESSION", ""), ("REX_BLOCK", "")], None).is_err());
     }
 }

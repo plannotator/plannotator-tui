@@ -158,7 +158,7 @@ Reply: `{"ok":true,"busy":false,"name":"…","id":"…"}`.
   and where it runs (`pid N` for a Pi, `workspace › tab · pane` for a Herdr pane). The
   review's own pane (`HERDR_PANE_ID`) is never listed, and a Pi that Herdr also lists (same
   transcript or session id) is shown once, as the Pi session.
-- Inside Rex (`REX_SESSION` set), the picker also lists every Rex block with an agent, in
+- Inside Rex (`REX_BLOCK` or `REX_SESSION` set), the picker also lists every Rex block with an agent, in
   every session. Rex has no agent list, so it is built from reads only: `rex ls --json`
   (sessions), `rex window ls -s <session> --json` (windows, their layers and blocks), and for
   each terminal block `rex do com.superlogical.terminal.process`, `…program_status` and, for
