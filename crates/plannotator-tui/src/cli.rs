@@ -97,7 +97,7 @@ fn review_delivery(interactive: bool, path: Option<&Path>) -> Box<dyn Delivery> 
     if !interactive {
         return Box::new(Discard);
     }
-    agent_pane().or_else(|| deliver_command(path)).unwrap_or_else(|| Box::new(Clipboard))
+    agent_pane(true).or_else(|| deliver_command(path)).unwrap_or_else(|| Box::new(Clipboard))
 }
 
 /// `PLANNOTATOR_TUI_DELIVER_CMD`, else `[deliver] command`. A config that does not parse
@@ -108,14 +108,16 @@ fn deliver_command(path: Option<&Path>) -> Option<Box<dyn Delivery>> {
     Some(Box::new(command))
 }
 
-/// A gated review sends to the same agent pane; without one its decision goes to the caller.
+/// A gated review sends to the same agent pane; without one, or when the pane cannot reach
+/// it, its decision goes to the caller.
 fn gate_delivery() -> Box<dyn Delivery> {
-    agent_pane().unwrap_or_else(|| Box::new(Caller))
+    agent_pane(false).unwrap_or_else(|| Box::new(Caller))
 }
 
 /// The Pi that started the review, or the Rex block, hc terminal or Herdr agent pane the
-/// environment names, if any.
-fn agent_pane() -> Option<Box<dyn Delivery>> {
+/// environment names, if any. With `refuse_unreachable`, a Rex launcher's agent that this
+/// pane cannot reach is a target that refuses Send and says why.
+fn agent_pane(refuse_unreachable: bool) -> Option<Box<dyn Delivery>> {
     // Set only by Pi's `/plannotator-review`, for the review it runs in its own terminal. A
     // Pi that cannot be found refuses Send: the Rex block, hc terminal or Herdr pane in Pi's
     // environment is the one the review now runs in.
@@ -124,8 +126,10 @@ fn agent_pane() -> Option<Box<dyn Delivery>> {
         Some(Err(gone)) => return Some(Box::new(gone)),
         None => {}
     }
-    if let Some(agent) = RexAgent::from_lookup(|k| std::env::var(k).ok()) {
-        return Some(Box::new(agent));
+    match RexAgent::from_lookup(|k| std::env::var(k).ok()) {
+        Some(Ok(agent)) => return Some(Box::new(agent)),
+        Some(Err(unreachable)) if refuse_unreachable => return Some(Box::new(unreachable)),
+        _ => {}
     }
     if let Some(agent) = HcAgent::from_lookup(|k| std::env::var(k).ok()) {
         return Some(Box::new(agent));

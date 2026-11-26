@@ -51,14 +51,24 @@ pub(crate) struct RexAgent {
 }
 
 impl RexAgent {
-    /// The target `plannotator-tui rex` named in the environment, or `None` outside such a layer.
-    pub(crate) fn from_lookup(env: impl Fn(&str) -> Option<String>) -> Option<Self> {
+    /// The target `plannotator-tui rex` named in the environment, or `None` outside such a
+    /// layer. A launcher names a block only when it found an agent there, so a pane that
+    /// cannot reach it gets [`RexUnreachable`]: Send says why instead of copying in silence.
+    pub(crate) fn from_lookup(env: impl Fn(&str) -> Option<String>) -> Option<Result<Self, RexUnreachable>> {
         let non_empty = |k: &str| env(k).filter(|v| !v.is_empty());
         let block = non_empty(BLOCK_VAR)?;
-        let pid = non_empty(PID_VAR)?.parse().ok()?;
-        let rex = Rex::from_lookup(&env, None).ok()?;
+        let unreachable = |reason: String| RexUnreachable { agent: non_empty(AGENT_VAR), reason };
+        let Some(pid) = non_empty(PID_VAR).and_then(|pid| pid.parse().ok()) else {
+            return Some(Err(unreachable(format!("{PID_VAR} names no process"))));
+        };
+        let Ok(rex) = Rex::from_lookup(&env, None) else {
+            return Some(Err(unreachable(format!(
+                "REX_BLOCK is not set, so this pane cannot reach {}",
+                short_id(&block)
+            ))));
+        };
         let submit = env(SUBMIT_VAR).as_deref() != Some("0");
-        Some(Self {
+        Some(Ok(Self {
             rex,
             block,
             agent: non_empty(AGENT_VAR),
@@ -70,7 +80,7 @@ impl RexAgent {
             ),
             submit,
             notice: RefCell::default(),
-        })
+        }))
     }
 
     /// The agent `agent` (its host label), process `pid`, that the agent picker found in
@@ -86,6 +96,33 @@ impl RexAgent {
             submit: true,
             notice: RefCell::default(),
         }
+    }
+}
+
+/// The Send target of a review a Rex launcher opened for an agent, when the review's pane
+/// cannot reach that agent. Send sends nothing and says why, the feedback is copied, and the
+/// notes stay unsent, so the button never reads `Sent ✓` for feedback the agent never got.
+#[derive(Debug)]
+pub(crate) struct RexUnreachable {
+    agent: Option<String>,
+    reason: String,
+}
+
+impl Delivery for RexUnreachable {
+    fn agent_host(&self) -> Option<&str> {
+        self.agent.as_deref()
+    }
+
+    fn describe(&self) -> String {
+        format!("{} · not found", self.agent.as_deref().unwrap_or("agent"))
+    }
+
+    fn is_agent(&self) -> bool {
+        true
+    }
+
+    fn deliver(&self, _feedback: &str) -> Result<(), DeliveryError> {
+        Err(DeliveryError::Unavailable(self.reason.clone()))
     }
 }
 
@@ -211,9 +248,31 @@ mod tests {
     use super::*;
 
     fn agent(vars: &[(&str, &str)]) -> Option<RexAgent> {
+        lookup(vars).and_then(Result::ok)
+    }
+
+    fn lookup(vars: &[(&str, &str)]) -> Option<Result<RexAgent, RexUnreachable>> {
         let owned: Vec<(String, String)> =
             vars.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
         RexAgent::from_lookup(|k| owned.iter().find(|(name, _)| name == k).map(|(_, v)| v.clone()))
+    }
+
+    #[test]
+    fn a_launchers_agent_the_pane_cannot_reach_refuses_send_and_says_why() {
+        let block = "block:01a17dd5-e47c-754f-b72e-ef739ea1d6db";
+        assert!(lookup(&[("REX_BLOCK", "block:r")]).is_none(), "no launcher named an agent");
+        let unreachable = |vars: &[(&str, &str)]| lookup(vars).expect("named").expect_err("unreachable");
+        let no_session = unreachable(&[(BLOCK_VAR, block), (PID_VAR, "7"), (AGENT_VAR, "claude")]);
+        assert_eq!(no_session.describe(), "claude · not found");
+        assert!(no_session.is_agent(), "quitting with the notes unsent still asks");
+        let refused = no_session.deliver("feedback").expect_err("refused");
+        assert!(refused.wants_copy());
+        assert_eq!(
+            refused.status(&no_session.describe(), true, 'E'),
+            "no agent to send to (REX_BLOCK is not set, so this pane cannot reach a1d6db) · copied to clipboard · E retry"
+        );
+        let no_pid = unreachable(&[("REX_BLOCK", "block:r"), (BLOCK_VAR, block), (PID_VAR, "x")]);
+        assert_eq!(no_pid.describe(), "agent · not found");
     }
 
     #[test]
