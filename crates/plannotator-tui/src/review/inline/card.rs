@@ -11,6 +11,7 @@ use plannotator_tui_review::{CodeAnnotation, NoteScope, NoteType, Side};
 use ratatui::style::Style;
 use ratatui::text::Line;
 
+use crate::review::ask::Thread;
 use crate::theme::palette;
 use crate::ui::compose::TAB_WIDTH;
 use crate::wrap::wrap_line;
@@ -66,6 +67,21 @@ impl Card {
     /// Whether this is `note`'s card at `width`, as [`Self::of`] would make it now.
     pub(super) fn is_for(&self, note: &CodeAnnotation, width: u16) -> bool {
         self.made_for == (revision(note), width)
+    }
+
+    /// An Ask thread's box at `width`: every question and all of each answer, which is what
+    /// the box is for, so no [`BODY_LINES`] limit.
+    pub(super) fn of_thread(thread: &Thread, width: u16) -> Self {
+        let mut body = thread.body(usize::from(width.saturating_sub(CHROME)).max(1));
+        if body.is_empty() {
+            body.push(Line::default());
+        }
+        Self { made_for: (thread.revision(), width), label: thread.label(), author: None, body, more: false }
+    }
+
+    /// Whether this is `thread`'s card at `width`, as [`Self::of_thread`] would make it now.
+    pub(super) fn is_for_thread(&self, thread: &Thread, width: u16) -> bool {
+        self.made_for == (thread.revision(), width)
     }
 
     /// The rows the box takes: its text and two borders.

@@ -68,7 +68,7 @@ pub(crate) fn feedback(name: &str, entries: &[Entry<'_>]) -> String {
 }
 
 /// A fence longer than any backtick run inside the text, so quoted markdown cannot escape.
-fn fenced(text: &str) -> String {
+pub(crate) fn fenced(text: &str) -> String {
     let longest = text.split(|c| c != '`').map(str::len).max().unwrap_or(0);
     let fence = "`".repeat(longest.max(2) + 1);
     format!("{fence}\n{text}\n{fence}\n")

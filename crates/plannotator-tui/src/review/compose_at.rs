@@ -10,6 +10,9 @@
 //! - The whole change (`M`, editing its note), or lines no longer on screen: centred.
 //! - Editing a note whose box the diff shows (`inline`): over the box, as wide as it. Notes'
 //!   boxes under the lines of a new one count as theirs: the box opens below them.
+//! - A question (`ask`): right under the end of the box of questions it goes into, as
+//!   drawn (`ask` scrolls that end into view first); with no such box, as for lines, below
+//!   the boxes under them whatever the Notes setting, as Ask boxes always show.
 //!
 //! The box only draws over the diff: opening, typing in and closing it never move the view
 //! or the cursor. It grows with its text on the side it opened on and, out of room there,
@@ -30,7 +33,7 @@ pub(super) const MIN_SIDE_WIDTH: u16 = 48;
 /// One row of text and its borders.
 const MIN_HEIGHT: u16 = 3;
 /// The room a side needs for the box to open there: three rows of text to grow into.
-const ROOM: u16 = 5;
+pub(super) const ROOM: u16 = 5;
 
 /// Which side of its rows the box took.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +60,8 @@ enum Anchor {
     Centre,
     /// A note's box in the diff, as last drawn.
     Over(Rect),
+    /// The end of the Ask box a question goes into, as drawn: right under it.
+    Under(Rect),
 }
 
 impl Screen {
@@ -66,7 +71,7 @@ impl Screen {
         let anchor = self.anchor(draft);
         // Where the viewer drew the line between a split diff's sides, wherever it was dragged.
         let middle = self.active_diff().filter(|diff| diff.split()).and_then(super::diff::Diff::split_line);
-        let boxes = self.notes_inline() && self.whole.is_none();
+        let boxes = self.whole.is_none() && (self.notes_inline() || matches!(draft, Draft::Ask(_)));
         let (x, width) = match &anchor {
             // Where the notes' boxes are drawn, the box lines up with them.
             Anchor::Lines(lines)
@@ -81,10 +86,15 @@ impl Screen {
                 columns
             }
             Anchor::File(_) | Anchor::Centre => (pane.x, pane.width.min(MAX_WIDTH)),
-            Anchor::Over(rect) => (rect.x, rect.width),
+            Anchor::Over(rect) | Anchor::Under(rect) => (rect.x, rect.width),
         };
         let wrap = usize::from(width.saturating_sub(compose::CHROME));
         let wanted = compose::height(&self.compose, wrap).min(pane.height);
+        if let Anchor::Under(rect) = anchor {
+            // Under the box, else (no room left under it) over its last rows.
+            let y = rect.bottom().min(pane.bottom().saturating_sub(wanted));
+            return Rect { x, y, width, height: wanted.min(pane.bottom() - y) };
+        }
         if let Anchor::Over(rect) = anchor {
             // From the box's top down, else as low as it fits.
             let y = rect.y.min(pane.bottom().saturating_sub(wanted.max(ROOM.min(pane.height))));
@@ -107,7 +117,7 @@ impl Screen {
                 // No heading on screen: at the top of the pane.
                 None => return Rect { x, y: pane.y, width, height: wanted },
             },
-            Anchor::Centre | Anchor::Over(_) => None,
+            Anchor::Centre | Anchor::Over(_) | Anchor::Under(_) => None,
         };
         let Some((first, last, top)) = rows else {
             let x = pane.x + (pane.width - width) / 2;
@@ -127,6 +137,17 @@ impl Screen {
         match draft {
             Draft::Comment(lines) | Draft::Suggestion(lines) | Draft::Outside(lines, _) => {
                 Anchor::Lines(lines.clone())
+            }
+            Draft::Ask(lines) => {
+                let thread = self.ask.box_for(lines);
+                let end = thread
+                    .and_then(|thread| self.diff.box_areas().iter().find(|area| area.id == thread.id))
+                    .filter(|area| area.height == area.clipped_top + area.area.height)
+                    .map(|area| Rect { width: area.area.width.min(MAX_WIDTH), ..area.area });
+                match end {
+                    Some(rect) => Anchor::Under(rect),
+                    None => Anchor::Lines(thread.map_or(lines, |thread| &thread.lines).clone()),
+                }
             }
             Draft::File(path) => Anchor::File(path.clone()),
             Draft::Change => Anchor::Centre,

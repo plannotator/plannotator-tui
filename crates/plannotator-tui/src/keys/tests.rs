@@ -368,3 +368,11 @@ fn pick_changes_is_p_in_the_code_review_and_yields_to_an_older_config_that_gave_
         assert_eq!(keymap.hint(PickChanges), key, "pick-changes in {config:?}");
     }
 }
+
+#[test]
+fn a_config_that_gave_asks_key_away_still_loads() {
+    // Written before `ask` existed: `a` is the user's file-comment key, and ask is left unbound.
+    let keymap = parse("file-comment = [\"a\"]\n").expect("an older config keeps loading");
+    assert_eq!(keymap.action(&press(KeyCode::Char('a'), KeyModifiers::NONE), DIFF), Some(FileComment));
+    assert_eq!(keymap.hint(Ask), "");
+}

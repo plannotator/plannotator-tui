@@ -100,3 +100,26 @@ fn garbage_input_yields_no_messages_rather_than_an_error() {
         [] as [plannotator_tui_hosts::Message; 0]
     );
 }
+
+#[test]
+fn a_prompt_queued_while_the_agent_worked_is_a_human_prompt_and_other_attachments_are_not() {
+    let jsonl = [
+        r#"{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"first"}}"#,
+        r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","id":"m1","content":[{"type":"text","text":"working"}]}}"#,
+        r#"{"type":"attachment","uuid":"q1","parentUuid":"a1","attachment":{"type":"queued_command","prompt":"asked meanwhile","commandMode":"prompt"}}"#,
+        r#"{"type":"attachment","uuid":"f1","parentUuid":"q1","attachment":{"type":"edited_text_file","filename":"a.rs"}}"#,
+        r#"{"type":"assistant","uuid":"a2","parentUuid":"f1","message":{"role":"assistant","id":"m2","content":[{"type":"text","text":"the answer"}]}}"#,
+    ]
+    .join("\n");
+    let messages = parse_messages(&jsonl, 5);
+    let shown: Vec<(Role, &str)> = messages.iter().map(|m| (m.role, m.text.as_str())).collect();
+    assert_eq!(
+        shown,
+        [
+            (Role::Assistant, "the answer"),
+            (Role::Human, "asked meanwhile"),
+            (Role::Assistant, "working"),
+            (Role::Human, "first")
+        ]
+    );
+}

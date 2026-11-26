@@ -118,6 +118,7 @@ impl Screen {
                     (key(&[Action::Comment]), "comment on the selection or line"),
                     (key(&[Action::Suggest]), "suggest code for new lines"),
                     (key(&[Action::FileComment]), "comment on the file"),
+                    (key(&[Action::Ask]), "ask the agent about the lines; the answer shows under them"),
                 ]
                 .into_iter()
                 .chain(self.box_help())

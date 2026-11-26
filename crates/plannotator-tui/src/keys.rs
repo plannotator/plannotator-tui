@@ -134,6 +134,9 @@ pub(crate) enum Action {
     /// Pick what the code review shows: uncommitted, unstaged or staged changes, the branch,
     /// or one of the recent commits.
     PickChanges,
+    /// Ask the agent about the selected lines: the question goes to it as Send goes, and its
+    /// answer shows in a box under the lines.
+    Ask,
 }
 
 use Action::{
@@ -143,12 +146,12 @@ use Action::{
     Reload, Remove, RemoveImage, ResendAll, ReviewMenu, Right, Send, SendAndClose, ToggleHidden, ToggleTree,
     Top, UndoFinish, Up, Visual, VisualLine, WordBack, WordEnd, WordForward, Yes,
 };
+use Action::{Ask, DiffSettings, PickChanges, SplitLeft, SplitRight, ToggleWhitespace};
 use Action::{
     ChangeComment, FileComment, Help, NextFile, NextHunk, NextMatch, NextUnviewed, PreviousFile,
     PreviousHunk, PreviousMatch, PreviousUnviewed, Search, Suggest, ToggleFiles, ToggleLayout, ToggleViewed,
     ToggleWrap, WholeBase, WholeFile,
 };
-use Action::{DiffSettings, PickChanges, SplitLeft, SplitRight, ToggleWhitespace};
 use Action::{FilterFiles, FilterKinds, GoToDefinition, HideViewed, JumpBack, JumpForward};
 use Action::{NarrowColumn, NarrowFiles, NarrowNotes, ToggleNotes, WidenColumn, WidenFiles, WidenNotes};
 
@@ -251,6 +254,7 @@ pub(crate) const DIFF: &[Action] = &[
     Comment,
     Suggest,
     FileComment,
+    Ask,
     Down,
     Up,
     PageDown,
@@ -542,14 +546,16 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (SplitLeft, &[ch('(')]),
     (SplitRight, &[ch(')')]),
     (PickChanges, &[ch('p')]),
+    (Ask, &[ch('a')]),
 ];
 
 /// Actions added after configs were written: `approve` (live only in a gated review), `copy`
 /// (on a waiting selection), `word-end`, `visual-line`, the code review's own, the reading
-/// column's, `toggle-notes` and search. The newest come first (`pick-changes`, then
-/// `toggle-whitespace`, then `diff-settings`, `split-left` and `split-right`, then
-/// `copy-lines`), so they yield a key before an older action does.
+/// column's, `toggle-notes` and search. The newest come first (`ask`, then
+/// `pick-changes`, then `toggle-whitespace`, then `diff-settings`, `split-left` and
+/// `split-right`, then `copy-lines`), so they yield a key before an older action does.
 const LATE: &[Action] = &[
+    Ask,
     PickChanges,
     ToggleWhitespace,
     DiffSettings,
@@ -798,6 +804,7 @@ impl Action {
             Self::SplitLeft => "split-left",
             Self::SplitRight => "split-right",
             Self::PickChanges => "pick-changes",
+            Self::Ask => "ask",
         }
     }
 }

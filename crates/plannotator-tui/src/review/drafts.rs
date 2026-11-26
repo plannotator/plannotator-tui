@@ -12,7 +12,7 @@ impl Screen {
     /// The lines a note made now would cover: the selection, else the cursor's line, else
     /// with the cursor on a note's box the lines it hangs under, so the new note's box
     /// stacks under it.
-    fn target_lines(&self) -> Result<Option<Lines>> {
+    pub(super) fn target_lines(&self) -> Result<Option<Lines>> {
         if let Some(lines) = self.diff.selection() {
             return Ok(Some(lines));
         }
@@ -139,6 +139,8 @@ impl Screen {
                 text,
                 &key,
             )),
+            // Asked when the box is saved (`ask::save_question`), never kept as a note.
+            Draft::Ask(_) => return Ok(()),
             Draft::Edit(id) => {
                 let changed = self.store.edit(id, |note| {
                     let field = match note.kind {

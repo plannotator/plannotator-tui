@@ -26,10 +26,13 @@ impl Screen {
     /// Draw the boxes on screen in the last frame of the diff, and note where for the mouse
     /// and the comment box.
     pub(in crate::review) fn draw_boxes(&mut self, frame: &mut Frame) {
-        if self.whole.is_some() || !self.notes_inline() {
+        // The rows kept are only for notes while they show inline, and for Ask threads always.
+        if self.whole.is_some() {
             return;
         }
         let more = self.keys.labelled(Action::Confirm, "for more").unwrap_or_else(|| "more".to_owned());
+        let more = format!("\u{2026} {more}");
+        let again = self.ask_box_hint();
         let areas = self.diff.box_areas().to_vec();
         let notes = self.store.annotations();
         // The note in the comment box: its box keeps its rows, blank, under the comment box,
@@ -39,6 +42,21 @@ impl Screen {
             _ => None,
         };
         for area in areas {
+            if let Some(thread) = self.ask.thread(area.id) {
+                let width = area.area.width.min(MAX_WIDTH);
+                let rect = Rect { width, ..area.area };
+                let card = self.inline.thread_card(thread, width);
+                paint(
+                    frame.buffer_mut(),
+                    rect,
+                    area.clipped_top,
+                    card,
+                    Look { sent: false, cursor: area.cursor },
+                    Some(&again),
+                );
+                self.geometry.boxes.push((rect, area.id));
+                continue;
+            }
             let Some(note) =
                 self.inline.notes.get(&area.id).and_then(|id| notes.iter().find(|n| n.id == *id))
             else {
@@ -51,7 +69,8 @@ impl Screen {
             } else {
                 let look = Look { sent: !self.store.is_pending(note), cursor: area.cursor };
                 let card = self.inline.card(area.id, note, width);
-                paint(frame.buffer_mut(), rect, area.clipped_top, card, look, &more);
+                let bottom = card.more.then_some(more.as_str());
+                paint(frame.buffer_mut(), rect, area.clipped_top, card, look, bottom);
             }
             self.geometry.boxes.push((rect, area.id));
         }
@@ -71,8 +90,9 @@ fn blank(buf: &mut Buffer, rect: Rect) {
     }
 }
 
-/// The box for `card`, its rows from `clipped_top` on, into `rect` of `buf`.
-fn paint(buf: &mut Buffer, rect: Rect, clipped_top: u16, card: &Card, look: Look, more: &str) {
+/// The box for `card`, its rows from `clipped_top` on, into `rect` of `buf`, with `bottom` on
+/// its lower border: what a note cut short says, or the keys of an Ask box.
+fn paint(buf: &mut Buffer, rect: Rect, clipped_top: u16, card: &Card, look: Look, bottom: Option<&str>) {
     let whole = Rect::new(0, 0, rect.width, card.height());
     let mut scratch = Buffer::empty(whole);
     let colour = if look.sent { Color::DarkGray } else { palette().comment };
@@ -90,8 +110,8 @@ fn paint(buf: &mut Buffer, rect: Rect, clipped_top: u16, card: &Card, look: Look
         .border_type(BorderType::Rounded)
         .border_style(border)
         .title(Line::from(title));
-    if card.more {
-        block = block.title_bottom(Span::styled(format!(" \u{2026} {more} "), Style::new().fg(colour)));
+    if let Some(bottom) = bottom {
+        block = block.title_bottom(Span::styled(format!(" {bottom} "), Style::new().fg(colour)));
     }
     let inner = block.inner(whole);
     block.render(whole, &mut scratch);

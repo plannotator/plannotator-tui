@@ -29,6 +29,7 @@
 //! person's `gh` login into their clone or a cache repository ([`capture`]), and sends to the
 //! agent as any review does. Nothing is posted to GitHub.
 
+mod ask;
 pub(crate) mod cli;
 mod compose_at;
 mod diff;
@@ -92,6 +93,8 @@ enum Draft {
     Outside(Lines, String),
     /// A new body for an existing note, by id.
     Edit(String),
+    /// A question for the agent about lines. It is asked, never saved as a note.
+    Ask(Lines),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,6 +241,8 @@ pub(crate) struct Screen {
     help_room: std::cell::Cell<usize>,
     /// `pick-changes` was pressed: the event loop opens the change picker over the review.
     pick_request: bool,
+    /// The questions asked with `ask`, by the lines they are about, and their answers so far.
+    ask: ask::Ask,
     /// The other reviews this session showed, for the notes left unsent on them.
     switched: pick::shown::Switched,
     quit: bool,
@@ -331,6 +336,7 @@ impl Screen {
             help_scroll: 0,
             help_room: std::cell::Cell::new(0),
             pick_request: false,
+            ask: ask::Ask::default(),
             switched: pick::shown::Switched::default(),
             quit: false,
         };
@@ -451,6 +457,7 @@ impl Screen {
             changed = true;
         }
         changed |= self.reach.poll();
+        changed |= self.poll_ask();
         changed |= self.step_at_edge(Instant::now())?;
         let whole_draw = self.whole.as_ref().is_some_and(whole::Whole::needs_draw);
         Ok(changed || self.diff.needs_draw() || whole_draw)

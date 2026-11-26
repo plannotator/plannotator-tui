@@ -234,8 +234,8 @@ file in the file list goes to that file, a click on a folder opens or closes it,
 click on a note selects it and shows its lines. The Send and `Review ▾` buttons in the header are clickable. Drag over lines to
 select them: a selection is whole lines on the side where the drag started, as in the
 browser's code review, and the lines are shaded while you drag. Drag past the top or bottom
-of the diff to scroll. When you let go, a small toolbar next to the lines offers `💬 comment`
-and `✎ suggest` (click it, or press `c` or `s`), and the note is anchored on exactly those
+of the diff to scroll. When you let go, a small toolbar next to the lines offers `❓ ask`,
+`💬 comment` and `✎ suggest` (click it, or press `a`, `c` or `s`), and the note is anchored on exactly those
 lines, with their code quoted for the agent. `Esc` clears the selection. Drag works the
 same in the whole-file view. Shift-click grows a selection to the clicked line, from the
 line the drag started on. A selection stays inside the hunk it started in, as GitHub's
@@ -364,6 +364,28 @@ saved in the browser app's own format under the data folder (`review-progress/`)
 review started in the browser continues here and the other way round. A mark stops
 counting once its file changes. Set `PLANNOTATOR_REVIEW_PROGRESS=0` to keep marks for the
 session only. See [docs/spec-review-progress.md](docs/spec-review-progress.md).
+
+### Ask the agent
+
+`a` (`ask`) on a selection or a line, or `❓ ask` on the toolbar after a drag, opens the
+comment box for a question. Enter puts it in a box under the lines and types it into the
+agent Send goes to, with the file, the lines and their code, so the question and its
+answer are part of the agent's own conversation. When nothing names an agent, it asks
+which one first, as Send does. The answer is read back from the agent's transcript and
+shows in the box as it is written, whatever the Notes setting, each message under who
+wrote it. A question typed while the agent is busy gets its answer when the agent takes
+it. Nothing you ask becomes a note.
+
+A question on the same lines, or on lines inside them, goes into the same box: Enter or
+`a` on the box asks one, and the question box opens at the box's end. `Delete` on the box,
+or on one of its lines, removes the box (the agent's chat keeps the questions).
+
+The answer is read from the agent's own session, found as [`last`](#agent-replies) finds
+it from the agent's process: a target that names the process (Rex, hc, or Pi's
+`/plannotator-review`) for Claude Code, Copilot or Pi. Anything else would be the newest
+session in the folder, a guess, so asking says so instead of sending. Codex is not
+supported yet: its transcript reader gives only the agent's replies, so the question cannot
+be found there.
 
 ### Pick what to review
 
@@ -713,6 +735,7 @@ added in a later release leaves its default key to whatever your file already bo
 | `review-menu` | `m` | the Review menu |
 | `pick-target` | `P` | choose the agent Send goes to (see [Choosing the agent](#choosing-the-agent)) |
 | `pick-changes` | `p` | code review: [pick what to review](#pick-what-to-review); in the picker, back to the review |
+| `ask` | `a` | code review: [ask the agent](#ask-the-agent) about the lines; on its box, ask again |
 | `resend-all` `finish-review` `undo-finish` `archive` | `R` `F` `U` `H` | file and folder review actions |
 | `toggle-hidden` | `.` | show/hide dot-prefixed entries in the tree |
 | `edit` `remove` | `e` `x`, `Delete` | the selected note |
