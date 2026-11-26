@@ -125,8 +125,11 @@ pub(super) enum OnRelease {
 }
 
 /// The toolbar's buttons: (glyph, label, action).
-const BUTTONS: [(&str, &str, Action); 2] =
-    [("\u{1f4ac}", "comment", Action::Comment), ("\u{270e}", "suggest", Action::Suggest)];
+const BUTTONS: [(&str, &str, Action); 3] = [
+    ("\u{2753}", "ask", Action::Ask),
+    ("\u{1f4ac}", "comment", Action::Comment),
+    ("\u{270e}", "suggest", Action::Suggest),
+];
 
 /// The drag's gutter mark. Bold tells it from a note's mark when the rows are tinted.
 pub(super) fn drag_mark() -> Style {
@@ -324,6 +327,8 @@ impl Screen {
         let labels: Vec<(String, Action)> = BUTTONS
             .iter()
             .filter(|(_, _, action)| *action != Action::Suggest || lines.side == Side::New)
+            // Ask is the diff's: the whole-file view has no boxes to answer in.
+            .filter(|(_, _, action)| *action != Action::Ask || self.whole.is_none())
             .map(|(glyph, label, action)| match self.keys.hint(*action) {
                 key if key.is_empty() => (format!(" {glyph} {label} "), *action),
                 key => (format!(" {glyph} {label} ({key}) "), *action),
@@ -348,7 +353,7 @@ impl Screen {
         for (label, action) in labels {
             let w = label.width() as u16;
             let chips = crate::ui::chips::chips();
-            let fg = if action == Action::Comment { chips.review_comment() } else { chips.review_suggest };
+            let fg = if action == Action::Suggest { chips.review_suggest } else { chips.review_comment() };
             let style = Style::new().fg(fg).bg(palette().toolbar_bg).add_modifier(Modifier::BOLD);
             buf.set_span(x, y, &Span::styled(label, style), w);
             self.geometry.toolbar.push((Rect { x, y, width: w, height: 1 }, action));

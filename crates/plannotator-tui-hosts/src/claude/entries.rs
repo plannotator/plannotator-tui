@@ -31,6 +31,9 @@ pub(crate) struct Entry {
     pub(crate) is_sidechain: bool,
     pub(crate) hidden: bool,
     pub(crate) is_compact_summary: bool,
+    /// A prompt typed while the agent worked: Claude Code takes it into the running turn and
+    /// records it as a `queued_command` attachment, not as a `user` entry.
+    pub(crate) queued: bool,
 }
 
 impl Entry {
@@ -41,7 +44,14 @@ impl Entry {
         let string = |key: &str| object.get(key).and_then(Value::as_str).map(str::to_owned);
         let flag = |key: &str| object.get(key).and_then(Value::as_bool).unwrap_or(false);
         let message = object.get("message").and_then(Value::as_object);
+        let queued_prompt = object
+            .get("attachment")
+            .filter(|a| a.get("type").and_then(Value::as_str) == Some("queued_command"))
+            .filter(|a| a.get("commandMode").and_then(Value::as_str) == Some("prompt"))
+            .and_then(|a| a.get("prompt"))
+            .and_then(Value::as_str);
         let texts = match message.and_then(|m| m.get("content")) {
+            _ if let Some(prompt) = queued_prompt => vec![prompt.to_owned()],
             Some(Value::String(text)) => vec![text.clone()],
             Some(Value::Array(blocks)) => blocks
                 .iter()
@@ -71,6 +81,7 @@ impl Entry {
             is_sidechain: flag("isSidechain"),
             hidden,
             is_compact_summary: flag("isCompactSummary"),
+            queued: queued_prompt.is_some(),
         })
     }
 
@@ -83,7 +94,7 @@ impl Entry {
     }
 
     pub(crate) fn is_skipped(&self) -> bool {
-        SKIPPED_TYPES.contains(&self.kind.as_str()) || self.hidden || self.is_sidechain
+        (SKIPPED_TYPES.contains(&self.kind.as_str()) && !self.queued) || self.hidden || self.is_sidechain
     }
 
     /// A typed human prompt with text: not meta, not a compact summary, not machinery.
@@ -91,7 +102,7 @@ impl Entry {
         if self.is_skipped()
             || self.is_meta
             || self.is_compact_summary
-            || self.effective_role() != Some("user")
+            || (self.effective_role() != Some("user") && !self.queued)
         {
             return false;
         }

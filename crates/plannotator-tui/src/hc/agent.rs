@@ -47,6 +47,10 @@ impl Delivery for HcAgent {
         self.agent.as_deref()
     }
 
+    fn agent_pid(&self) -> Option<u32> {
+        Some(self.pid)
+    }
+
     fn describe(&self) -> String {
         format!("{} in {}", self.agent.as_deref().unwrap_or("agent"), self.terminal)
     }

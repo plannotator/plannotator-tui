@@ -214,6 +214,12 @@ fn first_code(doc: &Document) -> Vec<(String, String)> {
     samples
 }
 
+/// `markdown` styled as the document view styles a block, one `Line` per logical line and
+/// unwrapped: an agent's answer in the code review's Ask panel.
+pub(crate) fn styled(markdown: &str) -> Text<'static> {
+    own(tui_markdown::from_str_with_options(markdown, &Options::new(Styles { fences: true })))
+}
+
 pub(crate) fn own(text: Text<'_>) -> Text<'static> {
     let lines = text
         .lines

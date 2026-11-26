@@ -9,7 +9,7 @@ use ratatui::layout::{Position, Rect};
 
 use super::diff::Diff;
 use super::whole::Version;
-use super::{Focus, Mode, Screen};
+use super::{Draft, Focus, Mode, Screen};
 use crate::keys::{self, Action};
 use crate::ui::agent_picker::{AgentPicker, Picked, PickerKey};
 use crate::ui::compose::{self, ComposeAction};
@@ -131,6 +131,7 @@ impl Screen {
                     drawn => drawn,
                 };
                 match self.compose.key(&self.keys, key, wrap) {
+                    ComposeAction::Save if let Draft::Ask(lines) = &draft => self.save_question(lines),
                     ComposeAction::Save => self.save_draft(&draft)?,
                     ComposeAction::Cancel => self.mode = Mode::Browse,
                     ComposeAction::Edited => {}
@@ -166,6 +167,7 @@ impl Screen {
                         if self.pick_then.take().is_some() {
                             self.status = Some("nothing sent".into());
                         }
+                        self.after_ask_picker(false);
                     }
                     PickerKey::Chose(row) => {
                         self.mode = Mode::Browse;
@@ -178,6 +180,7 @@ impl Screen {
                         if let Some(then) = then {
                             self.send_picked(then);
                         }
+                        self.after_ask_picker(true);
                     }
                 }
                 Ok(())
@@ -276,7 +279,7 @@ impl Screen {
     }
 
     fn diff_key(&mut self, key: KeyEvent) -> Result<()> {
-        if self.box_key(&key)? {
+        if self.ask_box_key(&key) || self.box_key(&key)? {
             return Ok(());
         }
         match self.keys.action(&key, keys::DIFF) {
@@ -323,6 +326,7 @@ impl Screen {
             Action::Back => Command::Back,
             Action::Visual | Action::VisualLine => return self.diff.begin_or_end_selection(),
             Action::Comment => return self.start_comment(),
+            Action::Ask => return self.start_ask(),
             Action::Suggest => return self.start_suggestion(),
             Action::FileComment => {
                 self.start_file_comment();

@@ -15,7 +15,9 @@
 //!   gives that key to something else (`x` marks the file viewed there).
 //! - `inline` starts with the panel away whatever notes there are; `z` opens it for the
 //!   session. `both` keeps the panel's own rule (`notes_rail`).
-//! - `panel`, the default, sets no rows at all: the diff draws as it always has.
+//! - `panel`, the default, sets no rows for notes: the diff draws as it always has.
+//! - Questions asked with `ask` get a box under their lines whatever the setting, one for
+//!   each set of lines (`ask`).
 //!
 //! A box is laid out once per note revision and width ([`card::Card`]), and only the boxes
 //! on screen are drawn.
@@ -86,6 +88,15 @@ impl Inline {
         }
         card
     }
+
+    /// The card for Ask `thread` at `width`, laid out again only when either changed.
+    fn thread_card(&mut self, thread: &super::ask::Thread, width: u16) -> &card::Card {
+        let card = self.cards.entry(thread.id).or_insert_with(|| card::Card::of_thread(thread, width));
+        if !card.is_for_thread(thread, width) {
+            *card = card::Card::of_thread(thread, width);
+        }
+        card
+    }
 }
 
 /// Where a box goes.
@@ -144,10 +155,10 @@ impl Screen {
         let mut slots = Vec::new();
         let mut skipped = 0;
         let small = self.geometry.diff.height < MIN_PANE_ROWS;
+        let area = self.geometry.diff;
+        let split = self.diff.split();
+        let mut widths: HashMap<&str, Widths> = HashMap::new();
         if self.settings.now.notes != Notes::Panel && !small {
-            let area = self.geometry.diff;
-            let split = self.diff.split();
-            let mut widths: HashMap<&str, Widths> = HashMap::new();
             let mut order: Vec<usize> = (0..notes.len()).collect();
             order.sort_by_key(|&i| (notes.get(i).map_or(0, |note| note.created_at), i));
             for note in order.into_iter().filter_map(|i| notes.get(i)) {
@@ -172,6 +183,18 @@ impl Screen {
                     Place::Heading => None,
                 };
                 slots.push(Slot { id, path, line, over, height });
+            }
+        }
+        for thread in self.ask.threads().iter().filter(|_| !small) {
+            let Lines { path, side, last, .. } = &thread.lines;
+            let widths = *widths.entry(path).or_insert_with(|| {
+                [Some(Side::Old), Some(Side::New), None].map(|over| self.diff.box_width(area, path, over))
+            });
+            let over = over(Place::Line(*side, *last), split, widths);
+            let width = width(widths, over).unwrap_or(0).min(MAX_WIDTH);
+            if width >= MIN_WIDTH {
+                let height = self.inline.thread_card(thread, width).height();
+                slots.push(Slot { id: thread.id, path, line: Some((*side, *last)), over, height });
             }
         }
         self.inline.skipped = skipped;

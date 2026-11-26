@@ -271,6 +271,19 @@ fn the_toolbar_after_a_drag_comments_on_the_selection() {
 }
 
 #[test]
+fn the_toolbar_after_a_drag_asks_the_agent_about_the_selection() {
+    let fixture = Fixture::new("mouse-toolbar-ask");
+    let mut screen = fixture.open();
+    let from = locate(&mut screen, "def add(a, b):", true);
+    let to = locate(&mut screen, "return total", true);
+    drag(&mut screen, from, to);
+    release(&mut screen, to);
+    let ask = locate(&mut screen, "ask (a)", false);
+    mouse(&mut screen, MouseEventKind::Down(MouseButton::Left), ask);
+    assert_eq!(screen.mode, Mode::Compose(Draft::Ask(lines(Side::New, 8, 10))));
+}
+
+#[test]
 fn a_key_takes_the_toolbar_away_and_keeps_the_selection() {
     let fixture = Fixture::new("mouse-toolbar-key");
     let mut screen = fixture.open();

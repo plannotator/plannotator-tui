@@ -78,6 +78,10 @@ pub(crate) trait Delivery {
     fn agent_host(&self) -> Option<&str> {
         None
     }
+    /// The receiving agent's process, when the target knows it: Ask finds its transcript.
+    fn agent_pid(&self) -> Option<u32> {
+        None
+    }
     fn deliver(&self, feedback: &str) -> Result<(), DeliveryError>;
     /// What the person still has to do after the last `deliver` succeeded, shown with its
     /// status: the feedback reached the agent but did not finish, e.g. it waits unsubmitted.

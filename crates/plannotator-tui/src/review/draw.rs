@@ -174,6 +174,7 @@ impl Screen {
             Draft::Change => "comment on the whole change".to_owned(),
             Draft::Outside(lines, _) => format!("comment on {} (not in the diff)", lines_label(lines)),
             Draft::Edit(_) => "edit".to_owned(),
+            Draft::Ask(lines) => format!("ask about {}", lines_label(lines)),
         };
         let title = self.compose.heading(&verb, self.shift_enter, &self.keys);
         let (text, first) = compose::draw(frame, rect, &self.compose, &title);
@@ -184,7 +185,7 @@ impl Screen {
 }
 
 /// `src/a.rs:12`, `src/a.rs:12-14`, or `src/a.rs:7 old` for lines of the old file.
-fn lines_label(lines: &Lines) -> String {
+pub(super) fn lines_label(lines: &Lines) -> String {
     let Lines { path, side, first, last } = lines;
     let at = if first == last { format!("{path}:{first}") } else { format!("{path}:{first}-{last}") };
     if *side == Side::Old { format!("{at} old") } else { at }

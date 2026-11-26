@@ -10,6 +10,9 @@ mod fallback;
 mod locate;
 mod readers;
 mod roots;
+mod transcript;
+
+pub(crate) use transcript::Transcript;
 
 use std::io::Read as _;
 use std::path::PathBuf;
