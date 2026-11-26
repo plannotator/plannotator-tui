@@ -4,30 +4,21 @@
 //! questions on those lines (or on lines inside them) add to that box. Nothing here is saved:
 //! the transcript is the record.
 //!
-//! Finding and reading the transcript take a thread (`watch`), so the screen never waits on
-//! them; only the delivery itself, as quick as Send's, runs here once the thread is ready.
+//! Finding and reading the transcript take a thread for each question (`watch`), so the
+//! screen never waits on them; only the delivery itself, as quick as Send's, runs here once
+//! that thread is ready.
 
+mod boxes;
+mod text;
 mod watch;
 
-use std::hash::{Hash as _, Hasher as _};
-
 use anyhow::Result;
-use plannotator_tui_hosts::{Message, Role};
-use plannotator_tui_review::Side;
-use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
-use ratatui::style::{Style, Stylize as _};
-use ratatui::text::{Line, Span};
 
 use super::diff::Lines;
-use super::{Draft, Mode, Screen};
-use crate::keys::{self, Action};
+use super::{Mode, Screen};
+use crate::keys::Action;
+#[cfg(test)]
 use crate::last::Transcript;
-use crate::theme::palette;
-use crate::ui::compose::Compose;
-
-/// How many replies a read of the transcript goes back through: an answer can be many
-/// messages between tool calls, and the question must still be in reach.
-const PICK: usize = 400;
 
 /// The first box id an Ask thread takes: far above any note's (`inline` counts those from 1).
 const FIRST_ID: u64 = 1 << 40;
@@ -40,16 +31,9 @@ pub(super) struct Ask {
     made: u64,
     /// A question waiting for the agent picker that asking opened.
     waiting: Option<(Lines, Turn)>,
-    /// The transcript found last, and the agent it belongs to, so the next question to that
-    /// agent need not find it again.
-    found: Option<Found>,
-}
-
-#[derive(Debug)]
-struct Found {
-    host: Option<String>,
-    pid: Option<u32>,
-    transcript: Transcript,
+    /// The transcript questions are read from, instead of finding the agent's: tests.
+    #[cfg(test)]
+    transcript: Option<Transcript>,
 }
 
 /// The questions on one set of lines, and their answers: one box.
@@ -72,6 +56,8 @@ struct Turn {
     sent: bool,
     /// The answer read so far: the agent's replies since the question, oldest first.
     answer: String,
+    /// Another prompt followed the answer: nothing more comes.
+    complete: bool,
     /// Why the question could not go, or its answer cannot be read.
     failed: Option<String>,
     /// The thread finding the transcript and then reading the answer, until it is complete.
@@ -105,66 +91,6 @@ impl Ask {
     }
 }
 
-impl Thread {
-    /// `ask · L9`, `ask · L9–12`, `ask · L7 old`, as a note's box names its lines.
-    pub(super) fn label(&self) -> String {
-        let Lines { side, first, last, .. } = &self.lines;
-        let lines = if first == last { format!("L{first}") } else { format!("L{first}\u{2013}{last}") };
-        let old = if *side == Side::Old { " old" } else { "" };
-        format!("ask \u{b7} {lines}{old}")
-    }
-
-    /// A number that changes whenever what the box shows does.
-    pub(super) fn revision(&self) -> u64 {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        for turn in &self.turns {
-            (&turn.question, turn.sent, &turn.answer, &turn.failed).hash(&mut hasher);
-        }
-        hasher.finish()
-    }
-
-    /// The box's text at `width` columns: each question, then its answer as Markdown, all of it.
-    pub(super) fn body(&self, width: usize) -> Vec<Line<'static>> {
-        let speaker =
-            |who: &str, colour| Line::from(Span::styled(who.to_owned(), Style::new().fg(colour).bold()));
-        let mut rows = Vec::new();
-        for (index, turn) in self.turns.iter().enumerate() {
-            if index > 0 {
-                let rule = "\u{254c}".repeat(width);
-                rows.push(Line::from(Span::styled(rule, Style::new().fg(palette().idle_fg))));
-            }
-            rows.push(speaker("You", palette().accent));
-            for line in turn.question.lines() {
-                rows.extend(wrapped(&Line::from(line.to_owned()), width));
-            }
-            rows.push(Line::default());
-            rows.push(speaker(&turn.agent, palette().heading));
-            for line in crate::layout::styled(&turn.answer).lines {
-                rows.extend(wrapped(&line, width));
-            }
-            let waiting = if turn.sent { "waiting for the answer\u{2026}" } else { "sending\u{2026}" };
-            match &turn.failed {
-                Some(why) => {
-                    let why = if turn.sent {
-                        format!("cannot read the answer: {why}")
-                    } else {
-                        format!("not sent: {why}")
-                    };
-                    rows.extend(wrapped(&Line::from(Span::styled(why, palette().delete)), width));
-                }
-                None if turn.answer.is_empty() => rows.push(Line::from(Span::raw(waiting).italic())),
-                None => {}
-            }
-        }
-        rows
-    }
-}
-
-fn wrapped(line: &Line<'_>, width: usize) -> impl Iterator<Item = Line<'static>> {
-    let chars: usize = line.spans.iter().map(|span| span.content.chars().count()).sum();
-    crate::wrap::wrap_line(line, &vec![None; chars], width).into_iter().map(|row| row.line)
-}
-
 impl Screen {
     /// Take what the questions' threads have done: send a question once its thread is ready,
     /// and show the answers read so far. True when a box changed.
@@ -176,15 +102,18 @@ impl Screen {
             while let Some(update) = watch.next() {
                 changed = true;
                 match update {
-                    watch::Update::Ready(transcript) => {
-                        let host = self.delivery.agent_host().map(str::to_owned);
-                        self.ask.found = Some(Found { host, pid: self.delivery.agent_pid(), transcript });
+                    watch::Update::Ready => {
                         let target = self.delivery.describe();
                         match self.delivery.deliver(&turn.prompt) {
                             Ok(()) => {
                                 turn.sent = true;
+                                let notice = self
+                                    .delivery
+                                    .notice()
+                                    .map(|n| format!(" \u{b7} {n}"))
+                                    .unwrap_or_default();
                                 self.status =
-                                    Some(format!("asked {target}; the answer shows under the lines"));
+                                    Some(format!("asked {target}; the answer shows under the lines{notice}"));
                             }
                             Err(error) => {
                                 let why = error.status(&target, false, 'a');
@@ -196,6 +125,7 @@ impl Screen {
                     }
                     watch::Update::Answer { text, complete } => {
                         turn.answer = text;
+                        turn.complete = complete;
                         ended |= complete;
                     }
                     watch::Update::Failed(why) => {
@@ -223,101 +153,6 @@ impl Screen {
         self.open_question(lines)
     }
 
-    /// The question box for `lines`. When they have a box already the question goes into, it
-    /// opens at that box's end: the diff scrolls, as the wheel does, until the end and room
-    /// for the question box under it show, which a long answer pushes below the pane.
-    fn open_question(&mut self, lines: Lines) -> Result<()> {
-        if let Some(id) = self.ask.box_for(&lines).map(|thread| thread.id) {
-            let pane = self.geometry.diff;
-            if let Some(area) = self.diff.box_areas().iter().find(|area| area.id == id) {
-                let cut = area.height.saturating_sub(area.clipped_top + area.area.height);
-                let below = pane.bottom().saturating_sub(area.area.bottom());
-                let rows = (cut + super::compose_at::ROOM).saturating_sub(below);
-                let wheel = MouseEvent {
-                    kind: MouseEventKind::ScrollDown,
-                    column: pane.x + 1,
-                    row: pane.y + 1,
-                    modifiers: KeyModifiers::NONE,
-                };
-                // The wheel scrolls three rows a step.
-                for _ in 0..rows.div_ceil(3) {
-                    self.diff.handle_event(Event::Mouse(wheel))?;
-                }
-            }
-        }
-        self.compose = Compose::default();
-        self.mode = Mode::Compose(Draft::Ask(lines));
-        Ok(())
-    }
-
-    /// A key on an Ask box: Enter or `ask` asks again about its lines, the panel's remove key
-    /// removes the box. True when the key was the box's.
-    pub(super) fn ask_box_key(&mut self, key: &KeyEvent) -> bool {
-        let diff = self.keys.action(key, keys::DIFF);
-        let remove = diff.is_none() && self.keys.is(Action::Remove, key);
-        if let Some(thread) = self.cursor_thread() {
-            let (id, lines) = (thread.id, thread.lines.clone());
-            if matches!(diff, Some(Action::Confirm | Action::Ask)) {
-                if let Err(error) = self.open_question(lines) {
-                    self.status = Some(format!("{error:#}"));
-                }
-            } else if remove {
-                self.remove_thread(id);
-            } else {
-                return false;
-            }
-            return true;
-        }
-        // On the lines a box is about, where the click that focused the pane may have put the
-        // cursor, the remove key removes that box too.
-        let on_lines = self.diff.cursor().ok().flatten().filter(|_| remove && self.whole.is_none());
-        match on_lines.and_then(|lines| self.ask.threads.iter().find(|thread| covers(&thread.lines, &lines)))
-        {
-            Some(thread) => {
-                self.remove_thread(thread.id);
-                true
-            }
-            None => false,
-        }
-    }
-
-    fn remove_thread(&mut self, id: u64) {
-        self.ask.threads.retain(|thread| thread.id != id);
-        self.status = Some("questions removed from the diff; the agent's chat keeps them".into());
-    }
-
-    /// What an Ask box's border says it does, each with its key as the keyboard shows it:
-    /// `ask again (⏎ Enter) · remove (⌫ Delete)`. Backspace is the Mac's delete key.
-    pub(super) fn ask_box_hint(&self) -> String {
-        let bound = |action, code| self.keys.is(action, &KeyEvent::from(code));
-        let again = if bound(Action::Confirm, KeyCode::Enter) {
-            "\u{23ce} Enter".to_owned()
-        } else {
-            self.keys.hint(Action::Ask)
-        };
-        let remove = if bound(Action::Remove, KeyCode::Backspace) {
-            "\u{232b} Delete".to_owned()
-        } else if bound(Action::Remove, KeyCode::Delete) {
-            "\u{2326} Delete".to_owned()
-        } else {
-            self.keys.hint_besides(Action::Remove, keys::DIFF)
-        };
-        [("ask again", again), ("remove", remove)]
-            .into_iter()
-            .filter(|(_, key)| !key.is_empty())
-            .map(|(what, key)| format!("{what} ({key})"))
-            .collect::<Vec<_>>()
-            .join(" \u{b7} ")
-    }
-
-    /// The thread whose box the cursor is on, in the diff (not the whole file).
-    fn cursor_thread(&self) -> Option<&Thread> {
-        if self.whole.is_some() {
-            return None;
-        }
-        self.ask.thread(self.diff.cursor_box()?)
-    }
-
     /// Ask what the comment box holds. When Send would ask which agent first, so does this.
     pub(super) fn save_question(&mut self, lines: &Lines) {
         self.mode = Mode::Browse;
@@ -327,9 +162,24 @@ impl Screen {
             return;
         }
         let prompt = self.question_prompt(lines, &question);
-        let agent = self.delivery.agent_host().unwrap_or("agent").to_owned();
-        let turn =
-            Turn { question, agent, prompt, sent: false, answer: String::new(), failed: None, watch: None };
+        if prompt.len() > super::send::MAX_SEND_BYTES {
+            self.status = Some(format!(
+                "the question and its code are {} KiB, over the {} KiB one send carries; select fewer lines",
+                prompt.len().div_ceil(1024),
+                super::send::MAX_SEND_BYTES / 1024
+            ));
+            return;
+        }
+        let turn = Turn {
+            question,
+            agent: String::new(),
+            prompt,
+            sent: false,
+            answer: String::new(),
+            complete: false,
+            failed: None,
+            watch: None,
+        };
         if let Some(picker) = self.reach.picker_for_send(self.delivery.as_ref(), &self.real_root()) {
             self.picker = picker;
             self.pick_then = None;
@@ -377,14 +227,22 @@ impl Screen {
             return;
         }
         let host = self.delivery.agent_host().map(str::to_owned);
-        let pid = self.delivery.agent_pid();
-        let found = self
-            .ask
-            .found
-            .as_ref()
-            .filter(|found| found.host == host && found.pid == pid)
-            .map(|found| found.transcript.clone());
-        turn.watch = Some(watch::Watch::start(watch::Source { found, host, pid }, self.wake.clone()));
+        turn.agent = host.clone().unwrap_or_else(|| "agent".to_owned());
+        let first = turn.prompt.lines().next().unwrap_or_default().to_owned();
+        let question = watch::Question {
+            host,
+            pid: self.delivery.agent_pid(),
+            marks: [first, turn.question.clone()],
+            #[cfg(test)]
+            transcript: self.ask.transcript.clone(),
+        };
+        match watch::Watch::start(question, self.wake.clone()) {
+            Ok(watch) => turn.watch = Some(watch),
+            Err(error) => {
+                self.status = Some(format!("not asked: could not start reading the answer: {error}"));
+                return;
+            }
+        }
         self.ask.add(lines, turn);
         self.status = Some(format!("asking {}\u{2026}", self.delivery.describe()));
         let _ = self.diff.clear_selection();
@@ -393,8 +251,7 @@ impl Screen {
     /// Read answers from `transcript` instead of finding the agent's: tests.
     #[cfg(test)]
     pub(super) fn answer_from(&mut self, transcript: Transcript) {
-        let host = self.delivery.agent_host().map(str::to_owned);
-        self.ask.found = Some(Found { host, pid: self.delivery.agent_pid(), transcript });
+        self.ask.transcript = Some(transcript);
     }
 }
 
@@ -402,37 +259,3 @@ impl Screen {
 fn covers(on: &Lines, lines: &Lines) -> bool {
     on.path == lines.path && on.side == lines.side && on.first <= lines.first && lines.last <= on.last
 }
-
-/// The id of the newest prompt in `newest_first`, if it has one.
-fn newest_prompt(newest_first: &[Message]) -> Option<String> {
-    newest_first.iter().find(|message| message.role == Role::Human).map(|message| message.id.clone())
-}
-
-/// The answer to the first prompt after prompt `after` (with `None`, the first prompt of all):
-/// the replies after it up to the next prompt, oldest first, and whether that next prompt has
-/// come, which ends the answer. `None` until the question is in the transcript, or when `after`
-/// is out of reach.
-fn answer(newest_first: &[Message], after: Option<&str>) -> Option<(String, bool)> {
-    let newer = match after {
-        Some(id) => newest_first.get(..newest_first.iter().position(|message| message.id == id)?)?,
-        None => newest_first,
-    };
-    // Newest first, so the oldest prompt in `newer` is the question.
-    let asked = newer.iter().rposition(|message| message.role == Role::Human)?;
-    let since = newer.get(..asked)?;
-    let next = since.iter().rposition(|message| message.role == Role::Human);
-    let replies = match next {
-        Some(next) => since.get(next + 1..)?,
-        None => since,
-    };
-    let text: Vec<&str> = replies
-        .iter()
-        .rev()
-        .filter(|message| message.role == Role::Assistant)
-        .map(|message| message.text.as_str())
-        .collect();
-    Some((text.join("\n\n"), next.is_some()))
-}
-
-#[cfg(test)]
-mod tests;

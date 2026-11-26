@@ -1,11 +1,14 @@
-//! An agent's transcript, found once the way `last` finds it, then read again as it grows:
-//! the code review's Ask reads its answers from there.
+//! An agent's transcript, found the way `last` finds it, then read again as it grows: the
+//! code review's Ask reads its answers from there.
 
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use plannotator_tui_hosts::{Host, Message};
 
+use super::fallback::Discovery;
 use super::{LastOptions, locate, readers};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,11 +22,20 @@ pub(crate) struct Transcript {
 }
 
 impl Transcript {
-    /// The transcript of agent process `pid` (else this folder's newest session), of host
-    /// `host` when the target names one (`claude`, `codex`, ...), else as detected.
+    /// The transcript of agent process `pid`, of host `host` when the target names one
+    /// (`claude`, `pi`, ...), else as detected. Only the agent's own session: the newest one
+    /// in its folder is a guess, and another session's answer would show as this one's.
     pub(crate) fn find(host: Option<&str>, pid: Option<u32>) -> Result<Self> {
         let options = LastOptions { host: host.map(str::to_owned), pid, pick: 1, ..LastOptions::default() };
         let located = locate::locate(&options)?;
+        if located.discovery != Discovery::Exact {
+            bail!(
+                "only a guess ({}) for {}: asking needs the agent's own session, which a target that names its \
+                 process gives for Claude Code, Copilot and Pi",
+                located.transcript.display(),
+                located.host.label()
+            );
+        }
         Ok(Self { host: located.host, path: located.transcript, session_id: located.session_id, pid })
     }
 
@@ -37,14 +49,13 @@ impl Transcript {
         self.host
     }
 
-    /// Whether its reader gives the person's prompts too, which Ask finds its question by.
-    /// Codex's gives only the replies of the newest turn.
-    pub(crate) fn has_prompts(&self) -> bool {
-        self.host != Host::Codex
-    }
-
-    pub(crate) fn path(&self) -> &Path {
-        &self.path
+    /// The file that grows as the agent writes: Copilot's session is a folder whose
+    /// `events.jsonl` it appends to.
+    pub(crate) fn file(&self) -> PathBuf {
+        match self.host {
+            Host::Copilot => self.path.join("events.jsonl"),
+            _ => self.path.clone(),
+        }
     }
 
     /// Prompts and replies, newest first, through the `pick`th reply.

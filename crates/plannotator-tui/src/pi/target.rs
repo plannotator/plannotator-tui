@@ -78,6 +78,10 @@ impl Delivery for PiSession {
         Some("pi")
     }
 
+    fn agent_pid(&self) -> Option<u32> {
+        Some(self.entry.pid)
+    }
+
     fn deliver(&self, feedback: &str) -> Result<(), DeliveryError> {
         self.last.set(None);
         match super::send(&self.entry, feedback) {

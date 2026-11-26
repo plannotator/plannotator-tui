@@ -82,18 +82,28 @@ impl Inline {
 
     /// The card for `note` at `width`, laid out again only when either changed.
     fn card(&mut self, id: u64, note: &CodeAnnotation, width: u16) -> &card::Card {
-        let card = self.cards.entry(id).or_insert_with(|| card::Card::of(note, width));
-        if !card.is_for(note, width) {
-            *card = card::Card::of(note, width);
-        }
-        card
+        self.cached(id, |card| card.is_for(note, width), || card::Card::of(note, width))
     }
 
     /// The card for Ask `thread` at `width`, laid out again only when either changed.
     fn thread_card(&mut self, thread: &super::ask::Thread, width: u16) -> &card::Card {
-        let card = self.cards.entry(thread.id).or_insert_with(|| card::Card::of_thread(thread, width));
-        if !card.is_for_thread(thread, width) {
-            *card = card::Card::of_thread(thread, width);
+        self.cached(
+            thread.id,
+            |card| card.is_for_thread(thread, width),
+            || card::Card::of_thread(thread, width),
+        )
+    }
+
+    /// Box `id`'s card, made again by `make` when `current` says the one kept is not.
+    fn cached(
+        &mut self,
+        id: u64,
+        current: impl FnOnce(&card::Card) -> bool,
+        make: impl Fn() -> card::Card,
+    ) -> &card::Card {
+        let card = self.cards.entry(id).or_insert_with(&make);
+        if !current(card) {
+            *card = make();
         }
         card
     }

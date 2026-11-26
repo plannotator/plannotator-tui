@@ -367,21 +367,27 @@ session only. See [docs/spec-review-progress.md](docs/spec-review-progress.md).
 
 ### Ask the agent
 
-`a` (`ask`) on a selection or a line opens the comment box for a question. Enter puts it in
-a box under the lines at once and types it into the agent Send goes to, with the file, the
-lines and their code, so the question and its answer are part of the agent's own
-conversation. When nothing names an agent, it asks which one first, as Send does. The answer
-is read back from the agent's transcript (found as [`last`](#agent-replies) finds it, on a
-thread of its own) and shows in the box as it is written, whatever the Notes setting; a
-question typed while the agent is busy is answered there too. A question on those lines, or
-on lines inside them, goes into the same box: the box's border names its keys, Enter or `a`
-to ask again and `Delete` or Backspace (the Mac's delete key) to remove it (the agent's chat keeps the questions). Nothing you
-ask becomes a note.
+`a` (`ask`) on a selection or a line, or `❓ ask` on the toolbar after a drag, opens the
+comment box for a question. Enter puts it in a box under the lines and types it into the
+agent Send goes to, with the file, the lines and their code, so the question and its
+answer are part of the agent's own conversation. When nothing names an agent, it asks
+which one first, as Send does. The answer is read back from the agent's transcript and
+shows in the box as it is written, whatever the Notes setting, each message under who
+wrote it. A question typed while the agent is busy gets its answer when the agent takes
+it. Nothing you ask becomes a note.
 
-Ask works with the agents [`last`](#agent-replies) reads, except Codex: its transcript
-reader gives only the agent's replies, so the question cannot be found there, and asking
-says so instead of sending.
+A question on the same lines, or on lines inside them, goes into the same box: Enter or
+`a` on the box asks one, and the question box opens at the box's end. `Delete` on the box,
+or on one of its lines, removes the box (the agent's chat keeps the questions).
 
+The answer is read from the agent's own session, found as [`last`](#agent-replies) finds
+it from the agent's process: a target that names the process (Rex, hc, or Pi's
+`/plannotator-review`) for Claude Code, Copilot or Pi. Anything else would be the newest
+session in the folder, a guess, so asking says so instead of sending. Codex is not
+supported yet: its transcript reader gives only the agent's replies, so the question cannot
+be found there.
+
+### Pick what to review
 
 `plannotator-tui review --pick`, or `p` (`pick-changes`) in a review, opens the change
 picker. Its rows never move:

@@ -491,7 +491,7 @@ const DEFAULTS: &[(Action, &[Key])] = &[
     (Archive, &[ch('H')]),
     (ToggleHidden, &[ch('.')]),
     (Edit, &[ch('e')]),
-    (Remove, &[ch('x'), named(KeyCode::Delete), named(KeyCode::Backspace)]),
+    (Remove, &[ch('x'), named(KeyCode::Delete)]),
     (AttachImage, &[ch('I')]),
     (RemoveImage, &[ch('D')]),
     (Visual, &[ch('v')]),

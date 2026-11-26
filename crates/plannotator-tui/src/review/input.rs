@@ -175,7 +175,10 @@ impl Screen {
                         match self.picker.choose(row, &mut self.delivery, &mut self.start_delivery) {
                             Picked::Moved(status) => self.status = Some(status),
                             Picked::Copy => {}
-                            Picked::Nothing => return Ok(()),
+                            Picked::Nothing => {
+                                self.after_ask_picker(false);
+                                return Ok(());
+                            }
                         }
                         if let Some(then) = then {
                             self.send_picked(then);
