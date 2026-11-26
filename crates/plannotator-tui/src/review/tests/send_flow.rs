@@ -55,6 +55,28 @@ fn send_carries_new_notes_and_resending_after_an_edit_carries_only_the_edit() {
 }
 
 #[test]
+fn a_reopened_review_whose_notes_were_only_copied_says_copied_not_sent() {
+    let fixture = Fixture::new("reopen-copied");
+    let mut screen = fixture.open();
+    screen.delivery = Box::new(crate::delivery::Clipboard);
+    note(&mut screen, 9, "name the total");
+    keys(&mut screen, "E");
+    assert_eq!(screen.send_label(), "Copied ✓");
+    // Reopened with the agent as target, or again with none: the notes reached no agent.
+    let reopened = fixture.open();
+    assert_eq!(reopened.send_state, SendState::Sent);
+    assert_eq!(reopened.send_label(), "Copied ✓");
+    let mut reopened = fixture.open();
+    reopened.delivery = Box::new(crate::delivery::Clipboard);
+    assert_eq!(reopened.send_label(), "Copied ✓");
+    // Resent to the agent, they read sent again, then and after the next reopen.
+    let mut screen = fixture.open();
+    keys(&mut screen, "R");
+    assert_eq!(screen.send_label(), "Sent ✓ ▸ test agent");
+    assert_eq!(fixture.open().send_label(), "Sent ✓ ▸ test agent");
+}
+
+#[test]
 fn a_blocked_agent_keeps_the_notes_pending_and_says_so() {
     let fixture = Fixture::new("blocked");
     fixture.agent.outcome.set(Outcome::Blocked);
